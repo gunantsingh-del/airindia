@@ -1463,11 +1463,18 @@
             /* ===== RETURN-TO-BASE BACKFILL =====
                After all duty days are laid out, if the final position is NOT base
                and the toggle is on, append additional days each containing the
-               return flight(s) until we make it home. */
+               return flight(s) until we make it home.
+               If the LAST flown leg was 8+ hours (long-haul), insert a rest day
+               BEFORE the return so the pilot gets a 24 h layover. */
             if (returnToBase && cursor !== baseCode) {
+              const lastDay = rotation[rotation.length - 1];
+              const lastDayBlock = lastDay?.block || 0;
+              if (lastDayBlock >= 480) {
+                /* One-day rest at the layover hotel */
+                rotation.push({ legs: [], block: 0, end: cursor, rest: true });
+              }
               for (let safety = 0; safety < 4 && cursor !== baseCode; safety++) {
                 let candidates = filterCands(AIVA.FLIGHTS.filter(f => f.from === cursor));
-                /* Prefer the direct return; if no direct, take whatever brings us closer */
                 const direct = candidates.find(f => f.to === baseCode);
                 const next = direct || candidates.sort((a,b) => a.durMins - b.durMins)[0];
                 if (!next) break;
@@ -1495,11 +1502,21 @@
                 </div>
                 ${rotation.map((day, i) => {
                   const date = new Date(startDate.getTime() + i * 86400000).toISOString().slice(0,10);
+                  if (day.rest) {
+                    return `
+                      <div class="mt-2" style="padding:12px 14px;background:rgba(96,165,250,.08);border-radius:10px;border:1px dashed rgba(96,165,250,.32);">
+                        <div class="row between">
+                          <div class="mono" style="color:#93C5FD;font-size:12px;">DAY ${i+1} · ${date} · LAYOVER REST</div>
+                          <div class="text-mute mono" style="font-size:11px;">24 h ground rest at ${day.end}</div>
+                        </div>
+                      </div>
+                    `;
+                  }
                   if (!day.legs.length) return `<div class="card mt-2" style="padding:12px;background:rgba(230,25,38,.08);">Day ${i+1} (${date}) — could not find any legal sectors. Loosen your filters.</div>`;
                   return `
                     <div class="mt-2" style="padding:12px;background:rgba(255,225,89,.06);border-radius:10px;border:1px solid rgba(255,225,89,.18);">
                       <div class="row between mb-1">
-                        <div class="mono" style="color:var(--ai-gold);font-size:12px;">DAY ${i+1} · ${date}</div>
+                        <div class="mono" style="color:var(--ai-gold);font-size:12px;">DAY ${i+1} · ${date}${day.ret ? ' · RETURN' : ''}</div>
                         <div class="text-mute mono" style="font-size:11px;">${(day.block/60).toFixed(1)} h block · ends at ${day.end}</div>
                       </div>
                       ${day.legs.map(f => `
@@ -1575,13 +1592,17 @@
                   <div class="eyebrow mb-1">Total hours target</div>
                   <input id="bidHours" class="input" type="number" min="40" max="100" value="80"/>
                 </div>
+                <div style="min-width:160px;">
+                  <div class="eyebrow mb-1">Max block hrs / day</div>
+                  <input id="bidDayCap" class="input" type="number" min="2" max="18" step="0.5" value="14"/>
+                </div>
                 <div style="min-width:140px;">
                   <div class="eyebrow mb-1">Days flying</div>
                   <input id="bidDays" class="input" type="number" min="10" max="22" value="16"/>
                 </div>
               </div>
               <label class="row gap-2 mt-3" style="font-size:12.5px;color:var(--text-dim);cursor:pointer;">
-                <input type="checkbox" id="bidReturn" checked> <span><b>Return to base</b> — every outbound is paired with the return flight (someone has to fly it back)</span>
+                <input type="checkbox" id="bidReturn" checked> <span><b>Return to base</b> — every outbound is paired with the return flight. Long-haul (>8 h) automatically gets a 24 h layover before the return.</span>
               </label>
               <div class="eyebrow mt-3 mb-2">Days I want OFF (click dates)</div>
               <div id="bidOffGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;"></div>
@@ -1617,6 +1638,7 @@
             const opVal = $('#bidOp', c).value;     // 'AI' | 'IX' | ''
             const returnToBase = $('#bidReturn', c).checked;
             const targetHours = parseFloat($('#bidHours', c).value);
+            const dayCapMins = parseFloat($('#bidDayCap', c).value || '14') * 60;
             const daysFlying = parseInt($('#bidDays', c).value, 10);
 
             let allowedTypes = null;
@@ -1630,24 +1652,24 @@
                B) Layover-friendly (1 longhaul + rest day pattern)
                C) Balanced (mixed 2-leg days) */
             const lines = ['heavy', 'layover', 'balanced'].map(shape =>
-              buildBidLine(shape, baseCode, allowedTypes, opVal, returnToBase, targetHours, daysFlying, offDays, daysInMonth)
+              buildBidLine(shape, baseCode, allowedTypes, opVal, returnToBase, dayCapMins, targetHours, daysFlying, offDays, daysInMonth)
             );
 
             renderBidLines(lines);
           };
 
-          function buildBidLine(shape, baseCode, allowedTypes, opVal, returnToBase, targetHours, daysFlying, offDays, daysInMonth) {
+          function buildBidLine(shape, baseCode, allowedTypes, opVal, returnToBase, dayCapMins, targetHours, daysFlying, offDays, daysInMonth) {
             const today = new Date();
             const todayYmd = today.toISOString().slice(0,10);
             const targetMins = targetHours * 60;
             const out = { shape, days: [], totalMins: 0 };
             const seed = { heavy: 7, balanced: 17, layover: 23 }[shape] || 1;
             const usedFnos = new Set();
-            /* Helper: find a return flight FROM somewhere back TO base */
             const findReturn = (from, used) => {
               let cands = AIVA.FLIGHTS.filter(f => f.from === from && f.to === baseCode);
               if (allowedTypes) cands = cands.filter(f => allowedTypes.has(f.ac));
               if (opVal) cands = cands.filter(f => f.op === opVal);
+              cands = cands.filter(f => f.durMins <= dayCapMins);   // respect day cap on return too
               if (!cands.length) return null;
               const fresh = cands.find(c => !used.has(c.fno));
               return fresh || cands[0];
@@ -1664,16 +1686,15 @@
               let legs = [];
               let here = baseCode;
               const wantLegs = shape === 'heavy' ? 3 : shape === 'layover' ? 1 : 2;
-              /* Per-leg block target — bump LAYOVER to 13h so true long-hauls
-                 (DEL-JFK / DEL-YYZ / DEL-SFO / DEL-SYD) win the sort. */
               const wantBlock = shape === 'heavy' ? 540 : shape === 'layover' ? 780 : 360;
 
               for (let i = 0; i < wantLegs; i++) {
+                const blockSoFar = legs.reduce((s,f) => s + f.durMins, 0);
                 let cands = AIVA.FLIGHTS.filter(f => f.from === here);
                 if (allowedTypes) cands = cands.filter(f => allowedTypes.has(f.ac));
                 if (opVal)       cands = cands.filter(f => f.op === opVal);
-                /* On last leg of heavy/balanced, force return to base.
-                   For layover shape, leave outbound free — return is added separately below. */
+                /* Day-cap: don't pick a sector that would push the day over the user's limit */
+                cands = cands.filter(f => (blockSoFar + f.durMins) <= dayCapMins);
                 if (i === wantLegs - 1 && shape !== 'layover') {
                   cands = cands.filter(f => f.to === baseCode);
                 }
@@ -1696,20 +1717,22 @@
               out.totalMins += block;
               pickedDays++;
 
-              /* === RETURN-TO-BASE PAIRING ===
-                 If the duty day ended away from base AND the toggle is on,
-                 schedule the return flight on the NEXT available day.
-                 Long-haul cannot legally return same-day per CAR 7-J. */
+              /* === RETURN-TO-BASE PAIRING + LAYOVER REST DAY ===
+                 If the outbound was 8+ hours, insert a one-day rest at the
+                 layover hotel BEFORE the return is scheduled. So:
+                   Day N   — long-haul outbound
+                   Day N+1 — rest at layover (no flying)
+                   Day N+2 — return flight */
+              const wasLongHaul = block >= 480;   // 8 h trips warrant a layover gap
               if (returnToBase && here !== baseCode) {
                 const ret = findReturn(here, usedFnos);
                 if (ret) {
-                  /* Find the next allowable date (skip off days, never past) */
-                  let retIdx = dayIdx;
+                  let retIdx = dayIdx + (wasLongHaul ? 1 : 0);   // skip 1 day for long-haul layover
                   while (retIdx <= daysInMonth) {
                     const rDate = new Date(today.getFullYear(), today.getMonth(), retIdx);
                     const rYmd  = rDate.toISOString().slice(0,10);
                     if (rYmd >= todayYmd && !offDays.has(rYmd)) {
-                      out.days.push({ date: rYmd, legs: [ret], block: ret.durMins });
+                      out.days.push({ date: rYmd, legs: [ret], block: ret.durMins, ret: true, restGap: wasLongHaul });
                       out.totalMins += ret.durMins;
                       usedFnos.add(ret.fno);
                       pickedDays++;
@@ -1720,7 +1743,6 @@
                   }
                 }
               } else if (shape === 'layover') {
-                /* Even without the toggle, layover shape skips a day for the layover itself */
                 dayIdx++;
               }
             }
@@ -1753,9 +1775,12 @@
                     </div>
                     <div class="col gap-1" style="max-height:240px;overflow:auto;">
                       ${l.days.slice(0, 12).map(d => `
-                        <div style="font-size:11px;color:var(--text-mute);display:flex;gap:8px;align-items:baseline;">
-                          <span class="mono" style="color:var(--ai-gold);min-width:42px;">${d.date.slice(5)}</span>
-                          <span style="flex:1;">${d.legs.map(f => `<span class="mono" style="color:var(--text);">${f.from}→${f.to}</span> <span class="text-mute mono" style="font-size:10px;">${f.fno}</span>`).join(' · ')}</span>
+                        <div style="font-size:11px;color:var(--text-mute);display:flex;gap:8px;align-items:baseline;${d.ret ? 'background:rgba(96,165,250,.06);padding:3px 6px;border-radius:6px;' : ''}">
+                          <span class="mono" style="color:${d.ret ? '#93C5FD' : 'var(--ai-gold)'};min-width:42px;">${d.date.slice(5)}</span>
+                          <span style="flex:1;">
+                            ${d.ret && d.restGap ? '<span class="text-mute" style="font-size:10px;">↳ after 24h layover</span> ' : ''}
+                            ${d.legs.map(f => `<span class="mono" style="color:var(--text);">${f.from}→${f.to}</span> <span class="text-mute mono" style="font-size:10px;">${f.fno}</span>`).join(' · ')}
+                          </span>
                           <span class="mono">${(d.block/60).toFixed(1)}h</span>
                         </div>
                       `).join('')}

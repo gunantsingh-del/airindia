@@ -200,18 +200,18 @@ AIVA.RAW = [
   ['144','EWR','BOM','AI','B77W'],
   ['116','JFK','BOM','AI','B77W'],
   ['4174','SFO','CCU','AI','B77W'],['173','DEL','SFO','AI','B77W'],
-  ['105','FCO','EWR','AI','B788'],['119','FCO','JFK','AI','B788'],
+  ['105','FCO','EWR','AI','A359'],['119','FCO','JFK','AI','A359'],
   /* Europe (B788 mid, A359 flagship LHR, B77W LHR-BOM) */
-  ['2028','FRA','BOM','AI','B788'],['2030','FRA','DEL','AI','B788'],['2025','DEL','FRA','AI','B788'],['2027','BOM','FRA','AI','B788'],
-  ['117','ATQ','BHX','AI','B77W'],
-  ['160','LGW','AMD','AI','B788'],['159','AMD','LGW','AI','B788'],
-  ['130','LHR','BOM','AI','B77W'],['129','BOM','LHR','AI','B77W'],
-  ['111','DEL','LHR','AI','A359'],
-  ['132','LHR','BLR','AI','B789'],['133','BLR','LHR','AI','B789'],
-  ['155','DEL','AMS','AI','B788'],
-  ['148','CDG','DEL','AI','B788'],['147','DEL','CDG','AI','B788'],
+  ['2028','FRA','BOM','AI','B789'],['2030','FRA','DEL','AI','B789'],['2025','DEL','FRA','AI','B789'],['2027','BOM','FRA','AI','B789'],
+  ['117','ATQ','BHX','AI','B788'],
+  ['160','LGW','AMD','AI','B789'],['159','AMD','LGW','AI','B788'],
+  ['130','LHR','BOM','AI','B789'],['129','BOM','LHR','AI','B77W'],
+  ['111','DEL','LHR','AI','B77W'],
+  ['132','LHR','BLR','AI','B789'],['133','BLR','LHR','AI','B77W'],
+  ['155','DEL','AMS','AI','B77W'],
+  ['148','CDG','DEL','AI','B789'],['147','DEL','CDG','AI','B788'],
   ['137','DEL','MXP','AI','B788'],
-  ['154','VIE','DEL','AI','B788'],
+  ['154','VIE','DEL','AI','B77W'],
   /* Africa / Indian Ocean */
   ['2242','MRU','BOM','AI','B788'],['2241','BOM','MRU','AI','B788'],
   /* Middle East (A21N short-Gulf, B788 longer) */
@@ -290,7 +290,7 @@ AIVA.RAW = [
   /* MAA spokes */
   ['2740','IXM','MAA','AI','A20N'],['2739','MAA','IXM','AI','A20N'],
   /* BOM-CMB */
-  ['125','DEL','FCO','AI','B788'],['117','BOM','FCO','AI','B788'],
+  ['125','DEL','FCO','AI','A359'],['117','BOM','FCO','AI','A359'],
 
   /* ====== AIR INDIA EXPRESS (AXB) — 278 routes ====== */
   /* International ex-Kerala / South India */
@@ -446,13 +446,13 @@ AIVA.RAW = [
             788=B788, 789=B789, 77W=B77W, 77L=B77L, 32Q=A21N */
 
   /* International — DEL departures */
-  ['127','DEL','VIE','AI','B77W'],['153','DEL','VIE','AI','B788'],
+  ['127','DEL','VIE','AI','B77W'],['153','DEL','VIE','AI','B77W'],
   ['185','DEL','YVR','AI','B77W'],['186','YVR','DEL','AI','B788'],
   ['157','DEL','CPH','AI','B788'],
-  ['143','DEL','CDG','AI','B77W'],['142','CDG','DEL','AI','B788'],
-  ['2029','DEL','FRA','AI','B789'],['2026','FRA','DEL','AI','B77W'],
-  ['2016','LHR','DEL','AI','B788'],
-  ['162','LHR','DEL','AI','A359'],['112','LHR','DEL','AI','A359'],
+  ['143','DEL','CDG','AI','B788'],['142','CDG','DEL','AI','B789'],
+  ['2029','DEL','FRA','AI','B789'],['2026','FRA','DEL','AI','B789'],
+  ['2016','LHR','DEL','AI','B789'],
+  ['162','LHR','DEL','AI','B789'],['112','LHR','DEL','AI','B789'],
   ['423','DEL','AMD','AI','B788'],
 
   /* Hong Kong family */
@@ -674,14 +674,14 @@ AIVA.RAW = [
 
   /* DEL ↔ Indonesia / Maldives / Nepal / Vietnam */
   ['2146','DPS','DEL','AI','A321'],['2148','DEL','DPS','AI','A321'],
-  ['138','MXP','DEL','AI','B788'],['122','FCO','DEL','AI','B788'],
+  ['138','MXP','DEL','AI','B788'],['122','FCO','DEL','AI','A359'],
   ['357','HND','DEL','AI','B789'],
   ['2385','KUL','DEL','AI','A20N'],['2387','KUL','DEL','AI','A20N'],
   ['2240','MLE','DEL','AI','A20N'],
   ['212','KTM','DEL','AI','A20N'],['214','KTM','DEL','AI','A20N'],
   ['216','KTM','DEL','AI','A20N'],['218','KTM','DEL','AI','A20N'],
   ['220','KTM','DEL','AI','A20N'],['224','KTM','DEL','AI','A20N'],
-  ['156','AMS','DEL','AI','B788'],
+  ['156','AMS','DEL','AI','B789'],
   ['2361','MNL','DEL','AI','A21N'],
   ['2284','DOH','DEL','AI','A20N'],
   ['2256','JED','DEL','AI','A20N'],
@@ -699,7 +699,7 @@ AIVA.RAW = [
   ['114','BHX','DEL','AI','B788'],
   ['126','ORD','DEL','AI','A359'],['102','JFK','DEL','AI','A359'],
   ['162','JFK','DEL','AI','A359'],['2016','JFK','DEL','AI','B788'],
-  ['2018','LHR','DEL','AI','B788'],
+  ['2018','LHR','DEL','AI','B789'],
   ['106','EWR','DEL','AI','A359'],
   ['2391','HAN','DEL','AI','A20N'],['2389','SGN','DEL','AI','A20N'],
 
@@ -768,7 +768,7 @@ AIVA.RAW = [
   /* Amritsar (ATQ) — mainline only */
   ['422','ATQ','DEL','AI','B788'],['480','ATQ','DEL','AI','A321'],
   ['169','ATQ','LGW','AI','B788'],['118','BHX','ATQ','AI','B788'],
-  ['170','LGW','ATQ','AI','B788'],
+  ['170','LGW','ATQ','AI','B789'],
   ['2997','BOM','ATQ','AI','A20N'],['2998','ATQ','BOM','AI','A20N'],
   /* Srinagar (SXR) — mainline only */
   ['1739','DEL','SXR','AI','A20N'],['1779','DEL','SXR','AI','A20N'],['1799','DEL','SXR','AI','A20N'],

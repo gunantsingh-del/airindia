@@ -1581,11 +1581,14 @@
                   </select>
                 </div>
                 <div style="min-width:200px;">
-                  <div class="eyebrow mb-1">Aircraft (substitutions allowed)</div>
+                  <div class="eyebrow mb-1">Aircraft (strict — only A320-series subs)</div>
                   <select id="bidAc" class="input">
                     <option value="">Any I'm rated on</option>
-                    ${Object.keys(FAMILIES).map(k => `<option value="fam:${k}">${AIVA.acFamilyLabel(k)}</option>`).join('')}
-                    ${acTypes.map(t => `<option value="${t}">${t} · ${AIVA.acTypeName(t).replace('Boeing ','').replace('Airbus ','')}</option>`).join('')}
+                    <option value="fam:A320_FAMILY">A320 family — A319 / 320 / 320neo / 321 / 321neo</option>
+                    <option value="fam:B787_FAMILY">787 family — 787-8 + 787-9 (same type rating)</option>
+                    <option value="fam:B777_FAMILY">777 family — 777-300ER + 777-200LR</option>
+                    <option value="fam:B737_FAMILY">737 family — 737-800 + 737 MAX 8</option>
+                    ${acTypes.map(t => `<option value="${t}">${t} · ${AIVA.acTypeName(t).replace('Boeing ','').replace('Airbus ','')} (exact)</option>`).join('')}
                   </select>
                 </div>
                 <div style="min-width:180px;">
@@ -1641,10 +1644,33 @@
             const dayCapMins = parseFloat($('#bidDayCap', c).value || '14') * 60;
             const daysFlying = parseInt($('#bidDays', c).value, 10);
 
+            /* === STRICT bid substitution policy ===
+               Real airline rule (and Chief Pilot direction): a 787-rated pilot
+               cannot operate a 777, and vice versa. The Book-Roster page still
+               uses the loose AIVA.acSubstitutes() because that page tracks
+               training currency, not bid eligibility. The Bid generator is the
+               canonical "what can I actually fly this month" filter so it uses
+               this tighter map: only the A320-series cross-substitutes; every
+               other family stays within its own type. */
+            const STRICT_FAMS = {
+              'A320_FAMILY': ['A20N','A21N','A319','A320','A321'],
+              'B787_FAMILY': ['B788','B789'],
+              'B777_FAMILY': ['B77W','B77L'],
+              'A350_FAMILY': ['A359'],
+              'B737_FAMILY': ['B738','B38M'],
+            };
+            const A320_FAM = new Set(STRICT_FAMS.A320_FAMILY);
             let allowedTypes = null;
             if (acVal) {
-              if (acVal.startsWith('fam:')) allowedTypes = new Set(FAMILIES[acVal.slice(4)]);
-              else allowedTypes = new Set(AIVA.acSubstitutes(acVal));
+              if (acVal.startsWith('fam:')) {
+                allowedTypes = new Set(STRICT_FAMS[acVal.slice(4)] || []);
+              } else if (A320_FAM.has(acVal)) {
+                /* Picking any single A320-series type gives you the whole family */
+                allowedTypes = A320_FAM;
+              } else {
+                /* Every other Boeing/Airbus: strict — only the exact type */
+                allowedTypes = new Set([acVal]);
+              }
             }
 
             /* Build 3 candidate bid lines with different shapes:

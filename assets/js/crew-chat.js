@@ -131,9 +131,9 @@ AIVA.CrewChat = (() => {
     if (mounted) return root;
     parent = parent || document.body;
     const compact = !!opts.compact;
-    /* Place the floating button bottom-LEFT on portal; the Maharaja launcher
-       already lives bottom-right. On the EFB it goes top-right since the
-       bottom corners are taken by map controls. */
+    /* Bottom-RIGHT, stacked above the Maharaja launcher.
+       The portal's left edge is taken by the sidebar's pilot panel; placing
+       the chat launcher there caused it to sit ON the pilot's avatar. */
     root = document.createElement('div');
     root.className = 'cc-root' + (compact ? ' cc-compact' : '');
     root.innerHTML = `
@@ -166,11 +166,19 @@ AIVA.CrewChat = (() => {
     drawer = root.querySelector('#ccDrawer');
     host = root;
 
-    root.querySelector('#ccLaunch').addEventListener('click', () => {
-      drawer.hidden = !drawer.hidden;
-      if (!drawer.hidden) { lastUnread = 0; updateBadge(); renderAll(); scrollBottom(); }
+    const toggle = (forceOpen) => {
+      const willOpen = forceOpen != null ? forceOpen : drawer.hidden;
+      drawer.hidden = !willOpen;
+      root.classList.toggle('cc-open', willOpen);
+      if (willOpen) { lastUnread = 0; updateBadge(); renderAll(); scrollBottom(); }
+    };
+    /* Tapping the launcher toggles. So does the close (✕) button. */
+    root.querySelector('#ccLaunch').addEventListener('click', () => toggle());
+    root.querySelector('#ccClose').addEventListener('click', () => toggle(false));
+    /* Escape key closes the drawer when it's open */
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !drawer.hidden) toggle(false);
     });
-    root.querySelector('#ccClose').addEventListener('click', () => { drawer.hidden = true; });
     root.querySelector('#ccRoster').addEventListener('click', () => {
       const r = root.querySelector('#ccRosterPanel');
       r.hidden = !r.hidden;
@@ -273,19 +281,28 @@ AIVA.CrewChat = (() => {
   (function injectCSS() {
     if (document.getElementById('cc-styles')) return;
     const css = `
-      .cc-root { position: fixed; bottom: 22px; left: 22px; z-index: 92; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
-      .cc-root.cc-compact { bottom: 14px; left: 14px; }
+      /* Bottom-RIGHT, sitting just above the Maharaja launcher which lives
+         at bottom: 22px on the portal. We offset to 86px so they stack. */
+      .cc-root { position: fixed; bottom: 86px; right: 22px; z-index: 92; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
+      .cc-root.cc-compact { bottom: 14px; right: 14px; }   /* EFB has no Maharaja so we sit at the corner */
       .cc-launch {
-        width: 52px; height: 52px; border-radius: 50%;
+        width: 48px; height: 48px; border-radius: 50%;
         background: linear-gradient(180deg, #C8102E, #8B1A2B);
         color: #FFFFFF; border: 1px solid rgba(255,225,89,.4);
         display: flex; align-items: center; justify-content: center;
         cursor: pointer;
-        box-shadow: 0 16px 40px rgba(168,16,31,.4);
+        box-shadow: 0 14px 36px rgba(168,16,31,.42);
         position: relative;
-        transition: transform .2s, box-shadow .2s;
+        transition: transform .2s, box-shadow .2s, background .2s;
       }
-      .cc-launch:hover { transform: translateY(-2px); box-shadow: 0 22px 50px rgba(168,16,31,.55); }
+      .cc-launch:hover { transform: translateY(-2px); box-shadow: 0 20px 48px rgba(168,16,31,.55); }
+      /* When the drawer is open, the launcher shows an X so the user knows
+         a click will close it (not re-open). */
+      .cc-root.cc-open .cc-launch { background: rgba(20,8,12,.92); border-color: rgba(255,225,89,.55); }
+      .cc-root.cc-open .cc-launch svg { display: none; }
+      .cc-root.cc-open .cc-launch::after {
+        content: '✕'; font-size: 18px; color: #FFFFFF; font-weight: 400;
+      }
       .cc-badge {
         position: absolute; top: -4px; right: -4px;
         min-width: 18px; height: 18px; padding: 0 5px;
@@ -294,10 +311,14 @@ AIVA.CrewChat = (() => {
         display: flex; align-items: center; justify-content: center;
         border: 2px solid #0A0709;
       }
+      /* The [hidden] HTML attribute defaults to display:none, but our
+         .cc-badge rule sets display:flex which won't lose to the default.
+         Re-assert display:none for the hidden state. */
+      .cc-badge[hidden] { display: none !important; }
       .cc-drawer {
-        position: fixed; bottom: 88px; left: 22px;
+        position: fixed; bottom: 152px; right: 22px;
         width: 380px; max-width: calc(100vw - 44px);
-        height: 540px; max-height: calc(100vh - 120px);
+        height: 520px; max-height: calc(100vh - 200px);
         background: rgba(14, 9, 12, .96);
         backdrop-filter: blur(20px) saturate(160%);
         -webkit-backdrop-filter: blur(20px) saturate(160%);
@@ -309,7 +330,9 @@ AIVA.CrewChat = (() => {
         box-shadow: 0 30px 80px rgba(0,0,0,.6);
         z-index: 93;
       }
-      .cc-compact .cc-drawer { bottom: 76px; left: 14px; width: 340px; height: 500px; }
+      .cc-compact .cc-drawer { bottom: 74px; right: 14px; width: 340px; height: 480px; }
+      /* Hide [hidden] drawer reliably */
+      .cc-drawer[hidden] { display: none !important; }
       .cc-head {
         display: flex; justify-content: space-between; align-items: center;
         padding: 14px 18px;
@@ -431,6 +454,8 @@ AIVA.CrewChat = (() => {
 
       @media (max-width: 640px) {
         .cc-drawer { left: 12px; right: 12px; width: auto; bottom: 80px; }
+        .cc-root { bottom: 16px; right: 16px; }
+        .cc-root.cc-open .cc-drawer { bottom: 86px; }
       }
     `;
     const style = document.createElement('style');

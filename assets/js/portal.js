@@ -1435,26 +1435,31 @@
               for (let attempt = 0; attempt < 6 && blockSoFar < targetBlock; attempt++) {
                 if (longHaulMode) break;
                 let candidates = filterCands(AIVA.FLIGHTS.filter(f => f.from === here));
-                /* City pool restricts ONLY outbound legs that go to cities OUT of the pool;
-                   inbound legs (returning to base) are always allowed regardless. */
                 if (cityPool) {
                   candidates = candidates.filter(f => cityPool.has(f.to) || f.to === baseCode);
                 }
-                /* If we're away from base and it's the last day, OR return-to-base is on
-                   and this is the final attempt of the day, force the return. */
                 const mustReturn = (isLastDay && attempt > 0) || (returnToBase && here !== baseCode && attempt >= 1);
                 if (mustReturn) {
                   candidates = candidates.filter(f => f.to === baseCode);
                 }
                 if (!candidates.length) break;
-                /* Prefer flights that bring blockSoFar closest to target */
                 candidates.sort((a, b) => Math.abs((blockSoFar + a.durMins) - targetBlock) - Math.abs((blockSoFar + b.durMins) - targetBlock));
                 const next = candidates[0];
                 dayLegs.push(next);
                 blockSoFar += next.durMins;
                 here = next.to;
-                if (next.durMins >= 540) longHaulMode = true;          // 9+ h → one leg per duty period
-                if (here === baseCode) break;                          // back home, stop
+                /* === TAG-FLIGHT CHAIN ===
+                   If the picked flight has a continuation under the same fno
+                   (e.g. AI127 DEL→VIE → AI127 VIE→ORD), tack the continuation
+                   onto the same duty day — it's the same physical flight. */
+                const cont = AIVA.FLIGHTS.find(f => f.fno === next.fno && f.from === next.to);
+                if (cont) {
+                  dayLegs.push(cont);
+                  blockSoFar += cont.durMins;
+                  here = cont.to;
+                }
+                if (next.durMins >= 480 || (cont && cont.durMins >= 480)) longHaulMode = true;
+                if (here === baseCode) break;
               }
               rotation.push({ legs: dayLegs, block: blockSoFar, end: here });
               cursor = here;
@@ -1475,11 +1480,28 @@
               }
               for (let safety = 0; safety < 4 && cursor !== baseCode; safety++) {
                 let candidates = filterCands(AIVA.FLIGHTS.filter(f => f.from === cursor));
-                const direct = candidates.find(f => f.to === baseCode);
-                const next = direct || candidates.sort((a,b) => a.durMins - b.durMins)[0];
+                /* Prefer the operational pair return (outbound fno ± 1) so
+                   AI127 DEL→VIE→ORD returns as AI128 ORD→VIE→DEL, not random. */
+                const lastOut = rotation[rotation.length - 1];
+                const outFno = lastOut?.legs?.[0]?.fno;
+                let next = null;
+                if (outFno) {
+                  const outNum = parseInt(String(outFno).replace(/\D/g,''), 10);
+                  next = candidates.find(c => {
+                    const n = parseInt(String(c.fno).replace(/\D/g,''), 10);
+                    return c.to === baseCode && (n === outNum + 1 || n === outNum - 1);
+                  });
+                }
+                if (!next) next = candidates.find(f => f.to === baseCode);
+                if (!next) next = candidates.sort((a,b) => a.durMins - b.durMins)[0];
                 if (!next) break;
-                rotation.push({ legs: [next], block: next.durMins, end: next.to, ret: true });
-                cursor = next.to;
+                /* Chain return continuation too */
+                const retLegs = [next];
+                let retEnd = next.to, retBlock = next.durMins;
+                const retCont = AIVA.FLIGHTS.find(f => f.fno === next.fno && f.from === next.to);
+                if (retCont) { retLegs.push(retCont); retEnd = retCont.to; retBlock += retCont.durMins; }
+                rotation.push({ legs: retLegs, block: retBlock, end: retEnd, ret: true });
+                cursor = retEnd;
               }
             }
 
@@ -1691,14 +1713,32 @@
             const out = { shape, days: [], totalMins: 0 };
             const seed = { heavy: 7, balanced: 17, layover: 23 }[shape] || 1;
             const usedFnos = new Set();
-            const findReturn = (from, used) => {
-              let cands = AIVA.FLIGHTS.filter(f => f.from === from && f.to === baseCode);
-              if (allowedTypes) cands = cands.filter(f => allowedTypes.has(f.ac));
-              if (opVal) cands = cands.filter(f => f.op === opVal);
-              cands = cands.filter(f => f.durMins <= dayCapMins);   // respect day cap on return too
+
+            const filter = (list) => {
+              if (allowedTypes) list = list.filter(f => allowedTypes.has(f.ac));
+              if (opVal)       list = list.filter(f => f.op === opVal);
+              return list;
+            };
+            /* Find a return flight from `from` back to `baseCode`. Prefer the
+               operational pair flight number (outFno ± 1) so AI127 pairs with
+               AI128, AI187 with AI188, etc. Falls back to any return. */
+            const findReturn = (from, outFnoStr, used) => {
+              let cands = filter(AIVA.FLIGHTS.filter(f => f.from === from && f.to === baseCode));
+              cands = cands.filter(f => f.durMins <= dayCapMins);
               if (!cands.length) return null;
+              const outNum = parseInt(String(outFnoStr).replace(/\D/g,''), 10);
+              const pair = cands.find(c => {
+                const n = parseInt(String(c.fno).replace(/\D/g,''), 10);
+                return n === outNum + 1 || n === outNum - 1;
+              });
+              if (pair) return pair;
               const fresh = cands.find(c => !used.has(c.fno));
               return fresh || cands[0];
+            };
+            /* If the just-picked leg has a same-fno continuation (e.g. AI127
+               DEL→VIE has AI127 VIE→ORD), return that continuation. */
+            const findContinuation = (leg) => {
+              return AIVA.FLIGHTS.find(f => f.fno === leg.fno && f.from === leg.to);
             };
 
             let pickedDays = 0, dayIdx = today.getDate();
@@ -1713,13 +1753,11 @@
               let here = baseCode;
               const wantLegs = shape === 'heavy' ? 3 : shape === 'layover' ? 1 : 2;
               const wantBlock = shape === 'heavy' ? 540 : shape === 'layover' ? 780 : 360;
+              let dayIsLongHaul = false;
 
               for (let i = 0; i < wantLegs; i++) {
                 const blockSoFar = legs.reduce((s,f) => s + f.durMins, 0);
-                let cands = AIVA.FLIGHTS.filter(f => f.from === here);
-                if (allowedTypes) cands = cands.filter(f => allowedTypes.has(f.ac));
-                if (opVal)       cands = cands.filter(f => f.op === opVal);
-                /* Day-cap: don't pick a sector that would push the day over the user's limit */
+                let cands = filter(AIVA.FLIGHTS.filter(f => f.from === here));
                 cands = cands.filter(f => (blockSoFar + f.durMins) <= dayCapMins);
                 if (i === wantLegs - 1 && shape !== 'layover') {
                   cands = cands.filter(f => f.to === baseCode);
@@ -1736,30 +1774,49 @@
                 usedFnos.add(pick.fno);
                 legs.push(pick);
                 here = pick.to;
+
+                /* === TAG-FLIGHT CHAIN ===
+                   If the same fno has a continuation from `here`, fly that too
+                   (it's the second leg of the same physical flight, e.g. AI127
+                   DEL→VIE→ORD). The continuation does NOT count toward wantLegs. */
+                const cont = findContinuation(pick);
+                if (cont && (blockSoFar + pick.durMins + cont.durMins) <= dayCapMins) {
+                  legs.push(cont);
+                  here = cont.to;
+                }
+
+                /* Long-haul detection: once any leg in the day is 8+ hours, stop
+                   adding more — that's a single-leg duty period. */
+                if (pick.durMins >= 480 || (cont && cont.durMins >= 480)) {
+                  dayIsLongHaul = true;
+                  break;
+                }
               }
               if (!legs.length) continue;
               const block = legs.reduce((s,f) => s + f.durMins, 0);
-              out.days.push({ date: ymd, legs, block });
+              out.days.push({ date: ymd, legs, block, longHaul: dayIsLongHaul });
               out.totalMins += block;
               pickedDays++;
 
-              /* === RETURN-TO-BASE PAIRING + LAYOVER REST DAY ===
-                 If the outbound was 8+ hours, insert a one-day rest at the
-                 layover hotel BEFORE the return is scheduled. So:
-                   Day N   — long-haul outbound
-                   Day N+1 — rest at layover (no flying)
-                   Day N+2 — return flight */
-              const wasLongHaul = block >= 480;   // 8 h trips warrant a layover gap
+              /* === RETURN-TO-BASE + 24h LAYOVER REST === */
+              const wasLongHaul = dayIsLongHaul || block >= 480;
               if (returnToBase && here !== baseCode) {
-                const ret = findReturn(here, usedFnos);
+                const outFno = legs[0].fno;
+                const ret = findReturn(here, outFno, usedFnos);
                 if (ret) {
-                  let retIdx = dayIdx + (wasLongHaul ? 1 : 0);   // skip 1 day for long-haul layover
+                  /* Insert rest day(s) before scheduling the return */
+                  let retIdx = dayIdx + (wasLongHaul ? 1 : 0);
                   while (retIdx <= daysInMonth) {
                     const rDate = new Date(today.getFullYear(), today.getMonth(), retIdx);
                     const rYmd  = rDate.toISOString().slice(0,10);
                     if (rYmd >= todayYmd && !offDays.has(rYmd)) {
-                      out.days.push({ date: rYmd, legs: [ret], block: ret.durMins, ret: true, restGap: wasLongHaul });
-                      out.totalMins += ret.durMins;
+                      /* Chain the return flight's continuation too (AI128 ORD→VIE → VIE→DEL) */
+                      const retLegs = [ret];
+                      const retCont = findContinuation(ret);
+                      if (retCont) retLegs.push(retCont);
+                      const retBlock = retLegs.reduce((s,f) => s + f.durMins, 0);
+                      out.days.push({ date: rYmd, legs: retLegs, block: retBlock, ret: true, restGap: wasLongHaul });
+                      out.totalMins += retBlock;
                       usedFnos.add(ret.fno);
                       pickedDays++;
                       dayIdx = retIdx + 1;

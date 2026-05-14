@@ -196,7 +196,11 @@ AIVA.AIRPORTS = {
 AIVA.RAW = [
   /* ====== AIR INDIA (AIC) — 227 routes ====== */
   /* North America (B77W primarily, A359 on DEL-JFK/EWR) */
-  ['188','YYZ','DEL','AI','B77W'],['187','VIE','YYZ','AI','B77W'],
+  /* AI127/128 and AI187/188 are tag-flights via Vienna — first legs added so
+     the bid generator can chain them as one continuous flight. */
+  ['188','YYZ','VIE','AI','B77W'],['188','VIE','DEL','AI','B77W'],
+  ['128','ORD','VIE','AI','B77W'],
+  ['187','VIE','YYZ','AI','B77W'],
   ['144','EWR','BOM','AI','B77W'],
   ['116','JFK','BOM','AI','B77W'],
   ['4174','SFO','CCU','AI','B77W'],['173','DEL','SFO','AI','B77W'],

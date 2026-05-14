@@ -1351,6 +1351,14 @@
                     ${BASES.map(b => `<option value="${b}">${b} · ${AIVA.airport(b)?.city}</option>`).join('')}
                   </select>
                 </div>
+                <div style="min-width:170px;">
+                  <div class="eyebrow mb-1">Operator</div>
+                  <select id="genOp" class="input">
+                    <option value="">Both (AI + AXB)</option>
+                    <option value="AI">Air India (AIC)</option>
+                    <option value="IX">Air India Express (AXB)</option>
+                  </select>
+                </div>
                 <div style="min-width:200px;flex:1;">
                   <div class="eyebrow mb-1">Aircraft type (substitutions allowed)</div>
                   <select id="genAc" class="input">
@@ -1361,7 +1369,7 @@
                 </div>
                 <div style="min-width:140px;">
                   <div class="eyebrow mb-1">Target block hrs / day</div>
-                  <input id="genBlock" class="input" type="number" min="1" max="10" step="0.5" value="6"/>
+                  <input id="genBlock" class="input" type="number" min="1" max="18" step="0.5" value="8"/>
                 </div>
                 <div style="min-width:120px;">
                   <div class="eyebrow mb-1">Days</div>
@@ -1373,6 +1381,9 @@
                   </select>
                 </div>
               </div>
+              <label class="row gap-2 mt-3" style="font-size:12.5px;color:var(--text-dim);cursor:pointer;">
+                <input type="checkbox" id="genReturn" checked> <span><b>Return to base</b> — auto-add the return leg so the aircraft (and you) get home</span>
+              </label>
               <div class="row gap-2 mt-3">
                 <button class="btn btn-primary" id="genGo">${I('check', 14)} Generate roster</button>
                 <button class="btn btn-ghost" id="genReset">Reset</button>
@@ -1392,6 +1403,8 @@
           $('#genGo', c).onclick = () => {
             const baseCode = $('#genBase', c).value;
             const acVal = $('#genAc', c).value;
+            const opVal = $('#genOp', c).value;
+            const returnToBase = $('#genReturn', c).checked;
             const targetBlock = parseFloat($('#genBlock', c).value) * 60;
             const days = parseInt($('#genDays', c).value, 10);
 
@@ -1400,8 +1413,13 @@
               if (acVal.startsWith('fam:')) allowedTypes = new Set(FAMILIES[acVal.slice(4)]);
               else allowedTypes = new Set(AIVA.acSubstitutes(acVal));
             }
-            /* Cities pool — if the user picked some, restrict to those, else go anywhere */
             const cityPool = picked.size ? new Set(picked) : null;
+
+            const filterCands = (list) => {
+              if (allowedTypes) list = list.filter(f => allowedTypes.has(f.ac));
+              if (opVal)       list = list.filter(f => f.op === opVal);
+              return list;
+            };
 
             /* Build the rotation, day by day. */
             const rotation = [];
@@ -1410,26 +1428,52 @@
               const dayLegs = [];
               let blockSoFar = 0;
               let here = cursor;
+              const isLastDay = d === days - 1;
+              /* Long-haul (>= 9h) is one-leg-per-day. We detect this from the first
+                 leg we pick — if it's a longhaul, we stop after 1. */
+              let longHaulMode = false;
               for (let attempt = 0; attempt < 6 && blockSoFar < targetBlock; attempt++) {
-                let candidates = AIVA.FLIGHTS.filter(f => f.from === here);
-                if (allowedTypes) candidates = candidates.filter(f => allowedTypes.has(f.ac));
-                if (cityPool) candidates = candidates.filter(f => cityPool.has(f.to) || cityPool.has(f.from));
-                /* On the LAST leg of the LAST day, must return to base */
-                const isLastDay = d === days - 1;
-                if (isLastDay && attempt > 0) {
+                if (longHaulMode) break;
+                let candidates = filterCands(AIVA.FLIGHTS.filter(f => f.from === here));
+                /* City pool restricts ONLY outbound legs that go to cities OUT of the pool;
+                   inbound legs (returning to base) are always allowed regardless. */
+                if (cityPool) {
+                  candidates = candidates.filter(f => cityPool.has(f.to) || f.to === baseCode);
+                }
+                /* If we're away from base and it's the last day, OR return-to-base is on
+                   and this is the final attempt of the day, force the return. */
+                const mustReturn = (isLastDay && attempt > 0) || (returnToBase && here !== baseCode && attempt >= 1);
+                if (mustReturn) {
                   candidates = candidates.filter(f => f.to === baseCode);
                 }
                 if (!candidates.length) break;
-                /* Prefer flights that get us closer to target block */
+                /* Prefer flights that bring blockSoFar closest to target */
                 candidates.sort((a, b) => Math.abs((blockSoFar + a.durMins) - targetBlock) - Math.abs((blockSoFar + b.durMins) - targetBlock));
                 const next = candidates[0];
                 dayLegs.push(next);
                 blockSoFar += next.durMins;
                 here = next.to;
-                if (isLastDay && here === baseCode) break;
+                if (next.durMins >= 540) longHaulMode = true;          // 9+ h → one leg per duty period
+                if (here === baseCode) break;                          // back home, stop
               }
               rotation.push({ legs: dayLegs, block: blockSoFar, end: here });
               cursor = here;
+            }
+
+            /* ===== RETURN-TO-BASE BACKFILL =====
+               After all duty days are laid out, if the final position is NOT base
+               and the toggle is on, append additional days each containing the
+               return flight(s) until we make it home. */
+            if (returnToBase && cursor !== baseCode) {
+              for (let safety = 0; safety < 4 && cursor !== baseCode; safety++) {
+                let candidates = filterCands(AIVA.FLIGHTS.filter(f => f.from === cursor));
+                /* Prefer the direct return; if no direct, take whatever brings us closer */
+                const direct = candidates.find(f => f.to === baseCode);
+                const next = direct || candidates.sort((a,b) => a.durMins - b.durMins)[0];
+                if (!next) break;
+                rotation.push({ legs: [next], block: next.durMins, end: next.to, ret: true });
+                cursor = next.to;
+              }
             }
 
             renderGenPreview(rotation, baseCode);
@@ -1511,6 +1555,14 @@
                     ${BASES.map(b => `<option value="${b}">${b} · ${AIVA.airport(b)?.city}</option>`).join('')}
                   </select>
                 </div>
+                <div style="min-width:160px;">
+                  <div class="eyebrow mb-1">Operator</div>
+                  <select id="bidOp" class="input">
+                    <option value="">Both (AI + AXB)</option>
+                    <option value="AI">Air India (AIC)</option>
+                    <option value="IX">Air India Express (AXB)</option>
+                  </select>
+                </div>
                 <div style="min-width:200px;">
                   <div class="eyebrow mb-1">Aircraft (substitutions allowed)</div>
                   <select id="bidAc" class="input">
@@ -1528,6 +1580,9 @@
                   <input id="bidDays" class="input" type="number" min="10" max="22" value="16"/>
                 </div>
               </div>
+              <label class="row gap-2 mt-3" style="font-size:12.5px;color:var(--text-dim);cursor:pointer;">
+                <input type="checkbox" id="bidReturn" checked> <span><b>Return to base</b> — every outbound is paired with the return flight (someone has to fly it back)</span>
+              </label>
               <div class="eyebrow mt-3 mb-2">Days I want OFF (click dates)</div>
               <div id="bidOffGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;"></div>
               <div class="row gap-2 mt-3">
@@ -1559,6 +1614,8 @@
           $('#bidGenerate', c).onclick = () => {
             const baseCode = $('#bidBase', c).value;
             const acVal = $('#bidAc', c).value;
+            const opVal = $('#bidOp', c).value;     // 'AI' | 'IX' | ''
+            const returnToBase = $('#bidReturn', c).checked;
             const targetHours = parseFloat($('#bidHours', c).value);
             const daysFlying = parseInt($('#bidDays', c).value, 10);
 
@@ -1573,48 +1630,56 @@
                B) Layover-friendly (1 longhaul + rest day pattern)
                C) Balanced (mixed 2-leg days) */
             const lines = ['heavy', 'layover', 'balanced'].map(shape =>
-              buildBidLine(shape, baseCode, allowedTypes, targetHours, daysFlying, offDays, daysInMonth)
+              buildBidLine(shape, baseCode, allowedTypes, opVal, returnToBase, targetHours, daysFlying, offDays, daysInMonth)
             );
 
             renderBidLines(lines);
           };
 
-          function buildBidLine(shape, baseCode, allowedTypes, targetHours, daysFlying, offDays, daysInMonth) {
+          function buildBidLine(shape, baseCode, allowedTypes, opVal, returnToBase, targetHours, daysFlying, offDays, daysInMonth) {
             const today = new Date();
             const todayYmd = today.toISOString().slice(0,10);
             const targetMins = targetHours * 60;
             const out = { shape, days: [], totalMins: 0 };
-            /* Seed used to vary picks per bid shape so the three lines don't all return
-               the identical leg every duty day. */
             const seed = { heavy: 7, balanced: 17, layover: 23 }[shape] || 1;
-            const usedFnos = new Set();   // de-dupe across this bid line
-            let pickedDays = 0, dayIdx = today.getDate();   // start from TODAY, not day-1
+            const usedFnos = new Set();
+            /* Helper: find a return flight FROM somewhere back TO base */
+            const findReturn = (from, used) => {
+              let cands = AIVA.FLIGHTS.filter(f => f.from === from && f.to === baseCode);
+              if (allowedTypes) cands = cands.filter(f => allowedTypes.has(f.ac));
+              if (opVal) cands = cands.filter(f => f.op === opVal);
+              if (!cands.length) return null;
+              const fresh = cands.find(c => !used.has(c.fno));
+              return fresh || cands[0];
+            };
+
+            let pickedDays = 0, dayIdx = today.getDate();
             while (pickedDays < daysFlying && dayIdx <= daysInMonth && out.totalMins < targetMins) {
               const date = new Date(today.getFullYear(), today.getMonth(), dayIdx);
               const ymd = date.toISOString().slice(0,10);
               dayIdx++;
-              if (ymd < todayYmd) continue;          // never bid for past dates
+              if (ymd < todayYmd) continue;
               if (offDays.has(ymd)) continue;
-              /* Build legs for this day per shape */
+
               let legs = [];
               let here = baseCode;
               const wantLegs = shape === 'heavy' ? 3 : shape === 'layover' ? 1 : 2;
-              const wantBlock = shape === 'heavy' ? 540 : shape === 'layover' ? 480 : 360;
+              /* Per-leg block target — bump LAYOVER to 13h so true long-hauls
+                 (DEL-JFK / DEL-YYZ / DEL-SFO / DEL-SYD) win the sort. */
+              const wantBlock = shape === 'heavy' ? 540 : shape === 'layover' ? 780 : 360;
+
               for (let i = 0; i < wantLegs; i++) {
                 let cands = AIVA.FLIGHTS.filter(f => f.from === here);
                 if (allowedTypes) cands = cands.filter(f => allowedTypes.has(f.ac));
-                /* On last leg, return to base (or for layover shape, accept anywhere) */
+                if (opVal)       cands = cands.filter(f => f.op === opVal);
+                /* On last leg of heavy/balanced, force return to base.
+                   For layover shape, leave outbound free — return is added separately below. */
                 if (i === wantLegs - 1 && shape !== 'layover') {
                   cands = cands.filter(f => f.to === baseCode);
                 }
                 if (!cands.length) break;
-                /* Sort by closeness to target block, then prefer flights we haven't
-                   already used in this line, then rotate by day index for variety. */
                 cands.sort((a, b) => Math.abs(a.durMins - wantBlock/wantLegs) - Math.abs(b.durMins - wantBlock/wantLegs));
                 const topN = cands.slice(0, Math.max(4, Math.min(8, cands.length)));
-                /* Rotate within the top candidates using (pickedDays + seed + i) so
-                   different days pick different flights. Skip already-used fnos when
-                   possible. */
                 let pick = null;
                 for (let r = 0; r < topN.length; r++) {
                   const c = topN[(pickedDays + seed + i + r) % topN.length];
@@ -1630,9 +1695,37 @@
               out.days.push({ date: ymd, legs, block });
               out.totalMins += block;
               pickedDays++;
-              /* For layover shape, skip a day to mimic a real layover */
-              if (shape === 'layover') dayIdx++;
+
+              /* === RETURN-TO-BASE PAIRING ===
+                 If the duty day ended away from base AND the toggle is on,
+                 schedule the return flight on the NEXT available day.
+                 Long-haul cannot legally return same-day per CAR 7-J. */
+              if (returnToBase && here !== baseCode) {
+                const ret = findReturn(here, usedFnos);
+                if (ret) {
+                  /* Find the next allowable date (skip off days, never past) */
+                  let retIdx = dayIdx;
+                  while (retIdx <= daysInMonth) {
+                    const rDate = new Date(today.getFullYear(), today.getMonth(), retIdx);
+                    const rYmd  = rDate.toISOString().slice(0,10);
+                    if (rYmd >= todayYmd && !offDays.has(rYmd)) {
+                      out.days.push({ date: rYmd, legs: [ret], block: ret.durMins });
+                      out.totalMins += ret.durMins;
+                      usedFnos.add(ret.fno);
+                      pickedDays++;
+                      dayIdx = retIdx + 1;
+                      break;
+                    }
+                    retIdx++;
+                  }
+                }
+              } else if (shape === 'layover') {
+                /* Even without the toggle, layover shape skips a day for the layover itself */
+                dayIdx++;
+              }
             }
+            /* Sort the line so dates appear in chronological order */
+            out.days.sort((a, b) => a.date.localeCompare(b.date));
             return out;
           }
 

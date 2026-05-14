@@ -281,9 +281,10 @@ AIVA.CrewChat = (() => {
   (function injectCSS() {
     if (document.getElementById('cc-styles')) return;
     const css = `
-      /* Bottom-RIGHT, sitting just above the Maharaja launcher which lives
-         at bottom: 22px on the portal. We offset to 86px so they stack. */
-      .cc-root { position: fixed; bottom: 86px; right: 22px; z-index: 92; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
+      /* Bottom-RIGHT, sitting to the LEFT of the Maharaja launcher.
+         Maharaja lives at right: 22px with a ~64px button → place us at
+         right: 96px so we're horizontally adjacent (not stacked above). */
+      .cc-root { position: fixed; bottom: 22px; right: 96px; z-index: 92; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
       .cc-root.cc-compact { bottom: 14px; right: 14px; }   /* EFB has no Maharaja so we sit at the corner */
       .cc-launch {
         width: 48px; height: 48px; border-radius: 50%;
@@ -316,9 +317,9 @@ AIVA.CrewChat = (() => {
          Re-assert display:none for the hidden state. */
       .cc-badge[hidden] { display: none !important; }
       .cc-drawer {
-        position: fixed; bottom: 152px; right: 22px;
+        position: fixed; bottom: 88px; right: 22px;
         width: 380px; max-width: calc(100vw - 44px);
-        height: 520px; max-height: calc(100vh - 200px);
+        height: 520px; max-height: calc(100vh - 140px);
         background: rgba(14, 9, 12, .96);
         backdrop-filter: blur(20px) saturate(160%);
         -webkit-backdrop-filter: blur(20px) saturate(160%);

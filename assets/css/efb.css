@@ -1,0 +1,704 @@
+/* =====================================================================
+   EFB — iPad-style home + app surfaces
+   ===================================================================== */
+
+body.efb-body {
+  background: var(--bg);
+  min-height: 100vh;
+}
+
+.efb-frame {
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+}
+
+/* ----- Header ----- */
+.efb-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 22px;
+  background: var(--surface-glass);
+  backdrop-filter: blur(20px) saturate(140%);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 60;
+}
+.efb-bar .home-btn {
+  width: 36px; height: 36px; border-radius: 10px;
+  display:flex; align-items:center; justify-content:center;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.efb-bar .home-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.efb-bar .crumb { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+.efb-bar .sub   { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--text-mute); padding-left: 14px; border-left: 1px solid var(--border); margin-left: 8px; }
+.efb-bar .clocks { margin-left: auto; display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 12px; }
+.efb-bar .clocks .lbl { color: var(--ai-gold-bright); font-size: 9px; letter-spacing: .22em; text-transform: uppercase; margin-right: 4px; }
+.efb-bar .icbtn {
+  width: 32px; height: 32px; border-radius: 10px;
+  display:flex; align-items:center; justify-content:center;
+  border: 1px solid var(--border); color: var(--text-dim);
+  cursor: pointer;
+}
+
+/* ----- iPad-style HOME ----- */
+.efb-home {
+  position: relative;
+  flex: 1;
+  display: flex; flex-direction: column;
+  padding: 24px 28px 40px;
+  /* Pure red Air India wallpaper */
+  background: radial-gradient(ellipse at top, #C8102E 0%, #8B1A2B 40%, #5A0815 100%);
+  overflow: hidden;
+}
+/* Subtle paper texture only */
+.efb-home::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 4px, rgba(255,255,255,.012) 4px 5px),
+    repeating-linear-gradient(-45deg, transparent 0 4px, rgba(0,0,0,.012) 4px 5px);
+  pointer-events: none;
+  z-index: 0;
+  mix-blend-mode: overlay;
+}
+.efb-home::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,.35) 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+.efb-home > .efb-hero, .efb-home > .app-grid { position: relative; z-index: 1; }
+
+.efb-hero {
+  text-align: center;
+  margin: 28px auto 22px;
+  max-width: 720px;
+}
+.efb-hero .logo-mark {
+  display:flex; justify-content:center;
+  filter: drop-shadow(0 6px 20px rgba(0,0,0,.4));
+  margin-bottom: 18px;
+}
+.efb-hero .logo-mark svg { height: 56px; }
+.efb-hero h1 em { font-style: italic; color: var(--ai-red-bright); font-weight: 700; }
+.efb-hero .tag {
+  font-family: var(--font-display); color: var(--ai-gold-bright);
+  margin-top: 6px; font-size: 13px;
+}
+.efb-hero .flight-strip {
+  display:inline-flex; gap: 16px; align-items: center;
+  margin-top: 14px;
+  padding: 10px 20px;
+  border: 1px solid rgba(255,225,89,.35);
+  border-radius: 99px;
+  background: rgba(0,0,0,.35);
+  backdrop-filter: blur(14px);
+  color: #FFE6E8;
+}
+.efb-hero .flight-strip .fno { color: #FFFFFF; }
+.efb-hero .flight-strip .rt  { color: #FFE159; }
+.efb-hero .flight-strip .fno { font-family: var(--font-display); font-weight: 700; font-size: 18px; color: var(--ai-cream); }
+.efb-hero .flight-strip .rt  { font-family: var(--font-mono); font-size: 12px; color: var(--ai-gold-bright); letter-spacing: .12em; }
+.efb-hero .flight-strip .sep { width: 1px; height: 18px; background: var(--border); }
+.efb-hero .flight-strip .startbtn {
+  background: var(--ai-red);
+  color: var(--ai-cream);
+  padding: 6px 14px; border-radius: 99px;
+  font-size: 12px; font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(218,25,47,.4);
+}
+.efb-hero .flight-strip .startbtn:hover { background: var(--ai-red-bright); }
+.efb-hero .flight-strip .endbtn {
+  background: rgba(248,113,113,.18); color: var(--bad);
+  padding: 6px 14px; border-radius: 99px;
+  font-size: 12px; font-weight: 500;
+  border: 1px solid rgba(248,113,113,.4);
+}
+
+/* ----- App grid (iPad-style spacing) ----- */
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 28px 32px;
+  margin: 26px auto 16px;
+  max-width: 1240px;
+  padding: 0 12px;
+}
+@media (max-width: 1100px) { .app-grid { grid-template-columns: repeat(4, 1fr); gap: 24px 28px; } }
+@media (max-width: 680px)  { .app-grid { grid-template-columns: repeat(3, 1fr); gap: 18px 22px; } }
+@media (max-width: 380px)  { .app-grid { grid-template-columns: repeat(2, 1fr); gap: 16px 18px; } }
+
+.app-tile {
+  background: rgba(20,7,8,.42);
+  backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255,225,89,.18);
+  border-radius: 24px;
+  padding: 22px 14px 18px;
+  text-align: center;
+  cursor: pointer;
+  transition: transform .25s var(--ease), background .25s var(--ease), border-color .25s var(--ease), box-shadow .25s var(--ease);
+  text-decoration: none;
+  color: #FFFFFF;
+  position: relative;
+}
+.app-tile:hover { transform: translateY(-5px); background: rgba(20,7,8,.7); border-color: rgba(255,225,89,.45); box-shadow: 0 14px 38px rgba(0,0,0,.45); }
+.app-tile:active { transform: translateY(-2px) scale(.98); }
+.app-tile .nm { color: #FFFFFF !important; }
+.app-tile .ico {
+  width: 64px; height: 64px;
+  margin: 0 auto 14px;
+  display:flex; align-items:center; justify-content:center;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--ai-red), var(--ai-aubergine));
+  color: var(--ai-cream);
+  box-shadow: 0 8px 22px rgba(218,25,47,.32), inset 0 1px 0 rgba(255,255,255,.1);
+}
+.app-tile .ico svg { width: 28px; height: 28px; }
+.app-tile .ico.gold { background: linear-gradient(135deg, var(--ai-gold-bright), var(--ai-gold-deep)); color: #1A1414; box-shadow: 0 8px 22px rgba(199,165,108,.34), inset 0 1px 0 rgba(255,255,255,.18); }
+.app-tile .ico.green{ background: linear-gradient(135deg, #4ADE80, #16A34A); color: #1A1414; box-shadow: 0 8px 22px rgba(74,222,128,.34), inset 0 1px 0 rgba(255,255,255,.18); }
+.app-tile .ico.dark { background: linear-gradient(135deg, #1C1719, #251E20); color: var(--ai-gold-bright); border: 1px solid var(--border-gold); box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
+.app-tile .nm {
+  font-size: 13px; font-weight: 500;
+  color: var(--ai-cream);
+  letter-spacing: -.005em;
+}
+.app-tile .live-dot {
+  position: absolute; top: 10px; right: 10px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--ok); box-shadow: 0 0 8px var(--ok);
+}
+
+/* ----- App page (inside views) ----- */
+/* When we're NOT on the home grid, ensure the body and frame ALLOW vertical
+   scroll. The home page sets overflow:hidden on .efb-home-v2, but that should
+   not bleed into sub-pages — explicitly reset here. */
+body.efb-body:not(:has(.efb-home-v2)) {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.efb-frame:not(:has(.efb-home-v2)) {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.efb-page {
+  padding: 18px 22px 32px;
+  max-width: 1480px;
+  margin: 0 auto;
+  width: 100%;
+  overflow-y: visible;
+}
+.efb-page > *:last-child { margin-bottom: 60px; }   /* breathing room at scroll bottom */
+
+/* Seat map (simplified in-app grid) */
+.seat-grid { display: flex; flex-direction: column; gap: 4px; }
+.seat-row {
+  display: flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono);
+}
+.seat-row-num {
+  width: 26px; text-align: right;
+  font-size: 10.5px; color: var(--text-mute);
+  letter-spacing: .08em;
+}
+.seat-cell {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; color: var(--ai-cream);
+  background: rgba(255,225,89,.06);
+  border: 1px solid rgba(255,225,89,.2);
+  border-radius: 4px;
+}
+.seat-aisle { width: 16px; }
+.efb-page .pagebar {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px;
+}
+.efb-page .pagebar h2 { font-family: var(--font-display); font-weight: 600; font-size: 22px; color: var(--ai-cream); letter-spacing: -.01em; }
+.efb-page .pagebar .actions { margin-left: auto; display: flex; gap: 8px; }
+
+.efb-iframe {
+  width: 100%;
+  height: calc(100vh - 64px - 100px);
+  min-height: 600px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #050507;
+}
+
+.embed-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-mute);
+  letter-spacing: .1em;
+}
+.embed-bar .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.embed-bar .right { margin-left: auto; display: flex; gap: 8px; }
+
+.efb-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px 18px;
+}
+
+.fsuipc-card {
+  background: linear-gradient(135deg, rgba(74,27,65,.22), rgba(20,16,18,.9));
+  border: 1px solid var(--border-gold);
+}
+.fsuipc-status {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .2em;
+  text-transform: uppercase;
+  padding: 4px 10px; border-radius: 99px;
+}
+.fsuipc-status.on  { color: var(--ok); border: 1px solid rgba(74,222,128,.4); background: rgba(74,222,128,.06); }
+.fsuipc-status.off { color: var(--bad); border: 1px solid rgba(248,113,113,.4); background: rgba(248,113,113,.06); }
+
+.fsuipc-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+}
+@media (max-width: 980px) { .fsuipc-grid { grid-template-columns: repeat(2, 1fr); } }
+.fsuipc-stat { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: rgba(28,23,25,.6); }
+.fsuipc-stat .lbl { font-family: var(--font-mono); font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--text-mute); }
+.fsuipc-stat .val { font-family: var(--font-display); font-weight:600; font-size: 24px; margin-top: 4px; color: var(--ai-cream); letter-spacing: -.01em; }
+.fsuipc-stat .sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+/* ====================================================================
+   App folder grouping (EFB Home)
+   ==================================================================== */
+.app-grid { display: flex; flex-direction: column; gap: 22px; }
+.app-folder {
+  background: rgba(10,7,9,.32);
+  border: 1px solid rgba(255,225,89,.16);
+  border-radius: 18px;
+  padding: 14px 14px 16px;
+  backdrop-filter: blur(8px);
+}
+.folder-label {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px; letter-spacing: .22em;
+  text-transform: uppercase;
+  color: rgba(255,225,89,.78);
+  padding: 4px 4px 12px;
+  border-bottom: 1px dashed rgba(255,225,89,.18);
+  margin-bottom: 14px;
+}
+.folder-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: linear-gradient(135deg, #FFE9A8, #C7A56C);
+  box-shadow: 0 0 8px rgba(255,225,89,.6);
+}
+.folder-count {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: .12em;
+  color: rgba(255,225,89,.4);
+  background: rgba(255,225,89,.06);
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 1px solid rgba(255,225,89,.14);
+}
+.folder-grid {
+  display: grid;
+  /* 4 tiles per row baseline; widens on big screens */
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+@media (min-width: 1280px) { .folder-grid { grid-template-columns: repeat(6, 1fr); } }
+@media (max-width: 900px)  { .folder-grid { grid-template-columns: repeat(4, 1fr); gap: 10px; } }
+@media (max-width: 600px)  { .folder-grid { grid-template-columns: repeat(3, 1fr); gap: 10px; } }
+@media (max-width: 380px)  { .folder-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; } }
+@media (max-width: 480px) {
+  .app-folder { padding: 10px 10px 12px; border-radius: 14px; }
+}
+
+/* ====================================================================
+
+/* ====================================================================
+   EFB v2 — clean, horizontal, no scroll
+   • Red Air India wallpaper, white foreground
+   • Logo focal in top bar
+   • 6 tiles per side, Network Globe map in centre
+   • Minimal gold; brand red is the hero
+   ==================================================================== */
+.efb-frame:has(.efb-home-v2) .efb-bar { display: none; }
+
+.efb-home.efb-home-v2 {
+  width: 100vw; height: 100vh; height: 100dvh;
+  padding: 0; margin: 0; overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255,255,255,.04) 0%, transparent 50%),
+    radial-gradient(ellipse at top, #C8102E 0%, #8B1A2B 45%, #5A0815 100%);
+  color: #FFFFFF;
+}
+.efb-home.efb-home-v2::before,
+.efb-home.efb-home-v2::after { display: none; }
+
+.efb2-grid {
+  display: grid;
+  grid-template-columns: 92px 1fr 92px;
+  grid-template-rows:    100px auto 1fr;
+  grid-template-areas:
+    "top   top    top"
+    "prog  prog   prog"
+    "left  centre right";
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  gap: 12px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+/* When no in-progress ribbon, the prog row collapses to zero */
+.efb2-grid:not(:has(.efb-progress)) {
+  grid-template-rows: 100px 1fr;
+  grid-template-areas:
+    "top   top    top"
+    "left  centre right";
+}
+.efb2-top    { grid-area: top; }
+.efb-progress { grid-area: prog; }
+.efb2-rail-left  { grid-area: left;  }
+.efb2-rail-right { grid-area: right; }
+/* Wrap the centre in extra padding so the map breathes and feels smaller */
+.efb2-centre {
+  grid-area: centre; position: relative; border-radius: 18px; overflow: hidden;
+  background: #0A0709; border: 1px solid rgba(255,255,255,.10);
+  /* Reserve room around the map so it isn't the whole canvas */
+  max-width: 1100px;
+  max-height: calc(100vh - 92px - 80px);   /* top bar 92 + 80px breathing room top/bottom */
+  width: 100%; height: 100%;
+  justify-self: center;
+  align-self: center;
+}
+
+/* ----- Top bar ----- */
+.efb2-top {
+  display: grid;
+  /* Logo dead-centred via 1fr/auto/1fr columns. Clocks left, flight right. */
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 22px;
+  background: rgba(0,0,0,.18);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+}
+/* Clocks block — Z huge, date + local below */
+.efb2-clocks { justify-self: start; display: flex; flex-direction: column; gap: 4px; }
+.efb2-clocks .z-time {
+  font-family: var(--font-mono);
+  font-size: clamp(26px, 3.4vw, 36px);
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: #FFFFFF;
+  line-height: 1;
+  text-shadow: 0 2px 10px rgba(0,0,0,.35);
+}
+.efb2-clocks .z-meta {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em;
+  color: rgba(255,255,255,.7);
+}
+.efb2-clocks .z-label { color: #FFE159; }   /* tiny gold accent OK */
+.efb2-clocks .z-sep   { color: rgba(255,255,255,.3); }
+.efb2-clocks .z-date  { color: rgba(255,255,255,.85); }
+.efb2-clocks .z-local { color: rgba(255,255,255,.85); }
+.efb2-clocks .loc-lbl { color: rgba(255,255,255,.55); font-size: 9.5px; letter-spacing: .22em; }
+
+/* Welcome strip — "Good morning, Captain Gunant" under the clocks */
+.efb-welcome {
+  margin-top: 6px;
+  display: flex; align-items: baseline; gap: 8px;
+  font-family: var(--font-display);
+}
+.efb-welcome .ew-greet { font-size: 13px; color: rgba(255,255,255,.6); }
+.efb-welcome .ew-name  {
+  font-size: 14.5px; font-weight: 600; color: #FFE9A8;
+  letter-spacing: .01em;
+}
+
+/* Live flight progress ribbon — sits between the top bar and the rails */
+.efb-progress {
+  grid-column: 1 / -1;
+  margin: -4px 6px 4px;
+  padding: 8px 14px;
+  background: rgba(0,0,0,.34);
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 14px;
+  color: #FFFFFF;
+}
+.efb-progress .ep-row {
+  display: flex; align-items: center; gap: 14px;
+  font-family: var(--font-mono); font-size: 11.5px;
+}
+.efb-progress .ep-from, .efb-progress .ep-to {
+  font-weight: 700; font-size: 13px; color: #FFFFFF; min-width: 38px;
+}
+.efb-progress .ep-track {
+  position: relative; flex: 1;
+  height: 6px; border-radius: 99px;
+  background: rgba(255,255,255,.12);
+  overflow: visible;
+}
+.efb-progress .ep-fill {
+  height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, #FFE159, #FFFFFF);
+  transition: width .8s ease;
+}
+.efb-progress .ep-plane {
+  position: absolute; top: 50%; left: 0;
+  transform: translate(-50%, -50%);
+  font-size: 16px; color: #FFE159;
+  text-shadow: 0 2px 8px rgba(0,0,0,.6);
+  transition: left .8s ease;
+}
+.efb-progress .ep-phase {
+  background: rgba(255,255,255,.14);
+  padding: 4px 10px; border-radius: 99px;
+  font-size: 10.5px; letter-spacing: .18em;
+  color: #FFE159; font-weight: 600;
+}
+
+/* Logo centred */
+.efb2-logo { justify-self: center; }
+.efb2-logo img {
+  height: 60px; width: auto; display: block;
+  filter: drop-shadow(0 6px 16px rgba(0,0,0,.5));
+}
+.efb2-flight {
+  display: flex; align-items: center; gap: 14px;
+  justify-content: flex-end; color: #FFFFFF;
+}
+.efb2-flight .fs-fno { font-family: var(--font-display); font-weight: 700; font-size: 18px; }
+.efb2-flight .fs-rt  {
+  font-family: var(--font-mono); font-size: 11.5px;
+  color: rgba(255,255,255,.78); letter-spacing: .08em;
+}
+.efb2-flight .startbtn,
+.efb2-flight .endbtn {
+  background: #FFFFFF; color: #A8101F;
+  border: 0; border-radius: 99px;
+  padding: 8px 18px; font-weight: 700; font-size: 11px; letter-spacing: .12em;
+  cursor: pointer; text-decoration: none;
+}
+.efb2-flight .endbtn { background: rgba(255,255,255,.15); color: #FFFFFF; border: 1px solid rgba(255,255,255,.35); }
+
+/* ----- Tile rails ----- */
+.efb2-rail {
+  display: flex; flex-direction: column; gap: 10px;
+  background: rgba(0,0,0,.18);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+  padding: 10px 8px;
+  overflow: hidden;
+}
+.efb2-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px;
+  padding: 10px 4px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 12px;
+  text-decoration: none; color: #FFFFFF;
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
+  transition: background .12s ease, transform .12s ease;
+}
+.efb2-tile:hover { background: rgba(255,255,255,.14); transform: translateY(-1px); }
+.efb2-tile:active { transform: translateY(0) scale(.97); }
+.efb2-tile .ico {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  display: grid; place-items: center;
+  background: rgba(255,255,255,.10);
+  color: #FFFFFF;
+}
+.efb2-tile .nm {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: .14em;
+  text-transform: uppercase; color: #FFFFFF;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.efb2-tile .live-dot {
+  position:absolute; top:6px; right:6px; width:7px; height:7px; border-radius:50%;
+  background: #4ADE80; box-shadow: 0 0 6px rgba(74,222,128,.7);
+}
+
+/* ----- Centre map area ----- */
+/* MapLibre adds its own `.maplibregl-map { position: relative; }` to this
+   same element, which overrides `inset:0`. Give it explicit dimensions
+   instead so the canvas fills the centre cell. */
+.efb2-map { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; }
+.efb2-map .maplibregl-canvas-container,
+.efb2-map .maplibregl-canvas { width: 100% !important; height: 100% !important; background: #0A0709; }
+
+/* Tiny three-line hamburger icon. No label. ~34x34px button.
+   Click opens the source-switcher dropdown below it. */
+.efb-map-burger {
+  position: absolute; top: 10px; left: 10px; z-index: 9;
+  width: 34px; height: 34px;
+  background: rgba(8,5,7,.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 9px;
+  cursor: pointer;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 4px;
+  padding: 0;
+  transition: background .2s, border-color .2s;
+}
+.efb-map-burger:hover { background: rgba(8,5,7,.96); border-color: rgba(255,255,255,.3); }
+.efb-map-burger > span {
+  display: block; width: 16px; height: 2px;
+  background: #FFFFFF; border-radius: 1px;
+}
+
+/* Switcher menu — drops down from the burger when open */
+.efb-map-switch {
+  position: absolute; top: 50px; left: 10px; z-index: 10;
+  display: flex; flex-direction: column; gap: 2px;
+  background: rgba(8,5,7,.94);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 10px;
+  padding: 4px;
+  min-width: 140px;
+}
+.efb-map-switch[hidden] { display: none; }
+.efb-map-src {
+  background: transparent; border: 0; cursor: pointer;
+  color: rgba(255,255,255,.7);
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .16em;
+  text-align: left;
+  padding: 8px 12px; border-radius: 7px;
+}
+.efb-map-src:hover { color: #FFFFFF; background: rgba(255,255,255,.08); }
+.efb-map-src.on {
+  background: #DA192F; color: #FFFFFF; font-weight: 600;
+}
+
+/* Back-to-Portal button in the top bar */
+.efb-back-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px;
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 99px;
+  color: #FFFFFF; text-decoration: none;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .16em; font-weight: 600;
+  transition: background .12s ease;
+}
+.efb-back-btn:hover { background: rgba(255,255,255,.22); }
+.efb-back-btn svg { transform: rotate(180deg); }
+
+/* Layer stack inside the map host */
+.efb-map-stack { position: absolute; inset: 0; }
+/* MapLibre forces position:relative inline on its container, so we need
+   !important + explicit size to keep the layer filling the stack. */
+.efb-map-layer {
+  position: absolute !important; inset: 0 !important;
+  width: 100% !important; height: 100% !important;
+  display: none;
+}
+.efb-map-aiva  { display: block; }
+.efb-map-aiva.maplibregl-map { width: 100% !important; height: 100% !important; }
+.efb-map-iframe {
+  border: 0; background: #0A0709;
+}
+.efb-map-prompt { display: grid; place-items: center; background: #0A0709; }
+
+/* Stats overlay — clean white text on translucent black, NO gold */
+.efb2-stats {
+  position: absolute; top: 14px; left: 14px; z-index: 5;
+  display: flex; gap: 16px;
+  background: rgba(8,5,7,.78);
+  backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+.ms-stat { text-align: center; min-width: 56px; }
+.ms-stat .lbl {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: .22em;
+  color: rgba(255,255,255,.55); text-transform: uppercase;
+}
+.ms-stat .val {
+  font-family: var(--font-mono); font-weight: 700;
+  font-size: 22px; line-height: 1; color: #FFFFFF;
+  margin-top: 4px;
+}
+.ms-stat .unit {
+  font-family: var(--font-mono); font-size: 9px;
+  color: rgba(255,255,255,.4); margin-top: 2px;
+}
+
+.efb2-livepill {
+  position: absolute; top: 14px; right: 14px; z-index: 5;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px;
+  background: rgba(8,5,7,.78);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 99px;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em;
+  color: #FFFFFF;
+}
+.efb2-livepill .dot { width: 7px; height: 7px; border-radius: 50%; background: #F87171; box-shadow: 0 0 6px #F87171; }
+.efb2-livepill.on { border-color: rgba(74,222,128,.4); }
+.efb2-livepill.on .dot { background: #4ADE80; box-shadow: 0 0 6px #4ADE80; animation: pulse 1.5s infinite; }
+
+.efb2-nearby {
+  position: absolute; bottom: 14px; left: 14px; z-index: 5;
+  background: rgba(8,5,7,.78);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 12px;
+  padding: 10px 14px;
+  min-width: 220px; max-width: 320px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: #FFFFFF;
+}
+.efb2-nearby-title {
+  color: rgba(255,255,255,.6); font-size: 9.5px; letter-spacing: .2em;
+  text-transform: uppercase; margin-bottom: 8px;
+}
+.efb2-nearby-row {
+  display: grid; grid-template-columns: 60px 70px 1fr auto; gap: 8px;
+  align-items: center; padding: 4px 0;
+}
+.efb2-nearby-row .cs { color: #FFFFFF; }
+.efb2-nearby-row .nm,
+.efb2-nearby-row .fn { color: rgba(255,255,255,.65); }
+.efb2-nearby-row .alt { color: #FFFFFF; font-weight: 600; }
+.efb2-nearby-empty { color: rgba(255,255,255,.6); font-size: 11px; }
+
+/* Network Globe side-panel inherited from base.css — works fine here */
+
+/* ----- Responsive ----- */
+@media (max-width: 900px) {
+  .efb2-grid { grid-template-columns: 78px 1fr 78px; grid-template-rows: 70px 1fr; }
+  .efb2-zclock .z-time { font-size: 26px; }
+  .ms-stat .val { font-size: 18px; }
+  .ms-stat { min-width: 46px; }
+  .efb2-stats { gap: 10px; padding: 10px 12px; }
+}
+@media (max-width: 640px) {
+  .efb2-grid { grid-template-columns: 64px 1fr 64px; grid-template-rows: 60px 1fr; padding: 8px; gap: 8px; }
+  .efb2-tile .nm { font-size: 8px; }
+  .efb2-zclock .z-time { font-size: 22px; }
+}
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }

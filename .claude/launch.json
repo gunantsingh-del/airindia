@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "aiva",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-c",
+        "import os, sys; os.chdir('/Users/gunant/Downloads/air india virtual'); from http.server import HTTPServer, SimpleHTTPRequestHandler; HTTPServer(('', 8421), SimpleHTTPRequestHandler).serve_forever()"
+      ],
+      "port": 8421
+    }
+  ]
+}

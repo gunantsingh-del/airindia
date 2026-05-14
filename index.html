@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="AIVA">
+<meta name="theme-color" content="#A8101F">
+<title>AIVA</title>
+<link rel="icon" type="image/png" href="assets/img/vaic-mini-colour.png?v=20260514n">
+<link rel="apple-touch-icon" href="assets/img/vaic-mini-colour.png?v=20260514n">
+<link href="https://fonts.googleapis.com/css2?family=Mukta:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/base.css?v=20260514n">
+<style>
+/* ====== AIR INDIA RED LOGIN — MINIMAL ====== */
+body {
+  margin: 0;
+  background: radial-gradient(ellipse at top, #C8102E 0%, #8B1A2B 40%, #5A0815 100%);
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  color: var(--ai-cream);
+  overflow: hidden;
+}
+
+/* Subtle paper texture overlay */
+body::before {
+  content:'';
+  position: fixed; inset: 0;
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 4px, rgba(255,255,255,.012) 4px 5px),
+    repeating-linear-gradient(-45deg, transparent 0 4px, rgba(0,0,0,.012) 4px 5px);
+  pointer-events: none;
+  mix-blend-mode: overlay;
+}
+
+/* Subtle radial spotlight in the center */
+body::after {
+  content:'';
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,.4) 100%);
+  pointer-events: none;
+}
+
+.stage {
+  position: relative;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 24px 28vh;     /* reserve space at the bottom for the login form */
+  z-index: 1;
+  box-sizing: border-box;
+}
+
+/* Tap target = the entire centered logo+maharaja column */
+.brand {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  cursor: pointer;
+  transition: transform .35s var(--ease-emph);
+  position: relative;
+  padding: 0;
+  max-width: min(420px, 92vw);
+}
+.brand:hover { transform: translateY(-3px); }
+.brand:active { transform: scale(.98); }
+.brand .logo {
+  width: min(360px, 78vw);
+  height: auto;
+  filter: drop-shadow(0 6px 18px rgba(0,0,0,.4));
+  display: block;
+}
+.brand .gold-rule {
+  width: min(280px, 60vw);
+  height: 2px;
+  background: linear-gradient(90deg, transparent 0%, #E0B65F 18%, #FFE9A8 50%, #E0B65F 82%, transparent 100%);
+  border-radius: 2px;
+  box-shadow: 0 1px 6px rgba(255,225,89,.35);
+}
+.brand .maharaja {
+  height: min(34vh, 280px);
+  width: auto;
+  max-width: 50vw;
+  filter: drop-shadow(0 18px 36px rgba(0,0,0,.55));
+  transition: transform .5s var(--ease-emph);
+  display: block;
+}
+.brand:hover .maharaja { transform: translateY(-4px); }
+
+/* Tall portrait screens — keep the figure smaller */
+@media (max-aspect-ratio: 3/4) {
+  .brand .maharaja { height: min(28vh, 220px); }
+  .brand .logo     { width: min(300px, 78vw); }
+  .brand .gold-rule { width: min(240px, 60vw); }
+}
+/* Very short windows */
+@media (max-height: 720px) {
+  .brand .maharaja { height: 28vh; }
+  .stage { padding-bottom: 22vh; }
+}
+@media (max-width: 480px) {
+  .brand .maharaja { height: 22vh; }
+  .brand .logo     { width: 260px; }
+}
+
+/* ===== Login form (collapsed by default) ===== */
+.login-stage {
+  position: absolute;
+  bottom: 8vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 92vw;
+  max-width: 400px;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height .55s var(--ease-emph);
+}
+.login-stage.open { max-height: 460px; }
+
+.login-form {
+  background: rgba(10,7,9,.62);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid rgba(255,225,89,.32);
+  border-radius: 24px;
+  padding: 26px 24px 22px;
+  box-shadow: 0 30px 80px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+.login-form .field { margin-bottom: 12px; }
+.login-form .label {
+  font-family: var(--font-mono); font-size: 9.5px;
+  letter-spacing: .26em; text-transform: uppercase;
+  color: rgba(255,225,89,.85);
+  margin-bottom: 6px; display: block;
+}
+.login-form .input {
+  width: 100%;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,225,89,.18);
+  color: var(--ai-cream);
+  border-radius: 12px;
+  padding: 13px 16px;
+  font-size: 14px;
+  transition: all .2s ease;
+}
+.login-form .input::placeholder { color: rgba(248,241,228,.4); }
+.login-form .input:focus {
+  outline: none;
+  border-color: rgba(255,225,89,.7);
+  background: rgba(255,255,255,.12);
+}
+
+.login-form .demo {
+  margin: 8px 0 16px;
+  padding: 10px 14px;
+  background: rgba(255,225,89,.08);
+  border: 1px dashed rgba(255,225,89,.4);
+  border-radius: 11px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--ai-cream); text-align: center; line-height: 1.6;
+}
+.login-form .demo a { color: #FFE159; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+.login-form .submit {
+  width: 100%;
+  background: var(--ai-cream);
+  color: #A8101F;
+  font-weight: 700;
+  padding: 14px;
+  border-radius: 99px;
+  font-size: 13px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  border: 0;
+  cursor: pointer;
+  transition: all .2s var(--ease);
+  font-family: inherit;
+}
+.login-form .submit:hover {
+  background: #FFE159;
+  color: #1A1414;
+  box-shadow: 0 14px 36px rgba(255,225,89,.35);
+  transform: translateY(-1px);
+}
+
+/* When form is open, shrink brand to make room for the form */
+.brand.condensed { transform: translateY(-24px) scale(.82); transform-origin: top center; }
+.brand.condensed .maharaja { height: min(24vh, 200px); }
+@media (max-width: 480px) {
+  .brand.condensed { transform: translateY(-10px) scale(.68); }
+}
+
+/* ===== Inquiry tab (bottom-pinned) =====
+   Small, unobtrusive — a single line for prospective pilots. Opens a modal
+   with a 60-second contact form. */
+.inquiry-tab {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  padding: 10px 18px;
+  background: rgba(10,7,9,.62);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border-top: 1px solid rgba(255,225,89,.22);
+  display: flex; justify-content: center; align-items: center; gap: 10px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: rgba(248,241,228,.78); letter-spacing: .14em;
+  z-index: 50;
+}
+.inquiry-tab a {
+  color: #FFE159; text-decoration: underline; text-underline-offset: 3px;
+  cursor: pointer;
+}
+.inq-modal {
+  position: fixed; inset: 0; z-index: 60;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(10,7,9,.78); backdrop-filter: blur(12px);
+}
+.inq-modal.open { display: flex; }
+.inq-card {
+  background: rgba(20,8,12,.94);
+  border: 1px solid rgba(255,225,89,.32);
+  border-radius: 20px;
+  padding: 28px 28px 22px;
+  width: 92vw; max-width: 460px;
+  color: var(--ai-cream); position: relative;
+}
+.inq-card .close {
+  position: absolute; top: 12px; right: 14px;
+  background: none; border: 0; color: var(--ai-cream);
+  font-size: 20px; cursor: pointer; opacity: .6;
+}
+.inq-card .close:hover { opacity: 1; }
+.inq-card h3 {
+  font-family: var(--font-display); font-weight: 600;
+  font-size: 22px; margin: 0 0 6px;
+}
+.inq-card p { font-size: 12.5px; color: rgba(248,241,228,.65); margin: 0 0 18px; line-height: 1.55; }
+.inq-card label { display: block; margin-bottom: 12px; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .26em; text-transform: uppercase; color: rgba(255,225,89,.85); }
+.inq-card label input,
+.inq-card label textarea {
+  display: block; width: 100%; margin-top: 6px;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,225,89,.18);
+  color: var(--ai-cream); border-radius: 10px;
+  padding: 11px 14px; font-size: 13px; font-family: inherit;
+  resize: vertical;
+}
+.inq-card label input:focus,
+.inq-card label textarea:focus {
+  outline: none; border-color: rgba(255,225,89,.7);
+  background: rgba(255,255,255,.12);
+}
+.inq-card .inq-send {
+  width: 100%;
+  background: var(--ai-cream); color: #A8101F;
+  font-weight: 700; padding: 13px;
+  border-radius: 99px; font-size: 12.5px; letter-spacing: .14em;
+  text-transform: uppercase; border: 0; cursor: pointer;
+  font-family: inherit;
+  transition: all .2s var(--ease);
+}
+.inq-card .inq-send:hover {
+  background: #FFE159; color: #1A1414;
+  box-shadow: 0 14px 36px rgba(255,225,89,.35);
+}
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="brand" id="brandTap" role="button" aria-label="Sign in">
+    <img class="logo" src="assets/img/vaic-logo-colour.png?v=20260514n" alt="Air India Virtual" onerror="this.onerror=null; this.src='assets/img/vaic-logo-colour.svg?v=20260514n'"/>
+    <div class="gold-rule" aria-hidden="true"></div>
+    <img class="maharaja" src="assets/img/maharaja.png?v=20260514n" alt="Air India Maharaja" onerror="this.onerror=null; this.src='assets/img/maharaja.svg?v=20260514n'"/>
+  </div>
+
+  <div class="login-stage" id="loginStage">
+    <!-- The honeypot fields below ABSORB Safari/iOS/Chrome autofill so it never
+         fires on our real fields. They're hidden visually but still focusable
+         enough for the browser's autofill heuristic to attach to them. -->
+    <form class="login-form" id="loginForm" autocomplete="off" data-form-type="other" novalidate>
+      <input type="text"     name="username" autocomplete="username"      aria-hidden="true" tabindex="-1" style="position:absolute;opacity:0;height:0;width:0;border:0;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);"/>
+      <input type="password" name="password" autocomplete="current-password" aria-hidden="true" tabindex="-1" style="position:absolute;opacity:0;height:0;width:0;border:0;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);"/>
+
+      <div class="field">
+        <label class="label">Crew Email</label>
+        <input class="input" type="search" inputmode="email" id="email" name="aiva_crew_8472" required autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" placeholder="captain@aiva.in"/>
+      </div>
+      <div class="field">
+        <label class="label">Password</label>
+        <input class="input" type="text" id="password" name="aiva_pass_3917" required autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" placeholder="••••••••" style="-webkit-text-security:disc; text-security:disc; font-family:text-security-disc, var(--font-sans);"/>
+      </div>
+      <div class="demo">
+        Crew only · 14 named pilots have access.<br>
+        <a id="fillDemo" style="opacity:.85;">Fill admin credentials</a>
+      </div>
+      <button type="submit" class="submit">Begin Pre-flight →</button>
+    </form>
+  </div>
+</div>
+
+<!-- Inquiry tab — prospective pilots can request to fly for AIC -->
+<div class="inquiry-tab">
+  <span>Want to fly for Air India Virtual?</span>
+  <a id="openInq">Request crew access →</a>
+</div>
+
+<div class="inq-modal" id="inqModal" role="dialog" aria-labelledby="inqTitle">
+  <div class="inq-card">
+    <button class="close" id="inqClose" aria-label="Close">×</button>
+    <h3 id="inqTitle">Crew Inquiry</h3>
+    <p>AIVA is invite-only. If you're a serious flight-sim pilot interested in joining the Maharaja Club's future intake, leave your details — the Chief Pilot will reach out when seats open.</p>
+    <form id="inqForm">
+      <label>Full name<input id="inqName" required></label>
+      <label>Email<input id="inqEmail" type="email" required></label>
+      <label>Sim experience (yrs · aircraft you fly)<input id="inqExp" required placeholder="6 yrs · A320 + B77W on MSFS"></label>
+      <label>Why AIVA?<textarea id="inqMsg" rows="3" required placeholder="One paragraph — why you, why us."></textarea></label>
+      <button type="submit" class="inq-send">Send inquiry</button>
+    </form>
+  </div>
+</div>
+
+<script src="assets/js/store.js?v=20260514n"></script>
+<script src="assets/js/data.js?v=20260514n"></script>
+<script src="assets/js/util.js?v=20260514n"></script>
+<script src="assets/js/auth.js?v=20260514n"></script>
+<script src="assets/js/maharaja.js?v=20260514n"></script>
+<script>
+  const stage = document.getElementById('loginStage');
+  const brand = document.getElementById('brandTap');
+  let opened = false;
+
+  brand.addEventListener('click', () => {
+    if (!opened) {
+      stage.classList.add('open');
+      brand.classList.add('condensed');
+      opened = true;
+      setTimeout(() => document.getElementById('email').focus(), 250);
+    }
+  });
+
+  document.getElementById('fillDemo').addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    document.getElementById('email').value = 'gunant.pahwa@aiv.in';
+    document.getElementById('password').value = 'Falcon-77W#42';
+    document.getElementById('email').focus();
+  });
+
+  if (AIVA.Auth.isLoggedIn()) location.replace('portal.html');
+
+  document.getElementById('loginForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const r = AIVA.Auth.login(document.getElementById('email').value, document.getElementById('password').value);
+    if (r.ok) {
+      AIVA.U.toast(`नमस्ते, ${r.pilot.rank} ${r.pilot.name.split(' ')[0]}.`, 'ok');
+      setTimeout(() => location.href = 'portal.html', 600);
+    } else AIVA.U.toast(r.error, 'bad');
+  });
+
+  /* === Inquiry modal === */
+  const inqModal = document.getElementById('inqModal');
+  document.getElementById('openInq').addEventListener('click', e => { e.preventDefault(); inqModal.classList.add('open'); });
+  document.getElementById('inqClose').addEventListener('click', () => inqModal.classList.remove('open'));
+  inqModal.addEventListener('click', e => { if (e.target === inqModal) inqModal.classList.remove('open'); });
+  document.getElementById('inqForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    /* Store locally; the Chief Pilot reviews the localStorage backlog when they log in */
+    const inq = AIVA.Store.get('crew_inquiries', []);
+    inq.push({
+      name:  document.getElementById('inqName').value.trim(),
+      email: document.getElementById('inqEmail').value.trim(),
+      exp:   document.getElementById('inqExp').value.trim(),
+      msg:   document.getElementById('inqMsg').value.trim(),
+      ts: Date.now(),
+    });
+    AIVA.Store.set('crew_inquiries', inq);
+    inqModal.classList.remove('open');
+    AIVA.U.toast('Inquiry received. The Chief Pilot will be in touch.', 'ok');
+    document.getElementById('inqForm').reset();
+  });
+</script>
+</body>
+</html>

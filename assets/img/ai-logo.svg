@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 180" width="520" height="180" aria-label="Air India">
+  <defs>
+    <linearGradient id="aiVistaGold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#F2D58A"/>
+      <stop offset="40%" stop-color="#E0B65F"/>
+      <stop offset="100%" stop-color="#9C7B2A"/>
+    </linearGradient>
+    <linearGradient id="aiVistaGoldDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#C99A3A"/>
+      <stop offset="100%" stop-color="#7A5C1E"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ========================================================== -->
+  <!-- VISTA WINDOW (the gold "frame" mark — Air India's 2023 ID) -->
+  <!-- A rounded "window" arch sitting above the wordmark.        -->
+  <!-- Built as a thick gold stroke that arcs left, up, over,     -->
+  <!-- and right with a horizontal sill underneath.               -->
+  <!-- ========================================================== -->
+  <g transform="translate(260 60)">
+    <!-- Outer arch frame -->
+    <path d="M -150 36
+             L -150 -10
+             Q -150 -54 -110 -54
+             L 110 -54
+             Q 150 -54 150 -10
+             L 150 36"
+          fill="none"
+          stroke="url(#aiVistaGold)"
+          stroke-width="14"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+
+    <!-- Sill / horizon stripe across the bottom of the window -->
+    <rect x="-150" y="30" width="300" height="12" rx="6" fill="url(#aiVistaGold)"/>
+
+    <!-- Inner highlight to give the gold a brushed-metal feel -->
+    <path d="M -144 32
+             L -144 -8
+             Q -144 -48 -108 -48
+             L 108 -48
+             Q 144 -48 144 -8
+             L 144 32"
+          fill="none"
+          stroke="#FFE9A8"
+          stroke-width="2"
+          stroke-linecap="round"
+          opacity=".55"/>
+
+    <!-- Subtle dark inner shadow to seat the frame -->
+    <path d="M -150 36
+             L -150 -10
+             Q -150 -54 -110 -54
+             L 110 -54
+             Q 150 -54 150 -10
+             L 150 36"
+          fill="none"
+          stroke="url(#aiVistaGoldDark)"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          opacity=".5"/>
+  </g>
+
+  <!-- ========================================================== -->
+  <!-- AIR INDIA wordmark — vivid Air India red, custom-feel       -->
+  <!-- Outfit Black with tight tracking sits closest to the brand. -->
+  <!-- ========================================================== -->
+  <text x="260" y="148"
+        text-anchor="middle"
+        font-family="Outfit, 'DM Sans', 'Arial Black', sans-serif"
+        font-size="56"
+        font-weight="900"
+        fill="#E61926"
+        letter-spacing="-0.005em">AIR INDIA</text>
+</svg>

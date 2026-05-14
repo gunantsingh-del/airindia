@@ -264,3 +264,75 @@ AIVA.PAX_NAMES = {
   kenya:     { first:['Brian','Kevin','Dennis','Daniel','Joseph','James','Grace','Mary','Faith','Sarah','Joyce','Ruth','Esther'], last:['Mwangi','Kamau','Wanjiku','Otieno','Onyango','Achieng','Kiprop','Cheruiyot','Wambui','Njoroge','Mutua','Kariuki'] },
   mauritius: { first:['Jean','Pierre','Marie','Claudine','Sandrine','Raj','Devi','Yashvir','Anjali'], last:['Ramdin','Beeharry','Bhugun','Seetohul','Lutchmun','Ramyead','Mohun','Jhuboo','Bhaukaurally'] },
 };
+
+/* =====================================================================
+   AIVA.SITUATIONS — 30+ non-technical in-flight scenarios.
+
+   Each scenario has:
+     id              short identifier
+     cat             cabin | world | company | medical | security | weather | ops
+     title           short header for the EFB
+     summary         one-line summary
+     acars           ACARS template — what dispatch reports when situation fires
+     cpdlc           CPDLC template — only used if datalink is connected
+     diversion       'expected' | 'likely' | 'possible' | 'no'
+     ack             'mandatory' | 'optional' — does dispatch expect an ack?
+     baseProb        baseline probability 0-1 of this firing in any given flight.
+                     The pilot's "world events" slider multiplies this.
+
+   When a flight is active, on FSUIPC heartbeat the EFB rolls per-second dice
+   weighted by baseProb × slider value. If it lands on a scenario, it's
+   triggered: shown in EFB, ACARS message auto-sent, and (if CPDLC connected)
+   the CPDLC line is uplinked too.
+   ===================================================================== */
+AIVA.SITUATIONS = [
+  /* ===== CABIN ===== */
+  { id:'pax_unruly',     cat:'cabin',    title:'Unruly passenger',           summary:'Inebriated pax in 38C refusing to comply with cabin crew.',                       acars:'CC reporting unruly pax 38C. Restraint kit deployed.',                     cpdlc:'REQUEST PRIORITY ARRIVAL — UNRULY PAX', diversion:'no',       ack:'optional',  baseProb:0.08 },
+  { id:'pax_medical',    cat:'cabin',    title:'Medical event onboard',       summary:'58yo male pax — chest pain, breathing laboured. Doctor onboard responding.',     acars:'MEDICAL EVENT — 58M chest pain — doctor onboard. Awaiting MEDA support.',  cpdlc:'PAN PAN — MEDICAL DIVERSION REQUEST',   diversion:'expected', ack:'mandatory', baseProb:0.04 },
+  { id:'pax_lavatory_smoke', cat:'cabin', title:'Smoke alarm — fwd lav',      summary:'Smoke detector in forward lav triggered. CC investigating.',                      acars:'SMK DET FWD LAV — investigating. No active smoke confirmed yet.',           cpdlc:'STANDBY',                                diversion:'possible', ack:'optional',  baseProb:0.03 },
+  { id:'pax_child',      cat:'cabin',    title:'Distressed child / UMNR',      summary:'Unaccompanied minor in 22D unwell, vomiting.',                                    acars:'UMNR ill — 22D, vomiting. CC managing.',                                    cpdlc:'',                                       diversion:'no',       ack:'optional',  baseProb:0.05 },
+  { id:'pax_belt',       cat:'cabin',    title:'Pax injured during turb',      summary:'Pax in 41B hit head on ceiling during light turbulence.',                         acars:'PAX INJURED 41B during turb — no LOC, observation.',                        cpdlc:'',                                       diversion:'no',       ack:'optional',  baseProb:0.04 },
+  { id:'pax_birth',      cat:'cabin',    title:'In-flight birth',              summary:'30wk pregnant pax in labour — onboard doctor + CC managing.',                     acars:'IN-FLIGHT BIRTH IMMINENT — 30wk gest. Doctor + CC managing.',               cpdlc:'PAN PAN — MEDICAL — IMMINENT BIRTH',    diversion:'expected', ack:'mandatory', baseProb:0.01 },
+  { id:'pax_lost_item',  cat:'cabin',    title:'Pax lost passport',            summary:'Premium pax in 4A misplaced passport — search underway.',                          acars:'PAX 4A lost passport — search ongoing.',                                    cpdlc:'',                                       diversion:'no',       ack:'optional',  baseProb:0.06 },
+  { id:'cc_short',       cat:'cabin',    title:'CC short — one ill',           summary:'L2 cabin crew member ill — crew complement now 7 of 8.',                           acars:'CC L2 ill — crew now 7/8. Service modified.',                                cpdlc:'',                                       diversion:'no',       ack:'optional',  baseProb:0.04 },
+  { id:'galley_fault',   cat:'cabin',    title:'Galley oven inop',             summary:'Aft galley oven 2 reported inop. Service plan adjusted.',                          acars:'AFT GALLEY OVEN 2 INOP — service modified.',                                cpdlc:'',                                       diversion:'no',       ack:'optional',  baseProb:0.07 },
+  { id:'pax_drunk',      cat:'cabin',    title:'Intoxicated pax refused alcohol', summary:'Pax in 24J visibly intoxicated, refused further service.',                       acars:'PAX 24J refused further alcohol service — verbally hostile.',               cpdlc:'',                                       diversion:'no',       ack:'optional',  baseProb:0.06 },
+
+  /* ===== SECURITY ===== */
+  { id:'sec_bomb_threat', cat:'security', title:'Bomb threat — ground call',    summary:'Dispatch received anonymous threat naming this flight. PIC briefed.',              acars:'⚠ SECURITY ALERT — anonymous bomb threat received against this flight. PIC discretion.', cpdlc:'PAN PAN PAN — SECURITY THREAT', diversion:'likely',   ack:'mandatory', baseProb:0.005 },
+  { id:'sec_pax_aggressive', cat:'security', title:'Pax aggression — interference', summary:'Pax in 11A attempting to enter cockpit door area — restrained.',                   acars:'⚠ SECURITY — pax 11A attempting cockpit entry — restrained.',                cpdlc:'PAN PAN — SECURITY',                  diversion:'likely',   ack:'mandatory', baseProb:0.008 },
+  { id:'sec_drone',       cat:'security', title:'Drone sighting near approach',  summary:'TWR reports drone observed 4nm final RWY 27R.',                                    acars:'DRONE SIGHTING reported 4nm final RWY 27R at destination.',                  cpdlc:'',                                  diversion:'possible', ack:'mandatory', baseProb:0.01 },
+
+  /* ===== MEDICAL / CREW ===== */
+  { id:'pic_incap',       cat:'medical', title:'PIC partial incapacitation',     summary:'Captain reports severe migraine + visual aura. F/O assumes control.',              acars:'⚠ PIC partial incap — F/O has control. Sector continuing.',                   cpdlc:'',                                  diversion:'possible', ack:'mandatory', baseProb:0.005 },
+  { id:'crew_food_pois',  cat:'medical', title:'Crew food poisoning suspected',  summary:'Both pilots ate the same meal. F/O reports nausea — PIC unaffected so far.',       acars:'CREW FOOD POIS suspected — F/O nauseous. PIC monitoring own status.',         cpdlc:'',                                  diversion:'possible', ack:'mandatory', baseProb:0.003 },
+
+  /* ===== WORLD / GEOPOLITICAL ===== */
+  { id:'world_airspace', cat:'world',    title:'Airspace closure enroute',       summary:'NOTAM raised for FIR XX — overflight prohibited for next 2 hours.',                acars:'AIRSPACE CLOSURE in FIR — reroute being computed.',                          cpdlc:'EXPECT REROUTE',                    diversion:'no',       ack:'mandatory', baseProb:0.02 },
+  { id:'world_volcano',  cat:'world',    title:'Volcanic ash forecast',          summary:'VAAC issued advisory — ash cloud expected on planned routing.',                    acars:'VOLCANIC ASH forecast on routing. Recompute filed.',                          cpdlc:'EXPECT REROUTE',                    diversion:'possible', ack:'mandatory', baseProb:0.005 },
+  { id:'world_geomag',   cat:'world',    title:'Geomagnetic storm — HF degraded',summary:'Solar storm in progress. HF coverage degraded over polar route.',                  acars:'GEOMAG STORM — HF coverage degraded. CPDLC primary.',                         cpdlc:'',                                  diversion:'no',       ack:'optional',  baseProb:0.01 },
+  { id:'world_gnd_stop', cat:'world',    title:'Destination ground stop',        summary:'Destination ATC ground-stopped for 90 min due to runway incident.',                 acars:'DEST GROUND STOP 90 min — runway incident. Hold or divert.',                  cpdlc:'EXPECT HOLD OR DIVERSION',         diversion:'likely',   ack:'mandatory', baseProb:0.015 },
+  { id:'world_curfew',   cat:'world',    title:'Approaching curfew window',      summary:'Destination has 23:00–06:00 curfew. Delay may push us into window.',                acars:'CURFEW alert — ETA approaches curfew. Coordinate priority.',                 cpdlc:'REQUEST PRIORITY',                   diversion:'possible', ack:'optional',  baseProb:0.02 },
+
+  /* ===== COMPANY ===== */
+  { id:'co_swap',        cat:'company',  title:'Aircraft swap requested',        summary:'OCC requests gate swap on arrival — original aircraft now operating different sector.', acars:'OCC: A/C swap on arrival. Continue as filed.',                                cpdlc:'',                                  diversion:'no',       ack:'optional',  baseProb:0.04 },
+  { id:'co_vip',         cat:'company',  title:'VIP / Code 1 on board',          summary:'OCC notes VIP pax in 1A — priority handling on arrival.',                          acars:'VIP CODE 1 onboard 1A. Priority handling at gate.',                           cpdlc:'',                                  diversion:'no',       ack:'optional',  baseProb:0.05 },
+  { id:'co_minconn',     cat:'company',  title:'Minimum connection pax',         summary:'24 pax with sub-30min connection at destination. Priority deplane.',               acars:'24 MINCONN pax — priority deplane requested at gate.',                       cpdlc:'',                                  diversion:'no',       ack:'optional',  baseProb:0.08 },
+  { id:'co_dx_change',   cat:'company',  title:'Last-minute SLOT change',        summary:'Network ops requesting +15min ground hold for crew connection at destination.',     acars:'SLOT +15 requested for downline crew connection.',                            cpdlc:'',                                  diversion:'no',       ack:'optional',  baseProb:0.06 },
+  { id:'co_press',       cat:'company',  title:'Media on board',                 summary:'Aviation press pax in 3A — corp comms aware.',                                     acars:'MEDIA pax 3A — corp comms briefed.',                                          cpdlc:'',                                  diversion:'no',       ack:'optional',  baseProb:0.02 },
+
+  /* ===== OPS / TECHNICAL (non-emergency) ===== */
+  { id:'ops_mel',        cat:'ops',      title:'New MEL item raised',            summary:'Maintenance raised an MEL item ground-side post-departure. Review required.',     acars:'MEL item raised post-dep — review NOTOC.',                                    cpdlc:'',                                  diversion:'no',       ack:'optional',  baseProb:0.04 },
+  { id:'ops_birds',      cat:'ops',      title:'Bird strike on T/O',             summary:'F/O reports bird strike on rotation. No engine indications abnormal.',              acars:'BIRD STRIKE on T/O — engines nominal — visual inspection on arrival.',         cpdlc:'',                                  diversion:'no',       ack:'mandatory', baseProb:0.02 },
+  { id:'ops_lightning',  cat:'ops',      title:'Lightning strike in cruise',     summary:'Suspected lightning strike — no caution lights. Inspection on arrival.',           acars:'SUSPECT LIGHTNING STRIKE — no warnings. Maintenance inspection on arrival.',  cpdlc:'',                                  diversion:'no',       ack:'mandatory', baseProb:0.015 },
+  { id:'ops_fuel_pi',    cat:'ops',      title:'Performance index drift',        summary:'EPR / N1 indications drifting +1.5%. Trending — not actionable yet.',               acars:'PERF DRIFT noted — trend monitoring.',                                        cpdlc:'',                                  diversion:'no',       ack:'optional',  baseProb:0.03 },
+
+  /* ===== WEATHER ===== */
+  { id:'wx_tafdest',     cat:'weather',  title:'Destination TAF deteriorating',  summary:'New TAF — destination ceiling forecast BKN005 with visibility 1500m.',              acars:'TAF DETERIORATING at dest — BKN005 1500m. Verify alt.',                       cpdlc:'EXPECT HOLD OR DIVERSION',         diversion:'likely',   ack:'mandatory', baseProb:0.03 },
+  { id:'wx_alt_deteriorating', cat:'weather', title:'Alternate going below mins', summary:'Filed alternate now reporting below CAT I mins.',                                    acars:'ALT below mins — second alt being recomputed.',                              cpdlc:'STANDBY ALTERNATE',                  diversion:'no',       ack:'mandatory', baseProb:0.02 },
+  { id:'wx_turbulence',  cat:'weather',  title:'Severe turbulence reported',     summary:'PIREP — severe turb FL340 abeam BBB.',                                              acars:'SEV TURB PIREP FL340. Recommend FL360 or FL320.',                             cpdlc:'REQUEST LEVEL CHANGE',              diversion:'no',       ack:'optional',  baseProb:0.04 },
+
+  /* ===== EQUIPMENT FAILURES — minor ===== */
+  { id:'eq_radar_inop',  cat:'ops',      title:'WX radar partial fail',          summary:'WX radar left side intermittent. Right side working.',                              acars:'WX RADAR L intermittent. Right side primary.',                                cpdlc:'',                                  diversion:'no',       ack:'optional',  baseProb:0.02 },
+  { id:'eq_ifr_box',     cat:'ops',      title:'IFE rack down',                  summary:'Cabin entertainment system fully down. No safety impact.',                          acars:'IFE down — cabin comfort impact only.',                                       cpdlc:'',                                  diversion:'no',       ack:'optional',  baseProb:0.08 },
+];

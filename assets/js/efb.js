@@ -44,6 +44,8 @@
     { id:'elevatex',  nm:'ElevateX',   icon:'satellite',  ico:'dark' },
     { id:'manifest',  nm:'Pax Manifest', icon:'users',    ico:'gold' },
     { id:'seatmap',   nm:'Seat Map',   icon:'layers',     ico:'dark' },
+    { id:'announce',  nm:'PA / Audio', icon:'megaphone',  ico:'red' },
+    { id:'psr',       nm:'File PSR',   icon:'activity',   ico:'red' },
     { id:'wb',        nm:'W & B',      icon:'scale',      ico:'gold' },
     { id:'perf',      nm:'Performance',icon:'target',     ico:'dark' },
     { id:'mel',       nm:'MEL',        icon:'doc',        ico:'dark' },
@@ -113,6 +115,10 @@
     /* The Maharaja launcher only lives on the portal — the EFB is a cockpit
        surface, no chat concierge needed (and it was overlapping the map's
        bottom-right control corner). */
+
+    /* Crew Chat — small group-chat panel, bottom-left. Compact variant
+       so it doesn't overlap the EFB map's bottom-left controls. */
+    AIVA.CrewChat?.mount(document.body, { compact: true });
   }
 
   function route() {
@@ -194,7 +200,7 @@
                 <div class="fs-rt">${f.from} → ${f.to} · ${f.ac}</div>
               </div>
               ${P.get('flight_in_progress')
-                ? `<button class="endbtn" id="endFlight">END</button>`
+                ? `<button class="endbtn" id="endFlight">FILE PSR</button>`
                 : `<button class="startbtn" id="startFlight">▶ START</button>`}
             ` : `
               <div class="fs-rt">No active flight</div>
@@ -218,6 +224,7 @@
               <span class="ep-to">${f.to}</span>
               <span class="ep-phase" id="epPhase">PUSHBACK</span>
             </div>
+            <div class="efb-sit-banner" id="efbSitBanner"></div>
           </div>
         ` : ''}
 
@@ -289,6 +296,57 @@
     /* ============ Live map (MapLibre) + live pilot positions ============ */
     setupLiveMap(home);
 
+    /* ============ Telemetry sampler ============
+       While a flight is in progress, capture FSUIPC telemetry every 10s.
+       Used at end-of-sector for PSR discrepancy detection (overspeed below FL100,
+       sharp turns, sustained altitude drops, hard landing). */
+    {
+      const fp_t = P.get('flight_in_progress');
+      if (fp_t) {
+        const sampleKey = 'telemetry_' + fp_t.fno;
+        const sampler = setInterval(() => {
+          if (!P.get('flight_in_progress')) { clearInterval(sampler); return; }
+          const live = AIVA.FSUIPC?.lastTelemetry?.();
+          if (!live) return;
+          const series = P.get(sampleKey, []);
+          series.push({
+            t: Date.now(),
+            lat: live.lat, lon: live.lon,
+            alt: live.alt, ias: live.ias, gs: live.gs, vs: live.vs,
+            hdg: live.hdg, bank: live.bank || 0,
+            onGround: live.onGround,
+          });
+          /* Cap at 2,000 samples (~5 hours of 10s sampling) to keep localStorage sane */
+          if (series.length > 2000) series.shift();
+          P.set(sampleKey, series);
+        }, 10_000);
+      }
+    }
+
+    /* Start the Situations engine if this is an active flight */
+    if (P.get('flight_in_progress') && AIVA.Situations) {
+      AIVA._activeFlight = f;
+      AIVA.Situations.start();
+      /* Show a toast + status pop-up when a scenario fires */
+      AIVA.Situations.on((sit) => {
+        try {
+          toast(`⚠ ${sit.title}`, sit.cat === 'security' || sit.cat === 'medical' ? 'bad' : 'warn');
+          /* Auto-post to the crew chat so the rest of the airline sees it */
+          AIVA.CrewChat?.event(`reporting "${sit.title}" on ${f.fno}${sit.diversion === 'expected' || sit.diversion === 'likely' ? ' — diversion expected' : ''}`, { situationId: sit.id });
+          /* Also append a small pulsing card on top of the live map for visibility */
+          const banner = document.getElementById('efbSitBanner');
+          if (banner) banner.innerHTML += `
+            <div class="efb-sit-pill" data-sit="${sit.id}">
+              <span class="pill pill-${sit.cat==='security'||sit.cat==='medical'?'red':sit.cat==='weather'?'warn':'gold'}" style="font-size:9px;">${sit.cat.toUpperCase()}</span>
+              <b>${sit.title}</b>
+              <span class="text-mute">${sit.summary}</span>
+              <button class="efb-sit-ack" onclick="AIVA.Situations.ack('${sit.id}'); this.parentElement.remove();">ACK</button>
+            </div>
+          `;
+        } catch {}
+      });
+    }
+
     /* ============ Live flight progress ribbon ============
        Updates every 5 s while a flight is in progress. Two sources, in order:
        1) FSUIPC live position (preferred) — % of great-circle progress
@@ -343,32 +401,15 @@
     $('#startFlight', home)?.addEventListener('click', () => {
       P.set('flight_in_progress', { fno: f.fno, startedAt: Date.now() });
       toast(`Flight ${f.fno} started — FSUIPC awaiting connection.`, 'ok');
+      /* Broadcast to the crew chat */
+      AIVA.CrewChat?.event(`pushed back on ${f.fno} ${f.from} → ${f.to}`, { fno: f.fno });
       location.hash = '#fsuipc';
     });
     $('#endFlight', home)?.addEventListener('click', () => {
-      const fp = P.get('flight_in_progress');
-      if (!fp) return;
-      P.remove('flight_in_progress');
-      /* Save a journey log entry */
-      const cur = P.get('flights_logged', []);
-      const dist = (() => {
-        const f2 = AIVA.findFlight(fp.fno);
-        if (!f2) return null;
-        const a = AIVA.airport(f2.from), b = AIVA.airport(f2.to);
-        return a && b ? Math.round(AIVA.U.distance(a.lat, a.lon, b.lat, b.lon)) : null;
-      })();
-      const f2 = AIVA.findFlight(fp.fno);
-      cur.push({
-        _id: AIVA.U.uid(),
-        date: new Date(fp.startedAt).toISOString().slice(0,10),
-        fno: fp.fno, ac: f2?.ac, from: f2?.from, to: f2?.to,
-        durMins: Math.round((Date.now() - fp.startedAt) / 60000),
-        network: 'OFFLINE',
-        dist,
-      });
-      P.set('flights_logged', cur);
-      toast(`Flight ended — sector logged.`, 'ok');
-      route();
+      /* Route to the PSR (Pilot Service Report) workflow instead of immediately
+         closing the flight. The PSR reviews telemetry + detected discrepancies,
+         lets the pilot annotate, and files a sector log + admin review item. */
+      location.hash = '#psr';
     });
   }
 
@@ -1220,6 +1261,207 @@
         </div>
         <p class="text-mute mt-3" style="font-size:11.5px;">For the authoritative, scaled, exit/galley-marked plan, use the <b>aerolopa.com</b> button above.</p>
       `}));
+    },
+
+    /* ==================== ANNOUNCE (PA / Audio) ==================== */
+    announce: (c) => {
+      const STAGES = [
+        { id:'pre_dep',    label:'Pre-departure',         when:'on ground, doors closed' },
+        { id:'safety',     label:'Safety demo',           when:'after pushback' },
+        { id:'pass_10k',   label:'Passing 10,000 ft',     when:'climb through FL100' },
+        { id:'service',    label:'Service announcement',  when:'top of climb' },
+        { id:'belts_on',   label:'Seatbelts on',          when:'turbulence / descent' },
+        { id:'belts_off',  label:'Seatbelts off',         when:'smooth air' },
+        { id:'descending', label:'Descending',            when:'top of descent' },
+        { id:'landed',     label:'Landed',                when:'after touchdown' },
+        { id:'disarm',     label:'Cabin crew disarm',     when:'approaching gate' },
+      ];
+      const lib = AIVA.Store.get('ann_lib', {});
+      const cfg = AIVA.Store.get('ann_cfg', { mode: 'manual' });
+
+      c.appendChild(el('div', { class:'embed-bar', html:`
+        <span class="dot"></span> Cabin PA · ${cfg.mode === 'auto' ? 'AUTO' : 'MANUAL'} mode
+        <span class="right">
+          <button class="btn btn-ghost btn-sm" id="annMode">${I('refresh',12)} Switch to ${cfg.mode === 'auto' ? 'MANUAL' : 'AUTO'}</button>
+          <a class="btn btn-ghost btn-sm" href="portal.html#announce">${I('upload',12)} Manage library</a>
+        </span>
+      `}));
+
+      const grid = el('div', { class:'grid grid-3 mt-3' });
+      STAGES.forEach(stage => {
+        const files = lib[stage.id] || [];
+        const card = el('div', { class:'efb-card', style:{padding:'14px 16px'} });
+        card.innerHTML = `
+          <div class="eyebrow">${stage.when}</div>
+          <h4 style="margin:6px 0 4px;font-size:14px;font-weight:600;">${stage.label}</h4>
+          <div class="text-mute mono" style="font-size:10.5px;">${files.length} clip${files.length===1?'':'s'} on file</div>
+          <button class="btn ${files.length ? 'btn-primary' : 'btn-ghost'} btn-sm mt-3" data-play="${stage.id}" ${files.length?'':'disabled'}>
+            ${I('send',12)} Play random
+          </button>
+        `;
+        card.querySelector('[data-play]').onclick = () => {
+          const f = files[Math.floor(Math.random() * files.length)];
+          if (!f) return;
+          new Audio(f.dataURL).play().catch(e => toast('Playback blocked: ' + e.message, 'bad'));
+          toast(`▶ ${stage.label} — ${f.name}`, 'ok');
+        };
+        grid.appendChild(card);
+      });
+      c.appendChild(grid);
+
+      $('#annMode', c).onclick = () => {
+        cfg.mode = cfg.mode === 'auto' ? 'manual' : 'auto';
+        AIVA.Store.set('ann_cfg', cfg);
+        location.reload();
+      };
+    },
+
+    /* ==================== FILE PSR ==================== */
+    psr: (c) => {
+      const fp = P.get('flight_in_progress');
+      if (!fp) {
+        return c.appendChild(emptyState('No flight in progress', 'Start a flight first — PSR is filed at end of sector.'));
+      }
+      const f = AIVA.findFlight(fp.fno);
+      if (!f) return c.appendChild(emptyState('Flight not found', `Couldn't resolve ${fp.fno}.`));
+
+      const telemetry = P.get('telemetry_' + fp.fno, []);
+      const live = AIVA.FSUIPC?.lastTelemetry?.();
+
+      /* === Discrepancy detection from FSUIPC samples === */
+      const findings = [];
+      const overspeed = telemetry.filter(t => (t.alt < 10000) && (t.ias > 250));
+      if (overspeed.length) findings.push({
+        kind: 'overspeed', sev: 'red',
+        title: 'Overspeed below FL100',
+        detail: `${overspeed.length} sample${overspeed.length===1?'':'s'} above 250 KIAS under 10,000 ft. Peak ${Math.max(...overspeed.map(t=>t.ias))} kt.`
+      });
+      const sharpTurns = telemetry.filter(t => Math.abs(t.bank || 0) > 30);
+      if (sharpTurns.length > 3) findings.push({
+        kind: 'sharp_turn', sev: 'gold',
+        title: 'Sharp turn(s) detected',
+        detail: `${sharpTurns.length} samples with bank > 30°. Peak ${Math.max(...sharpTurns.map(t=>Math.abs(t.bank||0))).toFixed(0)}°.`
+      });
+      const altDrops = telemetry.filter(t => (t.vs || 0) < -2500 && (t.alt || 0) > 3000);
+      if (altDrops.length) findings.push({
+        kind: 'alt_drop', sev: 'gold',
+        title: 'Altitude drop',
+        detail: `${altDrops.length} samples with VS < -2500 fpm in cruise/descent. Trough ${Math.min(...altDrops.map(t=>t.vs||0))} fpm.`
+      });
+      const touchdown = telemetry.findLast?.(t => (t.onGround === 1) || (t.onGround === true));
+      if (touchdown && (touchdown.vs || 0) < -600) findings.push({
+        kind: 'hard_landing', sev: 'red',
+        title: 'Hard landing',
+        detail: `Touchdown rate ${Math.round(touchdown.vs)} fpm. Soft landing is ≥ -300 fpm; hard is ≤ -600.`
+      });
+
+      const totalMins = Math.round((Date.now() - fp.startedAt) / 60000);
+      const fromA = AIVA.airport(f.from), toA = AIVA.airport(f.to);
+      const dist  = fromA && toA ? Math.round(AIVA.U.distance(fromA.lat, fromA.lon, toA.lat, toA.lon)) : null;
+
+      c.appendChild(el('div', { class:'embed-bar', html: `
+        <span class="dot"></span> Pilot Service Report · ${f.fno} ${f.from} → ${f.to}
+        <span class="right">
+          <span class="pill ${findings.length ? 'pill-warn' : 'pill-ok'}" style="font-size:9.5px;">${findings.length} finding${findings.length===1?'':'s'}</span>
+        </span>
+      `}));
+
+      c.appendChild(el('div', { class:'efb-card mt-3', html: `
+        <div class="eyebrow">Sector summary</div>
+        <div class="grid grid-4 mt-3 mono" style="font-size:12.5px;line-height:1.75;">
+          <div><span class="text-mute">FLIGHT</span><br><b>${f.fno}</b></div>
+          <div><span class="text-mute">ROUTE</span><br><b>${f.from} → ${f.to}</b><br><span class="text-mute">${fromA?.city} → ${toA?.city}</span></div>
+          <div><span class="text-mute">BLOCK</span><br><b>${(totalMins/60).toFixed(1)} h</b><br><span class="text-mute">${totalMins} min</span></div>
+          <div><span class="text-mute">DIST</span><br><b>${dist?.toLocaleString() || '—'} nm</b></div>
+          <div><span class="text-mute">SAMPLES</span><br><b>${telemetry.length}</b></div>
+          <div><span class="text-mute">LIVE</span><br><b>${live ? 'CONNECTED' : 'DISCONNECTED'}</b></div>
+          <div><span class="text-mute">PEAK IAS</span><br><b>${telemetry.length ? Math.round(Math.max(...telemetry.map(t=>t.ias||0))) + ' kt' : '—'}</b></div>
+          <div><span class="text-mute">MAX ALT</span><br><b>${telemetry.length ? Math.round(Math.max(...telemetry.map(t=>t.alt||0))).toLocaleString() + ' ft' : '—'}</b></div>
+        </div>
+      `}));
+
+      /* Findings + reasoning prompts */
+      const findingsCard = el('div', { class:'efb-card mt-3' });
+      findingsCard.innerHTML = `
+        <div class="eyebrow">Discrepancies detected</div>
+        ${findings.length === 0 ? `
+          <div class="row gap-2 mt-3"><span class="pill pill-ok" style="font-size:10px;">${I('shield',12)} CLEAN SECTOR</span><span class="text-mute" style="font-size:12.5px;">No FSUIPC-flagged discrepancies on this flight.</span></div>
+        ` : findings.map((x,i) => `
+          <div class="card mt-3" style="background:rgba(${x.sev==='red'?'200,16,46':'224,182,95'},.08);border-color:rgba(${x.sev==='red'?'200,16,46':'224,182,95'},.32);padding:14px 16px;">
+            <div class="row gap-2"><span class="pill pill-${x.sev==='red'?'red':'warn'}" style="font-size:9px;">${x.sev.toUpperCase()}</span><b style="font-size:13.5px;">${x.title}</b></div>
+            <div class="text-dim mt-1" style="font-size:12.5px;line-height:1.6;">${x.detail}</div>
+            <label class="eyebrow mt-3 mb-1" style="display:block;">Your reasoning (required)</label>
+            <textarea class="input" data-finding="${i}" rows="2" placeholder="e.g. ATC asked for descent at 290 kt, configured to comply"></textarea>
+          </div>
+        `).join('')}
+      `;
+      c.appendChild(findingsCard);
+
+      c.appendChild(el('div', { class:'efb-card mt-3', html: `
+        <div class="eyebrow">Pilot remarks</div>
+        <textarea id="psrRemarks" class="input mt-2" rows="3" placeholder="Anything else worth noting — pax issues, dispatch coordination, ATC delays…"></textarea>
+      `}));
+
+      const submitCard = el('div', { class:'efb-card mt-3', style:{textAlign:'right'} });
+      submitCard.innerHTML = `
+        <button class="btn btn-ghost btn-sm" id="psrCancel">Cancel — keep flight open</button>
+        <button class="btn btn-primary" id="psrSubmit">${I('send',14)} File PSR &amp; close sector</button>
+      `;
+      c.appendChild(submitCard);
+
+      $('#psrCancel', c).onclick = () => location.hash = '';
+      $('#psrSubmit', c).onclick = () => {
+        /* Collect reasoning */
+        const reasons = Array.from(c.querySelectorAll('[data-finding]')).map((el, i) => ({
+          ...findings[i], reasoning: el.value.trim()
+        }));
+        const missing = reasons.filter(r => !r.reasoning);
+        if (missing.length) {
+          toast('Reasoning required for all findings before filing.', 'warn');
+          return;
+        }
+        /* File the sector + PSR */
+        const cur = P.get('flights_logged', []);
+        const psrLog = P.get('psr_log', []);
+        const psrId = AIVA.U.uid();
+        cur.push({
+          _id: AIVA.U.uid(),
+          date: new Date(fp.startedAt).toISOString().slice(0,10),
+          fno: fp.fno, ac: f.ac, from: f.from, to: f.to,
+          durMins: totalMins,
+          network: 'OFFLINE',
+          dist,
+          psrId,
+          psrStatus: 'pending',
+          findings: reasons.length,
+        });
+        psrLog.push({
+          id: psrId,
+          pilotId: pilot.id, pilotName: pilot.name,
+          fno: fp.fno, from: f.from, to: f.to, ac: f.ac,
+          filed: Date.now(),
+          remarks: $('#psrRemarks', c).value.trim(),
+          findings: reasons,
+          status: 'pending',     /* admin reviews via Review Queue */
+          telemetrySamples: telemetry.length,
+        });
+        P.set('flights_logged', cur);
+        P.set('psr_log', psrLog);
+        /* Also mirror to a global queue so admin sees it */
+        const adminQueue = AIVA.Store.get('admin_psr_queue', []);
+        adminQueue.push({
+          id: psrId, pilotId: pilot.id, pilotName: pilot.name, fno: fp.fno,
+          from: f.from, to: f.to, ac: f.ac, filed: Date.now(),
+          findings: reasons, remarks: $('#psrRemarks', c).value.trim(),
+          status: 'pending',
+        });
+        AIVA.Store.set('admin_psr_queue', adminQueue);
+        P.remove('flight_in_progress');
+        P.remove('telemetry_' + fp.fno);
+        AIVA.CrewChat?.event(`closed sector ${f.fno} ${f.from} → ${f.to} · PSR filed${reasons.length ? ` with ${reasons.length} finding${reasons.length===1?'':'s'}` : ''}`, { fno: f.fno, psrId });
+        toast(`PSR filed — sector logged. Admin review pending.`, 'ok');
+        location.hash = '';
+      };
     },
 
     /* ==================== PERF ==================== */

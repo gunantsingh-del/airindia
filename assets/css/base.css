@@ -243,11 +243,14 @@ a { color: inherit; text-decoration: none; }
 }
 .btn-primary {
   background: linear-gradient(180deg, var(--ai-red-bright), var(--ai-red));
-  color: var(--ai-cream);
+  /* Always white text on the red gradient — `--ai-cream` flips dark in light theme,
+     which produced a low-contrast button. Use a literal cream instead. */
+  color: #F8F1E4;
   box-shadow: 0 6px 20px rgba(218,25,47,.32),
               inset 0 1px 0 rgba(255,255,255,.18),
               inset 0 -1px 0 rgba(0,0,0,.18);
 }
+.btn-primary:hover, .btn-primary:focus, .btn-primary:active { color: #FFFFFF; }
 .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 28px rgba(218,25,47,.45), inset 0 1px 0 rgba(255,255,255,.22); }
 .btn-primary:active { transform: translateY(0); }
 
@@ -371,13 +374,16 @@ a { color: inherit; text-decoration: none; }
 .tt { position: relative; }
 .tt::after {
   content: attr(data-tt);
-  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
-  background: var(--surface-3); color: var(--text); padding: 4px 8px;
+  /* Default tooltip drops DOWN below the trigger — never goes off the top of the
+     viewport for elements in the top bar. Opt in to upward via .tt-up. */
+  position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  background: var(--surface-3); color: var(--text); padding: 5px 10px;
   border: 1px solid var(--border); border-radius: var(--r-sm);
   font-size: 11px; white-space: nowrap; pointer-events: none;
   opacity: 0; transition: opacity var(--t) var(--ease);
   z-index: 50;
 }
+.tt.tt-up::after { top: auto; bottom: calc(100% + 8px); }
 .tt:hover::after { opacity: 1; }
 
 /* ----- Utility ----- */

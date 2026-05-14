@@ -43,6 +43,8 @@
       { id:'performance', label:'Performance',   icon:'target' },
       { id:'wb',          label:'W & B',         icon:'scale' },
       { id:'network',     label:'Network Globe', icon:'globe' },
+      { id:'situations',  label:'Situations',    icon:'activity' },
+      { id:'announce',    label:'Announcements', icon:'megaphone' },
     ]},
     { group: 'Fleet & Library', items: [
       { id:'fleet',       label:'Fleet Register', icon:'hangar' },
@@ -109,8 +111,8 @@
         <div class="clock-grp">
           <div class="clock"><span class="lbl">Z</span><span id="zuluClock">—</span></div>
           <div class="clock"><span class="lbl">IST</span><span id="istClock">—</span></div>
-          <button class="iconbtn tt" id="themeToggle" data-tt="Toggle light/dark">${I('star', 14)}</button>
-          <button class="iconbtn tt" data-tt="Notifications">${I('bell', 14)}</button>
+          <button class="iconbtn tt theme-toggle" id="themeToggle" data-tt="Toggle light/dark">${I('moon', 16)}</button>
+          <button class="iconbtn tt notif-bell" data-tt="Notifications">${I('bell', 14)}</button>
         </div>
       </header>
       <div class="content" id="content"></div>
@@ -123,6 +125,14 @@
 
     /* Mount the chatbot once shell is up */
     AIVA.Chatbot.mount(pilot);
+
+    /* Mount the group crew chat — floating panel bottom-left */
+    AIVA.CrewChat?.mount();
+    /* Post a login event once per session — the panel doubles as an ops feed */
+    if (!sessionStorage.getItem('aiva.cc_login_posted')) {
+      AIVA.CrewChat?.event(`just signed on at ${pilot.base}`);
+      sessionStorage.setItem('aiva.cc_login_posted', '1');
+    }
 
     /* ====================================================================
        AUTO-FLOW BRIDGE
@@ -153,6 +163,7 @@
     AIVA.FSUIPC?.on('crash', (info) => {
       AIVA.Store.pilot(pilot.id).set('crash_pending', info);
       toast(`Sim crash detected near ${info.lastPos || 'last position'} — please file a report`, 'bad');
+      AIVA.CrewChat?.event(`went off-net mid-flight near ${info.lastPos || 'last reported position'} — crash report pending`);
       setTimeout(() => AIVA._openCrashReport?.(info), 1500);
     });
 
@@ -186,6 +197,7 @@
       const dest = active ? (AIVA.airport(active.to)?.icao || active.to) : (info.dest || 'XXXX');
       const body = `PROGRESS · ${myCall}\nDESCENDING THROUGH FL100 INTO ${dest}\nGS ${info.gs||'?'} kt · ${info.lat?.toFixed?.(2) || '?'}, ${info.lon?.toFixed?.(2) || '?'}`;
       await hoppieAutoSend('AIC001', 'progress', body);
+      AIVA.CrewChat?.event(`passing FL100 inbound ${AIVA.airport(active?.to)?.city || dest}`, { phase: 'descent10k' });
       toast('Sent progress report to dispatch (FL100 descent)', 'ok');
     });
 
@@ -197,6 +209,7 @@
       const destCity = active ? (AIVA.airport(active.to)?.city || active.to) : '';
       const body = `ON BLOCKS · ${myCall}${destCity ? ' at ' + destCity : ''}\nBlock complete · awaiting AOC confirmation`;
       await hoppieAutoSend('AIC001', 'progress', body);
+      AIVA.CrewChat?.event(`landed${destCity ? ' at ' + destCity : ''}`, { phase: 'landed' });
       toast(`Sent on-blocks report to dispatch${destCity ? ' (' + destCity + ')' : ''}`, 'ok');
       /* If pilot has a NEXT booking today, auto-fetch SimBrief for that next
          leg in the background and queue it so the pre-flight pack is ready. */
@@ -303,7 +316,8 @@
       document.documentElement.setAttribute('data-theme', t);
       AIVA.Store.set('theme', t);
       const btn = $('#themeToggle');
-      if (btn) btn.innerHTML = t === 'light' ? AIVA.Icon('flame', 14) : AIVA.Icon('star', 14);
+      /* Sun when in dark mode (click → go light), moon when in light mode (click → go dark) */
+      if (btn) btn.innerHTML = t === 'light' ? AIVA.Icon('moon', 16) : AIVA.Icon('sun', 16);
     };
     applyTheme(AIVA.Store.get('theme', 'dark'));
     $('#themeToggle').addEventListener('click', () => {
@@ -328,7 +342,7 @@
        (welfare pages live in the myAI tile grid only). */
     const HIDDEN_TITLES = {
       payslip:'Payslip', competency:'Competency Card', leave:'Leave Relief',
-      hotels:'Hotel & Transport', layovers:'Layover Browser',
+      hotels:'Layover & Hotel', layovers:'Layover & Hotel',
       welfare:'Crew Welfare', bylaws:'Bylaws',
     };
     $('#pageTitle').textContent = matched ? matched.label : (HIDDEN_TITLES[id] || 'Dashboard');
@@ -3443,6 +3457,82 @@
           tab = b.dataset.tab;
           renderList(tab);
         });
+
+        /* ============ PSR REVIEW QUEUE ============
+           Pilot-Service-Reports filed at end of sector. Each PSR contains
+           the findings the system detected (overspeed, sharp turns, drops,
+           hard landing) plus the pilot's reasoning. Admin can accept or
+           reject — accepted PSRs remain in the pilot's log; rejected ones
+           are flagged on the pilot's profile. */
+        const psrQueue = AIVA.Store.get('admin_psr_queue', []);
+        const psrPending  = psrQueue.filter(p => p.status === 'pending');
+        const psrAccepted = psrQueue.filter(p => p.status === 'accepted');
+        const psrRejected = psrQueue.filter(p => p.status === 'rejected');
+
+        c.appendChild(el('section', { class:'mt-6', html: `
+          <div class="section-title">
+            <div><h2>PSR Reviews</h2><div class="sub">${psrPending.length} pending · ${psrAccepted.length} accepted · ${psrRejected.length} rejected</div></div>
+          </div>
+          <div id="psrList"></div>
+        `}));
+
+        const renderPSR = () => {
+          const list = AIVA.Store.get('admin_psr_queue', []);
+          const host = $('#psrList', c);
+          host.innerHTML = list.length ? list.slice().reverse().map(p => `
+            <div class="card mt-3" data-psr="${p.id}">
+              <div class="row between">
+                <div>
+                  <div class="eyebrow">PSR · ${p.id.slice(0,8)}</div>
+                  <div class="display" style="font-size:16px;font-weight:600;margin-top:4px;">${p.fno} · ${p.from} → ${p.to} · ${p.ac}</div>
+                  <div class="text-mute" style="font-size:12px;margin-top:4px;">${p.pilotName} (${p.pilotId}) · ${new Date(p.filed).toLocaleString()}</div>
+                </div>
+                <span class="pill ${p.status === 'pending' ? 'pill-red' : p.status === 'accepted' ? 'pill-gold' : ''}" style="font-size:10px;">${p.status.toUpperCase()}</span>
+              </div>
+              ${p.findings?.length ? p.findings.map(f => `
+                <div class="mt-3" style="border-left:3px solid ${f.sev==='red'?'var(--ai-red)':'var(--ai-gold)'};padding:8px 12px;background:rgba(0,0,0,.18);">
+                  <b style="font-size:13px;">${f.title}</b>
+                  <div class="text-dim mt-1" style="font-size:12px;">${f.detail}</div>
+                  <div class="mt-2" style="font-size:12px;"><b>Pilot says:</b> ${f.reasoning || '(no reasoning provided)'}</div>
+                </div>
+              `).join('') : '<div class="text-mute mt-2" style="font-size:12.5px;">No discrepancies flagged — clean sector.</div>'}
+              ${p.remarks ? `<div class="mt-3" style="font-size:12.5px;"><b>Remarks:</b> ${p.remarks}</div>` : ''}
+              ${p.status === 'pending' ? `
+                <div class="row gap-2 mt-3">
+                  <button class="btn btn-primary btn-sm" data-psr-act="accept">${I('check', 14)} Accept PSR</button>
+                  <button class="btn btn-ghost btn-sm" data-psr-act="reject">${I('close', 14)} Reject (flag pilot)</button>
+                </div>
+              ` : ''}
+            </div>
+          `).join('') : `<div class="card" style="text-align:center;padding:24px;color:var(--text-mute);">No PSRs filed yet.</div>`;
+
+          host.querySelectorAll('[data-psr]').forEach(card => {
+            const id = card.dataset.psr;
+            card.querySelector('[data-psr-act="accept"]')?.addEventListener('click', () => decidePSR(id, 'accepted'));
+            card.querySelector('[data-psr-act="reject"]')?.addEventListener('click', () => decidePSR(id, 'rejected'));
+          });
+        };
+        const decidePSR = (id, decision) => {
+          const list = AIVA.Store.get('admin_psr_queue', []);
+          const idx = list.findIndex(p => p.id === id);
+          if (idx < 0) return;
+          list[idx].status = decision;
+          list[idx].decidedAt = Date.now();
+          list[idx].decidedBy = pilot.id;
+          AIVA.Store.set('admin_psr_queue', list);
+          /* Mirror into the filing pilot's psr_log */
+          const pilotStore = AIVA.Store.pilot(list[idx].pilotId);
+          const psrLog = pilotStore.get('psr_log', []);
+          const own = psrLog.findIndex(x => x.id === id);
+          if (own >= 0) { psrLog[own].status = decision; pilotStore.set('psr_log', psrLog); }
+          /* Also mirror status onto the journey-log row */
+          const log = pilotStore.get('flights_logged', []);
+          const flightRow = log.find(x => x.psrId === id);
+          if (flightRow) { flightRow.psrStatus = decision; pilotStore.set('flights_logged', log); }
+          toast(`PSR ${decision}`, decision === 'accepted' ? 'ok' : 'warn');
+          renderPSR();
+        };
+        renderPSR();
       }
     },
 
@@ -3568,128 +3658,12 @@
     },
 
     /* ============ HOTEL & TRANSPORT ============ */
+    /* The old Hotel & Transport page was merged into Layover Browser.
+       This route now redirects there so external deep-links still work. */
     hotels: {
-      sub: 'Layover hotels · pay system',
+      sub: 'Now in Layover Browser',
       render: (c) => {
-        /* Stable Unsplash CDN images per city — recognizable skyline shots so
-           crew see where they're going. Curated by hand. */
-        const I_ = (id) => `https://images.unsplash.com/photo-${id}?w=720&h=400&fit=crop&q=80`;
-        const HOTELS = [
-          { country:'India',   city:'Mumbai (BOM)',    name:'JW Marriott Mumbai Sahar',     dist:'2 km',  rate:5, type:'Crew layover', img:I_('1570168007204-dfb528c6958f') },
-          { country:'India',   city:'Delhi (DEL)',     name:'Andaz Delhi',                  dist:'3 km',  rate:5, type:'Crew layover', img:I_('1587474260584-136574528ed5') },
-          { country:'India',   city:'Bengaluru (BLR)', name:'Taj Bangalore (Devanahalli)',  dist:'1 km',  rate:5, type:'Crew layover', img:I_('1582719508461-905c673771fd') },
-          { country:'India',   city:'Kolkata (CCU)',   name:'ITC Royal Bengal',             dist:'18 km', rate:5, type:'Crew layover', img:I_('1558431382-27e303142255') },
-          { country:'India',   city:'Hyderabad (HYD)', name:'Novotel HICC',                 dist:'18 km', rate:4, type:'Crew layover', img:I_('1568733873715-f0e3b9b07e8c') },
-          { country:'India',   city:'Chennai (MAA)',   name:'Hilton Chennai',               dist:'12 km', rate:4, type:'Crew layover', img:I_('1602216056096-3b40cc0c9944') },
-          { country:'UK',      city:'London (LHR)',    name:'Hilton London Heathrow T4',    dist:'0.5 km',rate:5, type:'Crew layover', img:I_('1513635269975-59663e0ac1ad') },
-          { country:'UK',      city:'London (LGW)',    name:'Sofitel London Gatwick',       dist:'0.3 km',rate:5, type:'Crew layover', img:I_('1533929736458-ca588d08c8be') },
-          { country:'USA',     city:'New York (JFK)',  name:'TWA Hotel',                    dist:'On-airport',rate:5,type:'Crew layover', img:I_('1496442226666-8d4d0e62e6e9') },
-          { country:'USA',     city:'New York (EWR)',  name:'Renaissance Newark Airport',   dist:'1 km',  rate:5, type:'Crew layover', img:I_('1485871981521-5b1fd3805eee') },
-          { country:'USA',     city:'San Francisco',   name:'Hyatt Regency SFO',            dist:'0.4 km',rate:5, type:'Crew layover', img:I_('1521747116042-5a810fda9664') },
-          { country:'USA',     city:'Chicago (ORD)',   name:'Hilton Chicago O\'Hare',       dist:'0 km',  rate:5, type:'Crew layover', img:I_('1494522358652-f30e61a60313') },
-          { country:'Canada',  city:'Toronto (YYZ)',   name:'Sheraton Gateway Toronto',     dist:'0 km',  rate:5, type:'Crew layover', img:I_('1517090504586-fde19ea6066f') },
-          { country:'Canada',  city:'Vancouver (YVR)', name:'Fairmont Vancouver Airport',   dist:'0 km',  rate:5, type:'Crew layover', img:I_('1559511260-66a654ae982a') },
-          { country:'Germany', city:'Frankfurt (FRA)', name:'Sheraton Frankfurt Airport',   dist:'0 km',  rate:5, type:'Crew layover', img:I_('1547548912-be0a32ef9ad2') },
-          { country:'France',  city:'Paris (CDG)',     name:'Hyatt Regency Paris CDG',      dist:'5 km',  rate:5, type:'Crew layover', img:I_('1502602898657-3e91760cbb34') },
-          { country:'Italy',   city:'Milan (MXP)',     name:'Sheraton Malpensa',            dist:'0 km',  rate:4, type:'Crew layover', img:I_('1520175480921-4edfa2983e0f') },
-          { country:'Italy',   city:'Rome (FCO)',      name:'Hilton Rome Airport',          dist:'0 km',  rate:4, type:'Crew layover', img:I_('1531572753322-ad063cecc140') },
-          { country:'Netherlands',city:'Amsterdam (AMS)',name:'Sheraton Amsterdam Airport', dist:'0 km',  rate:5, type:'Crew layover', img:I_('1534351590666-13e3e96c5017') },
-          { country:'Austria', city:'Vienna (VIE)',    name:'NH Vienna Airport',            dist:'0 km',  rate:4, type:'Crew layover', img:I_('1516550893923-42d28e5677af') },
-          { country:'Australia',city:'Sydney (SYD)',   name:'Stamford Plaza Sydney Airport',dist:'1 km',  rate:5, type:'Crew layover', img:I_('1506973035872-a4ec16b8e8d9') },
-          { country:'Australia',city:'Melbourne (MEL)',name:'PARKROYAL Melbourne Airport',  dist:'0 km',  rate:5, type:'Crew layover', img:I_('1514395462725-fb4566210144') },
-          { country:'Japan',   city:'Tokyo (NRT)',     name:'Hilton Tokyo Narita Airport',  dist:'2 km',  rate:5, type:'Crew layover', img:I_('1542051841857-5f90071e7989') },
-          { country:'Japan',   city:'Tokyo (HND)',     name:'The Royal Park Hotel Haneda',  dist:'On-airport',rate:5,type:'Crew layover', img:I_('1503899036084-c55cdd92da26') },
-          { country:'Singapore',city:'Singapore (SIN)',name:'Crowne Plaza Changi Airport',  dist:'0 km',  rate:5, type:'Crew layover', img:I_('1525625293386-3f8f99389edd') },
-          { country:'Hong Kong',city:'Hong Kong (HKG)',name:'Regal Airport Hotel',          dist:'0 km',  rate:5, type:'Crew layover', img:I_('1506146332389-18140dc7b2fb') },
-          { country:'Thailand',city:'Bangkok (BKK)',   name:'Novotel Suvarnabhumi Airport', dist:'0 km',  rate:5, type:'Crew layover', img:I_('1563492065-1a3ffe5e8da4') },
-          { country:'UAE',     city:'Dubai (DXB)',     name:'Le Méridien Dubai Hotel',      dist:'2 km',  rate:5, type:'Crew layover', img:I_('1512453979798-5ea266f8880c') },
-          { country:'Qatar',   city:'Doha (DOH)',      name:'Oryx Airport Hotel',           dist:'On-airport',rate:4,type:'Crew layover', img:I_('1539020140153-e479b8c2dc5b') },
-          { country:'Saudi Arabia',city:'Jeddah (JED)',name:'Movenpick Jeddah Airport',     dist:'2 km',  rate:4, type:'Crew layover', img:I_('1538902035000-9efb46aacd35') },
-          { country:'Saudi Arabia',city:'Riyadh (RUH)',name:'Marriott Riyadh Diplomatic Q', dist:'12 km', rate:4, type:'Crew layover', img:I_('1581014149244-3edda52b88f0') },
-          { country:'Kenya',   city:'Nairobi (NBO)',   name:'Crowne Plaza Nairobi Airport', dist:'3 km',  rate:4, type:'Crew layover', img:I_('1607604276583-eef5d076aa5f') },
-          { country:'Mauritius',city:'Port Louis (MRU)',name:'Hilton Mauritius Resort',     dist:'45 km', rate:5, type:'Layover resort', img:I_('1505881502353-a1986add3762') },
-        ];
-
-        /* Pay system — Air India IRL CTC mapped to hourly virtual pay */
-        const PAY_GRID = [
-          { rank:'Cadet',          rate:1800,  unit:'INR/hour', note:'Stipend during training; no flight pay yet' },
-          { rank:'First Officer',  rate:4500,  unit:'INR/hour', note:'+ 7,500 INR/sector ULH (>9h block)' },
-          { rank:'Senior First Officer', rate:6800, unit:'INR/hour', note:'Same sector pay as FO; higher base' },
-          { rank:'Captain',        rate:11500, unit:'INR/hour', note:'+ 15,000 INR/sector ULH; layover allowance USD 100/night' },
-          { rank:'Senior Captain', rate:14500, unit:'INR/hour', note:'Same as Captain + 1,800 INR/h check-airman premium' },
-        ];
-
-        const me = AIVA.Auth.currentPilot();
-        const myHours = (P.get('flights_logged', []).reduce((s,f) => s + (+f.durMins||0), 0)) / 60;
-        const myRank  = AIVA.rankFor(myHours);
-        const myPay   = PAY_GRID.find(p => p.rank === myRank.label) || PAY_GRID[0];
-        const monthlyHours = 80;
-
-        c.appendChild(el('section', { html: `
-          <div class="section-title">
-            <div><h2>Hotel & Transport</h2><div class="sub">${HOTELS.length} crew hotels worldwide · pay grid for ${AIVA.RANKS.length} ranks</div></div>
-          </div>
-
-          <div class="grid grid-2">
-            <div class="card">
-              <div class="eyebrow">Your projected monthly pay</div>
-              <div class="display" style="font-size:32px;font-weight:700;color:var(--ai-gold-bright);margin-top:6px;">₹${(myPay.rate * monthlyHours).toLocaleString()}</div>
-              <div class="text-mute" style="font-size:12.5px;margin-top:4px;">${myRank.label} · ${myPay.rate.toLocaleString()} ${myPay.unit} × ${monthlyHours} h/mo</div>
-              <div class="text-mute" style="font-size:11px;margin-top:8px;">${myPay.note}</div>
-            </div>
-            <div class="card">
-              <div class="eyebrow">Hours flown lifetime</div>
-              <div class="display" style="font-size:32px;font-weight:700;margin-top:6px;">${myHours.toFixed(1)} h</div>
-              <div class="text-mute" style="font-size:12.5px;margin-top:4px;">Lifetime pay accrued: ₹${(myPay.rate * myHours).toLocaleString()}</div>
-            </div>
-          </div>
-
-          <div class="section-title mt-6"><div><h3 style="margin:0;">Pay grid by rank</h3></div></div>
-          <div class="card mt-3">
-            <table class="tbl">
-              <thead><tr><th>Rank</th><th>Hourly</th><th>Notes</th></tr></thead>
-              <tbody>
-                ${PAY_GRID.map(p => `
-                  <tr${p.rank === myRank.label ? ' style="background:rgba(255,225,89,.08);"' : ''}>
-                    <td><b>${p.rank}</b></td>
-                    <td class="mono">₹${p.rate.toLocaleString()}/h</td>
-                    <td class="text-mute" style="font-size:12px;">${p.note}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-
-          <div class="section-title mt-6"><div><h3 style="margin:0;">Crew hotels</h3><div class="sub">Filter by country or city</div></div></div>
-          <div class="row gap-2 mt-3" style="flex-wrap:wrap;" id="hotelFilter">
-            <button class="ac-chip on" data-c="ALL">All countries</button>
-            ${[...new Set(HOTELS.map(h => h.country))].map(c => `<button class="ac-chip" data-c="${c}">${c}</button>`).join('')}
-          </div>
-          <div class="grid grid-3 mt-3" id="hotelGrid">
-            ${HOTELS.map(h => `
-              <div class="card hotel-card" data-country="${h.country}" style="padding:0;overflow:hidden;">
-                <div class="hotel-img" style="background-image:url('${h.img}');"></div>
-                <div style="padding:14px 16px;">
-                  <div class="row between">
-                    <div><div class="eyebrow">${h.country}</div><div class="display" style="font-size:14px;font-weight:600;margin-top:2px;">${h.city}</div></div>
-                    <span class="pill pill-gold" style="font-size:10px;">${'★'.repeat(h.rate)}</span>
-                  </div>
-                  <div style="font-size:13.5px;color:var(--text);margin-top:8px;font-weight:500;">${h.name}</div>
-                  <div class="text-mute mono" style="font-size:11px;margin-top:6px;">${h.dist} from airport · ${h.type}</div>
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        `}));
-
-        c.querySelectorAll('#hotelFilter [data-c]').forEach(b => b.onclick = () => {
-          c.querySelectorAll('#hotelFilter [data-c]').forEach(x => x.classList.remove('on'));
-          b.classList.add('on');
-          const f = b.dataset.c;
-          c.querySelectorAll('#hotelGrid .hotel-card').forEach(card => {
-            card.style.display = (f === 'ALL' || card.dataset.country === f) ? '' : 'none';
-          });
-        });
+        location.replace('#layovers');
       }
     },
 
@@ -3790,8 +3764,7 @@
               ['Payslip','briefcase','#payslip'],
               ['Leave Relief','newspaper','#leave'],
               ['Competency Card','shield','#competency'],
-              ['Hotel & Transport','building','#hotels'],
-              ['Layover Browser','star','#layovers'],
+              ['Layover & Hotel','building','#layovers'],
               ['Bylaws','book','#bylaws'],
               ['Crew Welfare','users','#welfare'],
               ['Notice Board','newspaper','#newsroom'],
@@ -4260,54 +4233,143 @@
 
     /* ============ LAYOVER BROWSER ============ */
     layovers: {
-      sub: 'Things to do at every city we serve · book a flight',
+      sub: 'Crew hotels · things to do · book a flight to/from any city',
       render: (c) => {
         const TIPS = AIVA.LAYOVER_TIPS;
-        const cities = Object.keys(TIPS).map(iata => ({ iata, ...TIPS[iata] }));
+        /* Crew hotel data merged in from the old Hotel & Transport page. */
+        const I_ = (id) => `https://images.unsplash.com/photo-${id}?w=720&h=400&fit=crop&q=80`;
+        const HOTELS_BY_IATA = {
+          BOM: { name:'JW Marriott Mumbai Sahar',     dist:'2 km',  rate:5, img:I_('1570168007204-dfb528c6958f') },
+          DEL: { name:'Andaz Delhi',                  dist:'3 km',  rate:5, img:I_('1587474260584-136574528ed5') },
+          BLR: { name:'Taj Bangalore (Devanahalli)',  dist:'1 km',  rate:5, img:I_('1582719508461-905c673771fd') },
+          CCU: { name:'ITC Royal Bengal',             dist:'18 km', rate:5, img:I_('1558431382-27e303142255') },
+          HYD: { name:'Novotel HICC',                 dist:'18 km', rate:4, img:I_('1568733873715-f0e3b9b07e8c') },
+          MAA: { name:'Hilton Chennai',               dist:'12 km', rate:4, img:I_('1602216056096-3b40cc0c9944') },
+          LHR: { name:'Hilton London Heathrow T4',    dist:'0.5 km',rate:5, img:I_('1513635269975-59663e0ac1ad') },
+          LGW: { name:'Sofitel London Gatwick',       dist:'0.3 km',rate:5, img:I_('1533929736458-ca588d08c8be') },
+          JFK: { name:'TWA Hotel',                    dist:'On-airport',rate:5, img:I_('1496442226666-8d4d0e62e6e9') },
+          EWR: { name:'Renaissance Newark Airport',   dist:'1 km',  rate:5, img:I_('1485871981521-5b1fd3805eee') },
+          SFO: { name:'Hyatt Regency SFO',            dist:'0.4 km',rate:5, img:I_('1521747116042-5a810fda9664') },
+          ORD: { name:"Hilton Chicago O'Hare",        dist:'0 km',  rate:5, img:I_('1494522358652-f30e61a60313') },
+          YYZ: { name:'Sheraton Gateway Toronto',     dist:'0 km',  rate:5, img:I_('1517090504586-fde19ea6066f') },
+          YVR: { name:'Fairmont Vancouver Airport',   dist:'0 km',  rate:5, img:I_('1559511260-66a654ae982a') },
+          FRA: { name:'Sheraton Frankfurt Airport',   dist:'0 km',  rate:5, img:I_('1547548912-be0a32ef9ad2') },
+          CDG: { name:'Hyatt Regency Paris CDG',      dist:'5 km',  rate:5, img:I_('1502602898657-3e91760cbb34') },
+          MXP: { name:'Sheraton Malpensa',            dist:'0 km',  rate:4, img:I_('1520175480921-4edfa2983e0f') },
+          FCO: { name:'Hilton Rome Airport',          dist:'0 km',  rate:4, img:I_('1531572753322-ad063cecc140') },
+          AMS: { name:'Sheraton Amsterdam Airport',   dist:'0 km',  rate:5, img:I_('1534351590666-13e3e96c5017') },
+          VIE: { name:'NH Vienna Airport',            dist:'0 km',  rate:4, img:I_('1516550893923-42d28e5677af') },
+          SYD: { name:'Stamford Plaza Sydney Airport',dist:'1 km',  rate:5, img:I_('1506973035872-a4ec16b8e8d9') },
+          MEL: { name:'PARKROYAL Melbourne Airport',  dist:'0 km',  rate:5, img:I_('1514395462725-fb4566210144') },
+          NRT: { name:'Hilton Tokyo Narita Airport',  dist:'2 km',  rate:5, img:I_('1542051841857-5f90071e7989') },
+          HND: { name:'The Royal Park Hotel Haneda',  dist:'On-airport',rate:5, img:I_('1503899036084-c55cdd92da26') },
+          SIN: { name:'Crowne Plaza Changi Airport',  dist:'0 km',  rate:5, img:I_('1525625293386-3f8f99389edd') },
+          HKG: { name:'Regal Airport Hotel',          dist:'0 km',  rate:5, img:I_('1506146332389-18140dc7b2fb') },
+          BKK: { name:'Novotel Suvarnabhumi Airport', dist:'0 km',  rate:5, img:I_('1563492065-1a3ffe5e8da4') },
+          DXB: { name:'Le Méridien Dubai Hotel',      dist:'2 km',  rate:5, img:I_('1512453979798-5ea266f8880c') },
+          DOH: { name:'Oryx Airport Hotel',           dist:'On-airport',rate:4, img:I_('1539020140153-e479b8c2dc5b') },
+          JED: { name:'Movenpick Jeddah Airport',     dist:'2 km',  rate:4, img:I_('1538902035000-9efb46aacd35') },
+          RUH: { name:'Marriott Riyadh Diplomatic Q', dist:'12 km', rate:4, img:I_('1581014149244-3edda52b88f0') },
+          NBO: { name:'Crowne Plaza Nairobi Airport', dist:'3 km',  rate:4, img:I_('1607604276583-eef5d076aa5f') },
+          MRU: { name:'Hilton Mauritius Resort',      dist:'45 km', rate:5, img:I_('1505881502353-a1986add3762') },
+        };
+
+        const cities = Object.keys(TIPS).map(iata => ({ iata, ...TIPS[iata], hotel: HOTELS_BY_IATA[iata] }));
+
         c.appendChild(el('section', { html: `
-          <div class="section-title"><div><h2>Layover Browser</h2><div class="sub">${cities.length} cities · what to see, eat &amp; shop · jump to a booking</div></div></div>
-          <input id="layFilter" class="input mb-3" placeholder="Search city, country or IATA…" style="max-width:480px;"/>
+          <div class="section-title">
+            <div><h2>Layover Browser</h2><div class="sub">${cities.length} cities · ${cities.filter(c => c.hotel).length} crew hotels · what to see, eat &amp; shop</div></div>
+          </div>
+          <div class="row gap-2 mb-3" style="flex-wrap:wrap;align-items:center;">
+            <input id="layFilter" class="input" placeholder="Search city, country or IATA…" style="flex:1;min-width:240px;max-width:480px;"/>
+            <div class="row gap-1" id="layCountry" style="flex-wrap:wrap;"></div>
+          </div>
           <div class="grid grid-2" id="layGrid"></div>
         ` }));
 
+        /* Country filter chips */
+        const countries = [...new Set(cities.map(x => x.area))].sort();
+        const chipHost = $('#layCountry', c);
+        chipHost.innerHTML = countries.map(co => `<button class="ac-chip" data-co="${co}" style="font-size:10px;">${co}</button>`).join('');
+        let activeCountry = null;
+        chipHost.querySelectorAll('[data-co]').forEach(b => b.onclick = () => {
+          chipHost.querySelectorAll('[data-co]').forEach(x => x.classList.remove('on'));
+          if (activeCountry === b.dataset.co) { activeCountry = null; }
+          else { activeCountry = b.dataset.co; b.classList.add('on'); }
+          draw();
+        });
+
         const grid = $('#layGrid', c);
         const filter = $('#layFilter', c);
+
+        const stars = (n) => '★'.repeat(n) + '☆'.repeat(5-n);
+
         const draw = () => {
           const q = (filter.value || '').toLowerCase();
           grid.innerHTML = '';
           cities
             .filter(x => !q || x.city.toLowerCase().includes(q) || x.area.toLowerCase().includes(q) || x.iata.toLowerCase().includes(q))
+            .filter(x => !activeCountry || x.area === activeCountry)
             .forEach(x => {
-              const arrFlights = AIVA.routesToBase(x.iata).slice(0, 6);
-              const depFlights = AIVA.routesFromBase(x.iata).slice(0, 6);
-              const card = el('div', { class:'card', style:{padding:'18px'} });
+              const arrFlights = AIVA.routesToBase(x.iata);
+              const depFlights = AIVA.routesFromBase(x.iata);
+              const card = el('div', { class:'card', style:{padding:0,overflow:'hidden'} });
               card.innerHTML = `
-                <div class="row between">
-                  <div><h3 style="margin:0;font-size:18px;">${x.city}</h3><div class="text-mute" style="font-size:12px;">${x.area} · ${x.iata}</div></div>
-                  <div class="pill pill-gold" style="font-size:10px;">${(arrFlights.length + depFlights.length)} sectors</div>
-                </div>
-                <div class="text-mute mono mt-2" style="font-size:10.5px;letter-spacing:.16em;">CREW HOTEL · ${x.hotelArea}</div>
-                <div class="text-dim" style="font-size:11.5px;">${x.commute}</div>
+                ${x.hotel ? `
+                  <div class="lay-photo" style="height:160px;background:url('${x.hotel.img}') center/cover, rgba(168,16,31,.2);position:relative;">
+                    <div style="position:absolute;inset:0;background:linear-gradient(180deg,transparent 40%,rgba(10,7,9,.92) 100%);"></div>
+                    <div style="position:absolute;left:16px;right:16px;bottom:14px;color:#FFFFFF;">
+                      <div style="font-family:var(--font-display);font-weight:700;font-size:18px;line-height:1.1;">${x.city}</div>
+                      <div class="text-mute mono" style="font-size:10.5px;letter-spacing:.16em;color:rgba(255,255,255,.7);">${x.area} · ${x.iata}</div>
+                    </div>
+                    <div class="pill pill-gold" style="position:absolute;top:12px;right:12px;font-size:10px;">${(arrFlights.length + depFlights.length)} sectors</div>
+                  </div>
+                ` : `
+                  <div style="padding:16px 18px 0;">
+                    <div class="row between">
+                      <div>
+                        <div style="font-family:var(--font-display);font-weight:700;font-size:18px;">${x.city}</div>
+                        <div class="text-mute mono" style="font-size:10.5px;letter-spacing:.16em;">${x.area} · ${x.iata}</div>
+                      </div>
+                      <div class="pill pill-gold" style="font-size:10px;">${(arrFlights.length + depFlights.length)} sectors</div>
+                    </div>
+                  </div>
+                `}
 
-                <div class="eyebrow mt-3">See</div>
-                <ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;line-height:1.65;color:var(--text);">
-                  ${x.see.map(s => `<li>${s}</li>`).join('')}
-                </ul>
-                <div class="eyebrow mt-2">Eat</div>
-                <ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;line-height:1.65;color:var(--text);">
-                  ${x.eat.map(s => `<li>${s}</li>`).join('')}
-                </ul>
-                <div class="eyebrow mt-2">Buy</div>
-                <ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;line-height:1.65;color:var(--text);">
-                  ${x.buy.map(s => `<li>${s}</li>`).join('')}
-                </ul>
+                <div style="padding:16px 18px;">
+                  ${x.hotel ? `
+                    <div class="lay-hotel" style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(255,225,89,.06);border:1px solid rgba(255,225,89,.18);border-radius:10px;margin-bottom:14px;">
+                      <div>
+                        <div class="text-mute mono" style="font-size:9.5px;letter-spacing:.16em;">CREW HOTEL</div>
+                        <div style="font-size:13px;font-weight:600;margin-top:2px;">${x.hotel.name}</div>
+                        <div class="text-mute" style="font-size:11px;">${x.hotel.dist} from terminal · ${x.commute}</div>
+                      </div>
+                      <div class="mono" style="color:var(--ai-gold-bright);font-size:13px;letter-spacing:.08em;">${stars(x.hotel.rate)}</div>
+                    </div>
+                  ` : `
+                    <div class="text-mute mono" style="font-size:10.5px;letter-spacing:.16em;margin-bottom:10px;">HOTEL — ${x.hotelArea}</div>
+                  `}
 
-                <div class="row gap-2 mt-3" style="flex-wrap:wrap;">
-                  <button class="btn btn-primary btn-sm" data-bookto="${x.iata}">${I('plane',12)} Book flight TO ${x.iata}</button>
-                  <button class="btn btn-ghost btn-sm" data-bookfrom="${x.iata}">${I('plane',12)} FROM ${x.iata}</button>
+                  <div class="eyebrow">See</div>
+                  <ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;line-height:1.65;color:var(--text);">
+                    ${x.see.map(s => `<li>${s}</li>`).join('')}
+                  </ul>
+                  <div class="eyebrow mt-3">Eat</div>
+                  <ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;line-height:1.65;color:var(--text);">
+                    ${x.eat.map(s => `<li>${s}</li>`).join('')}
+                  </ul>
+                  <div class="eyebrow mt-3">Buy</div>
+                  <ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;line-height:1.65;color:var(--text);">
+                    ${x.buy.map(s => `<li>${s}</li>`).join('')}
+                  </ul>
+
+                  <div class="row gap-2 mt-3" style="flex-wrap:wrap;">
+                    <button class="btn btn-primary btn-sm" data-bookto="${x.iata}">${I('plane',12)} TO ${x.iata}</button>
+                    <button class="btn btn-ghost btn-sm" data-bookfrom="${x.iata}">${I('plane',12)} FROM ${x.iata}</button>
+                  </div>
                 </div>
               `;
-              card.querySelector('[data-bookto]').onclick  = () => { AIVA.Store.set('book_prefill_to',   x.iata); location.hash = 'book'; };
+              card.querySelector('[data-bookto]').onclick   = () => { AIVA.Store.set('book_prefill_to',   x.iata); location.hash = 'book'; };
               card.querySelector('[data-bookfrom]').onclick = () => { AIVA.Store.set('book_prefill_from', x.iata); location.hash = 'book'; };
               grid.appendChild(card);
             });
@@ -4431,6 +4493,224 @@
             </div>
           </div>
         ` }));
+      }
+    },
+
+    /* ============ SITUATIONS ============ */
+    situations: {
+      sub: 'Random in-flight scenarios · ACARS + CPDLC integration',
+      render: (c) => {
+        const SITUATIONS = AIVA.SITUATIONS || [];
+        const cfg = AIVA.Store.get('sit_cfg', { intensity: 0.4, enabled: true, categories: ['cabin','company','weather','ops','world','medical','security'] });
+
+        const byCat = SITUATIONS.reduce((m, s) => { (m[s.cat] = m[s.cat] || []).push(s); return m; }, {});
+        const cats  = Object.keys(byCat);
+
+        c.appendChild(el('section', { html: `
+          <div class="section-title">
+            <div><h2>Situations</h2><div class="sub">${SITUATIONS.length} scenarios on file · dispatch fires them mid-flight via ACARS</div></div>
+            <div class="actions">
+              <label class="row gap-2" style="font-size:12px;color:var(--text-dim);">
+                <input type="checkbox" id="sitEnabled" ${cfg.enabled?'checked':''}> Engine enabled
+              </label>
+              <button class="btn btn-ghost btn-sm" id="sitTest">${I('send',14)} Fire one now (test)</button>
+            </div>
+          </div>
+
+          <div class="card mb-4" style="padding:22px;">
+            <div class="eyebrow">Intensity — how often situations fire</div>
+            <div class="row gap-3 mt-3" style="align-items:center;">
+              <input type="range" id="sitSlider" min="0" max="100" value="${Math.round(cfg.intensity * 100)}" style="flex:1;accent-color:var(--ai-gold);">
+              <div class="mono" style="min-width:80px;text-align:right;font-size:13px;">
+                <span id="sitPct">${Math.round(cfg.intensity * 100)}</span>%
+                <span class="text-mute" id="sitWord" style="display:block;font-size:10px;letter-spacing:.16em;">CALM</span>
+              </div>
+            </div>
+            <p class="text-mute mt-3" style="font-size:12px;line-height:1.65;">
+              At <b>0%</b> nothing fires. At <b>50%</b> a typical sector has ~1 in 3 chance of one event.
+              At <b>100%</b> expect multiple events per long-haul. Probability is rolled per-minute via FSUIPC heartbeat,
+              weighted by each scenario's <code>baseProb</code>.
+            </p>
+          </div>
+
+          <div class="section-title mt-6"><div><h3 style="margin:0;">Categories enabled</h3></div></div>
+          <div class="row gap-2 mb-4" style="flex-wrap:wrap;">
+            ${cats.map(cat => `
+              <label class="ac-chip ${cfg.categories.includes(cat)?'on':''}" data-cat="${cat}">
+                <input type="checkbox" data-cat-cb="${cat}" ${cfg.categories.includes(cat)?'checked':''} style="display:none;">
+                ${cat.toUpperCase()} <span class="text-mute" style="font-size:9.5px;margin-left:6px;">${byCat[cat].length}</span>
+              </label>
+            `).join('')}
+          </div>
+
+          <div class="section-title mt-6"><div><h3 style="margin:0;">All scenarios</h3><div class="sub">Browse the catalogue · click one to fire it as a test</div></div></div>
+          <div class="grid grid-2" id="sitGrid">
+            ${SITUATIONS.map(s => `
+              <div class="card" data-sit="${s.id}" style="padding:16px 18px;cursor:pointer;">
+                <div class="row between">
+                  <div class="row gap-2">
+                    <span class="pill pill-${s.cat==='security'?'red':s.cat==='medical'?'red':s.cat==='weather'?'warn':s.cat==='world'?'gold':'info'}" style="font-size:9px;letter-spacing:.18em;">${s.cat.toUpperCase()}</span>
+                    <span class="mono text-mute" style="font-size:10px;">${(s.baseProb*100).toFixed(1)}% base</span>
+                  </div>
+                  <span class="pill" style="font-size:9px;background:rgba(255,255,255,.06);">DIV ${s.diversion.toUpperCase()}</span>
+                </div>
+                <h4 style="margin:8px 0 6px;font-size:14px;font-family:var(--font-display);font-weight:600;">${s.title}</h4>
+                <div class="text-dim" style="font-size:12px;line-height:1.55;">${s.summary}</div>
+                ${s.acars ? `<div class="mono text-mute mt-2" style="font-size:10.5px;background:rgba(0,0,0,.18);padding:6px 8px;border-radius:6px;">ACARS: ${s.acars}</div>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        ` }));
+
+        const saveCfg = () => AIVA.Store.set('sit_cfg', cfg);
+
+        $('#sitSlider', c).oninput = (e) => {
+          cfg.intensity = +e.target.value / 100;
+          const pct = +e.target.value;
+          $('#sitPct', c).textContent = pct;
+          $('#sitWord', c).textContent = pct === 0 ? 'OFF' : pct < 25 ? 'CALM' : pct < 55 ? 'NORMAL' : pct < 80 ? 'BUSY' : 'CHAOTIC';
+          saveCfg();
+        };
+        $('#sitEnabled', c).onchange = (e) => { cfg.enabled = e.target.checked; saveCfg(); };
+        c.querySelectorAll('[data-cat]').forEach(chip => {
+          chip.onclick = () => {
+            const cat = chip.dataset.cat;
+            if (cfg.categories.includes(cat)) {
+              cfg.categories = cfg.categories.filter(x => x !== cat);
+              chip.classList.remove('on');
+            } else {
+              cfg.categories.push(cat);
+              chip.classList.add('on');
+            }
+            saveCfg();
+          };
+        });
+        c.querySelectorAll('[data-sit]').forEach(card => {
+          card.onclick = () => {
+            const sit = SITUATIONS.find(s => s.id === card.dataset.sit);
+            if (!sit) return;
+            AIVA.Situations?.fire(sit, { manual: true });
+            toast(`Fired: ${sit.title}`, 'ok');
+          };
+        });
+        $('#sitTest', c).onclick = () => {
+          /* pick a random enabled-category scenario */
+          const pool = SITUATIONS.filter(s => cfg.categories.includes(s.cat));
+          const s = pool[Math.floor(Math.random() * pool.length)];
+          if (s) { AIVA.Situations?.fire(s, { manual: true }); toast(`Fired: ${s.title}`, 'ok'); }
+        };
+      }
+    },
+
+    /* ============ ANNOUNCEMENTS ============ */
+    announce: {
+      sub: 'Cabin announcements · upload audio + auto/manual playback',
+      render: (c) => {
+        const STAGES = [
+          { id:'pre_dep',    label:'Pre-departure',         desc:'Doors closed, before pushback' },
+          { id:'safety',     label:'Safety demo',           desc:'After pushback, before taxi' },
+          { id:'pass_10k',   label:'Passing 10,000 ft',     desc:'Climb through FL100' },
+          { id:'service',    label:'Service announcement',  desc:'Top of climb / mid-cruise' },
+          { id:'belts_on',   label:'Seatbelts on',          desc:'Turbulence / descent' },
+          { id:'belts_off',  label:'Seatbelts off',         desc:'Smooth air resumed' },
+          { id:'descending', label:'Descending',            desc:'Start of descent (T/D)' },
+          { id:'landed',     label:'Landed',                desc:'After touchdown' },
+          { id:'disarm',     label:'Cabin crew disarm',     desc:'Approaching gate' },
+        ];
+        const cfg = AIVA.Store.get('ann_cfg', { mode: 'manual' });
+        const lib = AIVA.Store.get('ann_lib', {});   /* { stageId: [{name, dataURL}], ... } */
+
+        c.appendChild(el('section', { html: `
+          <div class="section-title">
+            <div><h2>Cabin Announcements</h2><div class="sub">${STAGES.length} stages · upload your own audio (MP3/WAV) · shuffled per flight</div></div>
+            <div class="actions">
+              <div class="row gap-2" style="background:var(--surface);padding:4px;border-radius:99px;border:1px solid var(--border);">
+                <button class="btn btn-sm ${cfg.mode==='manual'?'btn-primary':'btn-ghost'}" data-mode="manual">Manual</button>
+                <button class="btn btn-sm ${cfg.mode==='auto'?'btn-primary':'btn-ghost'}" data-mode="auto">Auto</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="note-callout mb-4">
+            <b>Auto mode</b> plays announcements automatically at the right phase of flight based on FSUIPC telemetry.
+            <b>Manual mode</b> shows a play button for each stage in the EFB — you decide when.
+            <b>Multiple files per stage</b> are shuffled flight-to-flight so it doesn't sound identical every leg.
+          </div>
+
+          <div class="grid grid-2" id="annGrid">
+            ${STAGES.map(stage => {
+              const files = lib[stage.id] || [];
+              return `
+                <div class="card" data-stage="${stage.id}" style="padding:18px;">
+                  <div class="row between">
+                    <div>
+                      <h3 style="margin:0;font-size:16px;font-family:var(--font-display);font-weight:600;">${stage.label}</h3>
+                      <div class="text-mute" style="font-size:11.5px;">${stage.desc}</div>
+                    </div>
+                    <span class="pill ${files.length?'pill-ok':'pill-warn'}" style="font-size:9.5px;">${files.length} file${files.length===1?'':'s'}</span>
+                  </div>
+                  <div class="ann-files mt-3" data-files="${stage.id}">
+                    ${files.map((f, i) => `
+                      <div class="ann-file-row">
+                        <button class="ann-play" data-play="${stage.id}:${i}" title="Play">▶</button>
+                        <span class="ann-file-name">${f.name}</span>
+                        <button class="ann-del" data-del="${stage.id}:${i}" title="Delete">✕</button>
+                      </div>
+                    `).join('') || `<div class="text-mute" style="font-size:11.5px;padding:8px 0;">No audio uploaded yet.</div>`}
+                  </div>
+                  <label class="btn btn-ghost btn-sm mt-3" style="display:inline-flex;cursor:pointer;">
+                    ${I('upload',12)} Upload audio
+                    <input type="file" data-up="${stage.id}" accept="audio/*" multiple style="display:none;">
+                  </label>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        ` }));
+
+        const updateLib = (l) => { AIVA.Store.set('ann_lib', l); route(); };
+
+        c.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
+          cfg.mode = b.dataset.mode;
+          AIVA.Store.set('ann_cfg', cfg);
+          route();
+        });
+
+        c.querySelectorAll('input[data-up]').forEach(inp => {
+          inp.onchange = async (e) => {
+            const stageId = inp.dataset.up;
+            const files = Array.from(e.target.files || []);
+            if (!files.length) return;
+            const cur = AIVA.Store.get('ann_lib', {});
+            cur[stageId] = cur[stageId] || [];
+            for (const f of files) {
+              if (f.size > 5 * 1024 * 1024) {
+                toast(`${f.name} is over 5 MB — please use shorter clips.`, 'bad');
+                continue;
+              }
+              const dataURL = await new Promise(res => {
+                const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f);
+              });
+              cur[stageId].push({ name: f.name, dataURL });
+            }
+            updateLib(cur);
+            toast(`${files.length} file${files.length===1?'':'s'} added.`, 'ok');
+          };
+        });
+
+        c.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+          const [stage, idx] = b.dataset.del.split(':');
+          const cur = AIVA.Store.get('ann_lib', {});
+          cur[stage]?.splice(+idx, 1);
+          updateLib(cur);
+        });
+
+        c.querySelectorAll('[data-play]').forEach(b => b.onclick = () => {
+          const [stage, idx] = b.dataset.play.split(':');
+          const f = AIVA.Store.get('ann_lib', {})[stage]?.[+idx];
+          if (!f) return;
+          const a = new Audio(f.dataURL); a.play().catch(e => toast('Playback blocked: ' + e.message, 'bad'));
+        });
       }
     },
   };

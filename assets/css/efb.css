@@ -469,6 +469,41 @@ body.efb-body:not(:has(.efb-home-v2)) {
   color: #FFE159; font-weight: 600;
 }
 
+/* Situations banner — appears under the progress ribbon when scenarios fire */
+.efb-sit-banner {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 8px;
+}
+.efb-sit-banner:empty { display: none; }
+.efb-sit-pill {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px;
+  background: rgba(168,16,31,.22);
+  border: 1px solid rgba(168,16,31,.5);
+  border-radius: 10px;
+  font-size: 11.5px; color: #FFFFFF;
+  animation: pulse-sit 2s ease-in-out infinite;
+}
+.efb-sit-pill b { font-family: var(--font-display); font-weight: 600; }
+.efb-sit-pill .text-mute { color: rgba(255,255,255,.65); font-size: 11px; }
+.efb-sit-pill .efb-sit-ack {
+  margin-left: auto;
+  background: rgba(255,255,255,.16); color: #FFFFFF;
+  border: 0; border-radius: 99px;
+  padding: 5px 12px; font-size: 10px; letter-spacing: .14em;
+  font-weight: 700; cursor: pointer;
+}
+.efb-sit-pill .efb-sit-ack:hover { background: rgba(255,255,255,.3); }
+@keyframes pulse-sit {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,75,75,0); }
+  50%      { box-shadow: 0 0 0 5px rgba(255,75,75,.18); }
+}
+
+/* PSR FILE button styling (top-right of EFB top bar) — same shape as END */
+.efb2-flight .endbtn {
+  font-size: 10px; padding: 7px 14px; letter-spacing: .12em;
+}
+
 /* Logo centred */
 .efb2-logo { justify-self: center; }
 .efb2-logo img {

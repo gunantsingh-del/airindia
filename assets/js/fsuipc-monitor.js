@@ -127,3 +127,91 @@ AIVA.FSUIPC = (() => {
     fireCrash:      () => emit('crash',      { fno: AIVA._activeFlight?.fno, sim:false }),
   };
 })();
+
+/* =====================================================================
+   AIVA.Situations — the random-event engine.
+
+   Public surface:
+     fire(scenario, opts)  → trigger a specific scenario now (test or manual)
+     start()               → start rolling the dice (called by EFB on flight start)
+     stop()                → stop rolling
+     active()              → list of scenarios currently active on this flight
+     ack(id)               → acknowledge a fired scenario
+
+   Roll cadence: once per minute. Per-scenario chance = baseProb × intensity slider.
+   Each scenario fires at most once per flight.
+   ===================================================================== */
+AIVA.Situations = (() => {
+  let timer = null;
+  const subs = [];   /* event listeners */
+  const fired = new Set();
+  let activeList = [];
+  const FIRED_KEY = (fno) => `sit_fired_${fno}`;
+
+  function on(cb) { subs.push(cb); }
+  function emit(s, opts) { subs.forEach(cb => { try { cb(s, opts); } catch(_){} }); }
+
+  function fire(scenario, opts = {}) {
+    if (!scenario) return;
+    if (fired.has(scenario.id) && !opts.manual) return;
+    fired.add(scenario.id);
+    /* Persist to per-flight store so a reload doesn't refire */
+    const fno = AIVA._activeFlight?.fno;
+    if (fno) {
+      try {
+        const list = JSON.parse(localStorage.getItem(FIRED_KEY(fno)) || '[]');
+        if (!list.find(x => x.id === scenario.id)) {
+          list.push({ id: scenario.id, ts: Date.now(), title: scenario.title });
+          localStorage.setItem(FIRED_KEY(fno), JSON.stringify(list));
+        }
+      } catch {}
+    }
+    activeList.push({ ...scenario, ts: Date.now(), acked: false });
+    /* Auto-send ACARS */
+    if (AIVA.Hoppie?.sendDispatch) {
+      AIVA.Hoppie.sendDispatch(scenario.acars).catch(()=>{});
+    }
+    /* Auto-uplink CPDLC if datalink configured + scenario has cpdlc text */
+    if (scenario.cpdlc && AIVA.Hoppie?.sendCPDLC) {
+      AIVA.Hoppie.sendCPDLC(scenario.cpdlc).catch(()=>{});
+    }
+    emit(scenario, opts);
+    return scenario;
+  }
+  function rollDice() {
+    const cfg = AIVA.Store?.get?.('sit_cfg', { intensity: 0.4, enabled: true, categories: [] });
+    if (!cfg.enabled || !cfg.intensity) return;
+    const pool = (AIVA.SITUATIONS || []).filter(s =>
+      (!cfg.categories?.length || cfg.categories.includes(s.cat)) && !fired.has(s.id)
+    );
+    /* Each scenario gets its own per-minute chance = baseProb × intensity × 0.6
+       (0.6 calibration so 100% slider = roughly the listed baseProb per minute). */
+    for (const s of pool) {
+      const chance = s.baseProb * cfg.intensity * 0.6;
+      if (Math.random() < chance) {
+        fire(s);
+        break;   /* one event per minute max */
+      }
+    }
+  }
+  function start() {
+    stop();
+    /* Restore previously-fired list for THIS flight */
+    fired.clear(); activeList = [];
+    const fno = AIVA._activeFlight?.fno;
+    if (fno) {
+      try {
+        const list = JSON.parse(localStorage.getItem(FIRED_KEY(fno)) || '[]');
+        list.forEach(x => fired.add(x.id));
+      } catch {}
+    }
+    timer = setInterval(rollDice, 60_000);   /* once a minute */
+  }
+  function stop() {
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+  function active() { return activeList.filter(x => !x.acked); }
+  function ack(id) { const a = activeList.find(x => x.id === id); if (a) a.acked = true; }
+
+  return { on, fire, start, stop, active, ack };
+})();

@@ -1449,16 +1449,17 @@
                 blockSoFar += next.durMins;
                 here = next.to;
                 /* === TAG-FLIGHT CHAIN ===
-                   If the picked flight has a continuation under the same fno
-                   (e.g. AI127 DEL→VIE → AI127 VIE→ORD), tack the continuation
-                   onto the same duty day — it's the same physical flight. */
+                   Same-fno continuation is the same physical flight, so it
+                   always gets added regardless of any cap (e.g. AI127
+                   DEL→VIE → AI127 VIE→ORD). */
                 const cont = AIVA.FLIGHTS.find(f => f.fno === next.fno && f.from === next.to);
                 if (cont) {
                   dayLegs.push(cont);
                   blockSoFar += cont.durMins;
                   here = cont.to;
                 }
-                if (next.durMins >= 480 || (cont && cont.durMins >= 480)) longHaulMode = true;
+                /* Anything 6+ hours total is single-leg-per-day */
+                if (blockSoFar >= 360) longHaulMode = true;
                 if (here === baseCode) break;
               }
               rotation.push({ legs: dayLegs, block: blockSoFar, end: here });
@@ -1719,12 +1720,23 @@
               if (opVal)       list = list.filter(f => f.op === opVal);
               return list;
             };
-            /* Find a return flight from `from` back to `baseCode`. Prefer the
-               operational pair flight number (outFno ± 1) so AI127 pairs with
-               AI128, AI187 with AI188, etc. Falls back to any return. */
+            /* Find a return flight from `from` back to `baseCode`. Accepts two
+               kinds of return:
+                 a) DIRECT — a single sector from `from` straight to base
+                 b) TAG    — a first-leg from `from` whose same-fno continuation
+                             ends at base (e.g. AI188 YYZ→VIE whose continuation
+                             VIE→DEL gets us home)
+               Prefers the operational pair (outFno ± 1) so AI127↔AI128,
+               AI187↔AI188, etc. */
             const findReturn = (from, outFnoStr, used) => {
-              let cands = filter(AIVA.FLIGHTS.filter(f => f.from === from && f.to === baseCode));
-              cands = cands.filter(f => f.durMins <= dayCapMins);
+              const all = filter(AIVA.FLIGHTS.filter(f => f.from === from));
+              const direct = all.filter(f => f.to === baseCode && f.durMins <= dayCapMins);
+              const tag    = all.filter(f => {
+                if (f.to === baseCode) return false;       // not direct
+                const cont = AIVA.FLIGHTS.find(c => c.fno === f.fno && c.from === f.to);
+                return cont && cont.to === baseCode && (f.durMins + cont.durMins) <= dayCapMins;
+              });
+              const cands = [...direct, ...tag];
               if (!cands.length) return null;
               const outNum = parseInt(String(outFnoStr).replace(/\D/g,''), 10);
               const pair = cands.find(c => {
@@ -1754,6 +1766,9 @@
               const wantLegs = shape === 'heavy' ? 3 : shape === 'layover' ? 1 : 2;
               const wantBlock = shape === 'heavy' ? 540 : shape === 'layover' ? 780 : 360;
               let dayIsLongHaul = false;
+              /* Anything ≥ 6 h total block in a day collapses to a single-leg
+                 duty period — long-haul means no same-day same-leg return. */
+              const LONG_HAUL_MIN = 360;
 
               for (let i = 0; i < wantLegs; i++) {
                 const blockSoFar = legs.reduce((s,f) => s + f.durMins, 0);
@@ -1776,18 +1791,20 @@
                 here = pick.to;
 
                 /* === TAG-FLIGHT CHAIN ===
-                   If the same fno has a continuation from `here`, fly that too
-                   (it's the second leg of the same physical flight, e.g. AI127
-                   DEL→VIE→ORD). The continuation does NOT count toward wantLegs. */
+                   Same-fno continuation is ALWAYS added — it's the same
+                   physical flight (e.g. AI127 DEL→VIE→ORD), the pilot can't
+                   refuse the second leg even if it would exceed the day cap.
+                   Augmented crew handles the FDTL implication. */
                 const cont = findContinuation(pick);
-                if (cont && (blockSoFar + pick.durMins + cont.durMins) <= dayCapMins) {
+                if (cont) {
                   legs.push(cont);
                   here = cont.to;
                 }
 
-                /* Long-haul detection: once any leg in the day is 8+ hours, stop
-                   adding more — that's a single-leg duty period. */
-                if (pick.durMins >= 480 || (cont && cont.durMins >= 480)) {
+                /* Long-haul detection: any single leg ≥ 6 h, OR a tag chain
+                   whose total exceeds 6 h, collapses to a single-leg-per-day. */
+                const dayBlock = legs.reduce((s,f) => s + f.durMins, 0);
+                if (dayBlock >= LONG_HAUL_MIN) {
                   dayIsLongHaul = true;
                   break;
                 }

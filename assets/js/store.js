@@ -68,6 +68,7 @@ AIVA.PILOTS_SEED = [
   { id:'AIV012', name:'Brick',               email:'brick@aiv.in',            password:'Hurricane-71$la',rank:'Cadet',        base:'BOM', aircraft:['A20N'],          hireDate:'2026-05-01', medClass:'Class 1', medExpiry:'2028-05-01', avatar:'B',  role:'pilot' },
   { id:'AIV013', name:'Siddhant',            email:'siddhant@aiv.in',         password:'Comet-44!nf',    rank:'Cadet',        base:'CCU', aircraft:['A20N'],          hireDate:'2026-05-01', medClass:'Class 1', medExpiry:'2028-05-01', avatar:'S',  role:'pilot' },
   { id:'AIV014', name:'Akshat Tiwari',       email:'akshat.tiwari@aiv.in',    password:'Skyhawk-29@ye',  rank:'Cadet',        base:'BLR', aircraft:['A20N'],          hireDate:'2026-05-01', medClass:'Class 1', medExpiry:'2028-05-01', avatar:'AT', role:'pilot' },
+  { id:'AIV015', name:'Samyo Ghosh',         email:'samyo.ghosh@aiv.in',      password:'Zephyr-45#bg',   rank:'Cadet',        base:'CCU', aircraft:['A20N'],          hireDate:'2026-05-15', medClass:'Class 1', medExpiry:'2028-05-15', avatar:'SG', role:'pilot' },
 ];
 
 /* ---------- Rank ladder ----------

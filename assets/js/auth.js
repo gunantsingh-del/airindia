@@ -7,9 +7,10 @@ window.AIVA = window.AIVA || {};
 AIVA.Auth = (() => {
 
   /* Roster version — bump when PILOTS_SEED changes so existing browsers
-     re-seed from the new locked roster. Naadir Shaikh spelling fix +
-     credential rotation (AIV008) → v4. */
-  const ROSTER_VERSION = 'v4-naadir-shaikh-2026-05-15';
+     re-seed from the new locked roster. v5 → Gunant deranked to Cadet
+     (rank now computed live from hours; admin role kept), and live-rank
+     wiring lands in currentPilot(). */
+  const ROSTER_VERSION = 'v5-live-rank-2026-05-15';
   const ensureSeed = () => {
     const ver = AIVA.Store.get('roster_version');
     if (ver !== ROSTER_VERSION) {
@@ -39,10 +40,31 @@ AIVA.Auth = (() => {
 
   const session = () => AIVA.Store.get('session');
   const isLoggedIn = () => !!session();
+  /* Live pilot decoration: rank is computed from total block hours so it
+     stays in sync with progression instead of relying on the seed string,
+     and aircraft is merged with the pilot's saved type-rating override
+     from Profile so the dashboard reflects whatever they ticked last. */
   const currentPilot = () => {
     const s = session();
     if (!s) return null;
-    return allPilots().find(p => p.id === s.pilotId) || null;
+    const seed = allPilots().find(p => p.id === s.pilotId);
+    if (!seed) return null;
+    let hours = 0;
+    let acOverride = null;
+    try {
+      const ps = AIVA.Store.pilot(seed.id);
+      const flights = ps.get('flights_logged', []) || [];
+      const totalMins = flights.reduce((a, f) => a + (Number(f.durMins) || 0), 0);
+      hours = totalMins / 60;
+      acOverride = ps.get('aircraft_override', null);
+    } catch {}
+    const rankLabel = (AIVA.rankFor?.(hours)?.label) || seed.rank;
+    return {
+      ...seed,
+      aircraft: acOverride || seed.aircraft,
+      hours,
+      rank: rankLabel,
+    };
   };
 
   const requireAuth = () => {

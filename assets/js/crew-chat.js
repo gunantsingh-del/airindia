@@ -97,6 +97,19 @@ AIVA.CrewChat = (() => {
     try { localStorage.setItem(PRESENCE, JSON.stringify(p)); } catch {}
   }
   function pilot() { return (AIVA.Auth?.currentPilot && AIVA.Auth.currentPilot()) || null; }
+  /* Look up a pilot's avatar dataURL from the shared crew_avatars map.
+     Falls back to null so the renderer can show initials. Stored as a
+     plain {pilotId: dataURL} dictionary — see Profile page upload
+     handler in portal.js for the write side. */
+  function avatarFor(pilotId) {
+    try {
+      const map = AIVA.Store?.get?.('crew_avatars', {}) || {};
+      return map[pilotId] || null;
+    } catch { return null; }
+  }
+  function initialsFor(name) {
+    return (name || '?').split(/\s+/).map(p => p[0]).filter(Boolean).join('').slice(0, 2).toUpperCase();
+  }
 
   /* ============ presence heartbeat ============ */
   function beat() {
@@ -338,14 +351,20 @@ AIVA.CrewChat = (() => {
     const ids = new Set(online());
     r.innerHTML = `
       <div class="cc-roster-list">
-        ${all.map(p => `
-          <div class="cc-roster-row ${ids.has(p.id) ? 'on' : ''}">
-            <span class="cc-dot ${ids.has(p.id) ? 'on' : ''}"></span>
-            <span class="cc-roster-id">${p.avatar || p.id.slice(-3)}</span>
-            <span class="cc-roster-name">${p.name}</span>
-            <span class="cc-roster-rank">${p.rank}</span>
-          </div>
-        `).join('')}
+        ${all.map(p => {
+          const pic = avatarFor(p.id);
+          const avatarHtml = pic
+            ? `<span class="cc-roster-avatar"><img src="${pic}" alt=""></span>`
+            : `<span class="cc-roster-avatar"><span class="cc-roster-initials">${initialsFor(p.name)}</span></span>`;
+          return `
+            <div class="cc-roster-row ${ids.has(p.id) ? 'on' : ''}">
+              <span class="cc-dot ${ids.has(p.id) ? 'on' : ''}"></span>
+              ${avatarHtml}
+              <span class="cc-roster-name">${p.name}</span>
+              <span class="cc-roster-rank">${p.rank}</span>
+            </div>
+          `;
+        }).join('')}
       </div>
     `;
   }
@@ -373,11 +392,25 @@ AIVA.CrewChat = (() => {
       `;
     }
     const own = m.pilotId === me;
+    const pic = avatarFor(m.pilotId);
+    const avatarHtml = !own ? (pic
+      ? `<span class="cc-msg-avatar"><img src="${pic}" alt=""></span>`
+      : `<span class="cc-msg-avatar"><span class="cc-msg-initials">${initialsFor(m.pilotName)}</span></span>`)
+      : '';
     return `
       <div class="cc-msg ${own ? 'own' : ''}">
-        ${!own ? `<div class="cc-msg-head"><b>${escapeHTML(m.pilotName)}</b> <span class="cc-msg-rank">${escapeHTML(m.rank || '')}</span> <span class="cc-msg-time">${time}</span></div>` : ''}
-        <div class="cc-msg-bubble">${escapeHTML(m.text)}</div>
-        ${own ? `<div class="cc-msg-time own">${time}</div>` : ''}
+        ${!own ? `
+          <div class="cc-msg-row">
+            ${avatarHtml}
+            <div class="cc-msg-col">
+              <div class="cc-msg-head"><b>${escapeHTML(m.pilotName)}</b> <span class="cc-msg-rank">${escapeHTML(m.rank || '')}</span> <span class="cc-msg-time">${time}</span></div>
+              <div class="cc-msg-bubble">${escapeHTML(m.text)}</div>
+            </div>
+          </div>
+        ` : `
+          <div class="cc-msg-bubble">${escapeHTML(m.text)}</div>
+          <div class="cc-msg-time own">${time}</div>
+        `}
       </div>
     `;
   }
@@ -469,7 +502,7 @@ AIVA.CrewChat = (() => {
       }
       .cc-roster-list { display: flex; flex-direction: column; gap: 4px; }
       .cc-roster-row {
-        display: grid; grid-template-columns: 12px 28px 1fr auto; gap: 10px;
+        display: grid; grid-template-columns: 12px 32px 1fr auto; gap: 10px;
         align-items: center;
         padding: 6px 8px; border-radius: 8px;
         font-size: 12.5px; color: rgba(248,241,228,.55);
@@ -477,7 +510,15 @@ AIVA.CrewChat = (() => {
       .cc-roster-row.on { color: #F8F1E4; background: rgba(110,231,183,.06); }
       .cc-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.2); }
       .cc-dot.on { background: #6EE7B7; box-shadow: 0 0 8px #6EE7B7; }
-      .cc-roster-id { font-family: var(--font-mono); font-size: 10.5px; color: var(--ai-gold-bright, #FFE159); letter-spacing: .12em; }
+      .cc-roster-avatar {
+        width: 30px; height: 30px; border-radius: 50%;
+        background: linear-gradient(135deg, #DA192F, #4A1B41);
+        display: grid; place-items: center;
+        overflow: hidden;
+        box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 4px 12px rgba(0,0,0,.4);
+      }
+      .cc-roster-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .cc-roster-initials { color: #FFFFFF; font-family: var(--font-display); font-weight: 700; font-size: 11px; letter-spacing: .04em; }
       .cc-roster-rank { font-size: 10.5px; color: rgba(248,241,228,.5); font-family: var(--font-mono); }
 
       .cc-body {
@@ -496,6 +537,18 @@ AIVA.CrewChat = (() => {
 
       .cc-msg { display: flex; flex-direction: column; gap: 4px; }
       .cc-msg.own { align-items: flex-end; }
+      .cc-msg-row { display: flex; gap: 10px; align-items: flex-start; }
+      .cc-msg-col { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+      .cc-msg-avatar {
+        flex: 0 0 32px;
+        width: 32px; height: 32px; border-radius: 50%;
+        background: linear-gradient(135deg, #DA192F, #4A1B41);
+        display: grid; place-items: center;
+        overflow: hidden; margin-top: 2px;
+        box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 4px 12px rgba(0,0,0,.4);
+      }
+      .cc-msg-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+      .cc-msg-initials { color: #FFFFFF; font-family: var(--font-display); font-weight: 700; font-size: 12px; letter-spacing: .04em; }
       .cc-msg-head { display: flex; align-items: baseline; gap: 8px; font-size: 11px; color: rgba(248,241,228,.55); }
       .cc-msg-head b { color: var(--ai-gold-bright); font-weight: 600; font-family: var(--font-display); font-size: 12.5px; }
       .cc-msg-rank { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .12em; }

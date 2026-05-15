@@ -162,7 +162,9 @@
   margin-bottom: 14px; gap: 16px; flex-wrap: wrap;
 }
 .section-title h2 { font-family: var(--font-display); font-weight: 600; font-size: 22px; color: var(--ai-cream); letter-spacing: -.015em; }
-.section-title .sub { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--text-mute); margin-top: 4px; }
+/* Sub-label was mono ALL-CAPS, looked over-engineered everywhere.
+   Switched to the display sans at small weight + tighter tracking. */
+.section-title .sub { font-family: var(--font-display); font-weight: 500; font-size: 12.5px; letter-spacing: .02em; text-transform: none; color: var(--text-mute); margin-top: 6px; }
 .section-title .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ---------- Hero ---------- */

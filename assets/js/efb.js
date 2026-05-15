@@ -258,8 +258,10 @@
     const tileHTML = (id) => {
       const a = byId[id]; if (!a) return '';
       const href = a.portal ? `portal.html#${a.portal}` : `#${a.id}`;
+      /* Live-dot removed per Chief Pilot — the .live flag is kept on the
+         APPS records for future state-driven hints, but we don't render
+         a green pip on every iframe-backed app anymore. */
       return `<a class="efb2-tile" href="${href}">
-        ${a.live ? '<span class="live-dot"></span>' : ''}
         <div class="ico">${I(a.icon, 20)}</div>
         <div class="nm">${a.nm}</div>
       </a>`;
@@ -739,10 +741,40 @@
       ` }));
     },
 
-    /* ==================== NAVIGRAPH ==================== */
+    /* ==================== NAVIGRAPH ====================
+       Navigraph Charts can't run inside an iframe — their auth flow
+       (OAuth + Cloudflare protection) sets X-Frame-Options: deny and
+       refuses to load. Trying to "Sign in" inside the iframe broke
+       to the user's system browser, then their session was stuck
+       there instead of in our app.
+
+       Right behaviour: launch a NEW WINDOW. In the Electron desktop
+       wrapper the window-open handler can be configured to open
+       another in-app BrowserWindow that shares the app session, so
+       auth + charts both live inside AIVA. In a regular browser tab
+       it opens as a normal popup (also fine).
+       */
     navigraph: (c) => {
-      c.appendChild(el('div', { class:'embed-bar', html:`<span class="dot"></span> Navigraph Charts · authenticated session required <span class="right"><button class="btn btn-ghost btn-sm" onclick="window.open('https://charts.navigraph.com','_blank')">${I('external',14)} New window</button></span>` }));
-      c.appendChild(el('iframe', { class:'efb-iframe', src:'https://charts.navigraph.com', loading:'lazy' }));
+      const f = activeFlight();
+      const apt = f ? (AIVA.airport(f.from)?.icao || '') : '';
+      c.appendChild(el('div', { class:'efb-card', style:{ padding:'32px 28px', textAlign:'center', maxWidth:'680px', margin:'24px auto' }, html: `
+        <div class="eyebrow" style="color:rgba(255,225,89,.7);">Navigraph Charts</div>
+        <h2 class="display mt-2" style="font-size:24px;color:var(--ai-cream);">Live charts open in a dedicated window</h2>
+        <p class="text-mute mt-3" style="font-size:13px;line-height:1.6;max-width:480px;margin:14px auto 0;">
+          Navigraph blocks iframe embedding (X-Frame-Options) so the
+          OAuth sign-in flow has to run in its own window. Click below
+          — in the AIVA desktop app it opens a second AIVA window that
+          shares your session, so charts and login both stay inside
+          AIVA. In the browser, it opens a popup tab.
+        </p>
+        <div class="row gap-2 mt-4" style="justify-content:center;flex-wrap:wrap;">
+          ${apt ? `<button class="btn btn-primary" id="ngOpenApt">${I('external', 14)} Open ${apt} charts</button>` : ''}
+          <button class="btn btn-ghost" id="ngOpenAll">${I('external', 14)} Open Navigraph home</button>
+        </div>
+        <div class="text-mute mono mt-4" style="font-size:10.5px;letter-spacing:.18em;">CHARTS · AIRAC 2605 · LIDO / JEPPESEN</div>
+      `}));
+      $('#ngOpenApt', c)?.addEventListener('click', () => window.open(`https://charts.navigraph.com/airport/${apt}`, 'aiva-navigraph', 'noopener,width=1200,height=820'));
+      $('#ngOpenAll', c)?.addEventListener('click', () => window.open('https://charts.navigraph.com/', 'aiva-navigraph', 'noopener,width=1200,height=820'));
     },
 
     /* ==================== WINDY ==================== */

@@ -2388,7 +2388,28 @@
     notam: {
       sub: 'Live NOTAMs from your SimBrief OFP · ICAO live · authoritative fallbacks',
       render: (c) => {
-        const default3 = ['VIDP','VABB','EGLL'];
+        /* Default ICAOs:
+           1) Today's roster flight (origin + destination) — most relevant.
+           2) Otherwise, the active SimBrief OFP's origin + destination if
+              we have a username cached (saves a fetch later in the flow).
+           3) Otherwise fall back to the pilot's home base only. */
+        let default3 = [];
+        try {
+          const todayBk = (getBookings() || []).find(b => b.date === ymd());
+          if (todayBk) {
+            const f = AIVA.findFlight(todayBk.fno);
+            if (f) {
+              const orig = AIVA.airport(f.from)?.icao;
+              const dest = AIVA.airport(f.to)?.icao;
+              if (orig) default3.push(orig);
+              if (dest) default3.push(dest);
+            }
+          }
+        } catch {}
+        if (!default3.length) {
+          const base = AIVA.airport(pilot.base || 'DEL')?.icao;
+          if (base) default3.push(base);
+        }
         c.appendChild(el('section', { html: `
           <div class="section-title">
             <div><h2>NOTAM &amp; AIP</h2><div class="sub">Live NOTAMs pulled from your dispatched SimBrief OFP</div></div>
@@ -2742,17 +2763,23 @@
           const altn = $('#ofpAltn', c).value.trim().toUpperCase();
           const ac = $('#ofpAc', c).value;
           const reg = $('#ofpReg', c).value.trim();
-          const fl = ($('#ofpFl', c).value || '360').replace(/^FL/i,'');
+          /* Cruise altitude: pilot types "360" meaning FL360.
+             SimBrief Dispatch's `cpt` param expects RAW FEET (36000),
+             not FL hundreds — the previous code passed `fl=360` and
+             SimBrief read it as 360 ft. Multiply by 100 when the value
+             is FL-style (< 1000); pass through if already raw feet. */
+          const flRaw = ($('#ofpFl', c).value || '360').toString().replace(/^FL/i,'').trim();
+          const flNum = parseInt(flRaw, 10) || 360;
+          const cruiseFeet = flNum < 1000 ? flNum * 100 : flNum;
           const ci = $('#ofpCi', c).value || '35';
           const pax = $('#ofpPax', c).value || '0';
-          const route = encodeURIComponent($('#ofpRte', c).value.trim());
-          const remarks = encodeURIComponent($('#ofpRmk', c).value.trim());
           /* SimBrief Dispatch URL params:
-             orig, dest, altn, type, reg, callsgn, fl, cpt, route, pax, ci, manualrmk */
+             orig, dest, altn, type, reg, callsgn, cpt (feet), route, pax, ci, manualrmk */
           const params = new URLSearchParams({
             orig: o, dest: d, altn,
             type: ac, reg, callsgn: cs,
-            fl, ci, pax,
+            cpt: String(cruiseFeet),
+            ci, pax,
             route: $('#ofpRte', c).value.trim(),
             manualrmk: $('#ofpRmk', c).value.trim(),
           });
@@ -4497,17 +4524,25 @@
         const linePilots  = pilots.filter(p => p.club === false);
 
         /* Type-rating column removed per Chief Pilot — felt like exposing
-           training currency to the rest of the crew. Hire date stays. */
+           training currency to the rest of the crew. Hire date stays.
+           Avatar prefers the uploaded crew_avatars[pilotId] dataURL
+           (uploaded via Profile) and falls back to initials. */
+        const crewAvatars = AIVA.Store.get('crew_avatars', {}) || {};
         const renderTable = (list) => `
           <div class="crew-table crew-table-5col">
             <div class="crew-row crew-head">
               <div>ID</div><div>Pilot</div><div>Rank</div><div>Base</div><div>Hire date</div>
             </div>
-            ${list.map(p => `
+            ${list.map(p => {
+              const pic = crewAvatars[p.id];
+              const avatarHTML = pic
+                ? `<div class="crew-avatar"><img src="${pic}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block;"></div>`
+                : `<div class="crew-avatar">${p.avatar}</div>`;
+              return `
               <div class="crew-row${p.role === 'admin' ? ' is-admin' : ''}">
                 <div class="mono">${p.id}</div>
                 <div>
-                  <div class="crew-avatar">${p.avatar}</div>
+                  ${avatarHTML}
                   <div class="crew-name">${p.name}${p.role === 'admin' ? ' <span class="pill pill-gold" style="font-size:9px;margin-left:6px;">ADMIN</span>' : ''}</div>
                   <div class="crew-email">${p.email}</div>
                 </div>
@@ -4515,7 +4550,7 @@
                 <div class="mono">${p.base}</div>
                 <div class="mono" style="font-size:11px;">${p.hireDate}</div>
               </div>
-            `).join('')}
+            `;}).join('')}
           </div>
         `;
 
@@ -4780,23 +4815,61 @@
         $('#saveCs', c).onclick = () => { P.set('my_callsign', $('#myCallsign').value.trim().toUpperCase()); toast('Callsign saved.', 'ok'); };
         $('#saveProxy', c).onclick = () => { P.set('hoppie_proxy', $('#hopProxy').value.trim()); toast('CORS proxy saved · reload Hoppie page.', 'ok'); };
 
-        /* Profile picture upload */
-        $('#profPicInput', c)?.addEventListener('change', (e) => {
+        /* Profile picture upload.
+           Pic is auto-resized to 256×256 JPEG (≤30 KB) so the global
+           crew_avatars store stays tiny and renders fast on every chat
+           bubble + crew row. Saved per-pilot AND globally so any browser
+           that has seen the upload renders it everywhere. */
+        async function compressForAvatar(file, maxSide = 256, quality = 0.82) {
+          const dataUrl = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload = () => res(r.result);
+            r.onerror = rej;
+            r.readAsDataURL(file);
+          });
+          const img = await new Promise((res, rej) => {
+            const i = new Image();
+            i.onload = () => res(i);
+            i.onerror = rej;
+            i.src = dataUrl;
+          });
+          const side = Math.min(maxSide, Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = side;
+          const ctx = canvas.getContext('2d');
+          /* center-crop to a square */
+          const sourceSide = Math.min(img.width, img.height);
+          const sx = (img.width  - sourceSide) / 2;
+          const sy = (img.height - sourceSide) / 2;
+          ctx.drawImage(img, sx, sy, sourceSide, sourceSide, 0, 0, side, side);
+          return canvas.toDataURL('image/jpeg', quality);
+        }
+
+        $('#profPicInput', c)?.addEventListener('change', async (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
-          if (file.size > 1024 * 1024 * 2) { toast('Photo too large — keep it under 2 MB', 'bad'); return; }
-          const r = new FileReader();
-          r.onload = () => {
-            P.set('profile_pic', r.result);
+          if (file.size > 1024 * 1024 * 5) { toast('Photo too large — keep it under 5 MB before resize.', 'bad'); return; }
+          try {
+            const small = await compressForAvatar(file);
+            P.set('profile_pic', small);
+            const avatars = AIVA.Store.get('crew_avatars', {}) || {};
+            avatars[pilot.id] = small;
+            AIVA.Store.set('crew_avatars', avatars);
             const wrap = $('#profPicWrap', c);
-            wrap.innerHTML = `<img src="${r.result}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
-            toast('Profile photo updated', 'ok');
+            wrap.innerHTML = `<img src="${small}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+            toast('Profile photo updated — visible across the portal.', 'ok');
             buildNav();
-          };
-          r.readAsDataURL(file);
+          } catch (err) {
+            toast('Couldn\'t process that image: ' + err.message, 'bad');
+          }
         });
         $('#removePicBtn', c)?.addEventListener('click', () => {
-          P.remove('profile_pic'); toast('Profile photo removed', 'ok'); route();
+          P.remove('profile_pic');
+          const avatars = AIVA.Store.get('crew_avatars', {}) || {};
+          delete avatars[pilot.id];
+          AIVA.Store.set('crew_avatars', avatars);
+          toast('Profile photo removed', 'ok');
+          route();
         });
 
         /* Aircraft type toggling */
@@ -5422,7 +5495,7 @@
           </div>
 
           <div class="card mb-4" style="padding:22px;">
-            <div class="eyebrow">Intensity — how often situations fire</div>
+            <div class="eyebrow">Intensity — how often situations occur</div>
             <div class="row gap-3 mt-3" style="align-items:center;">
               <input type="range" id="sitSlider" min="0" max="100" value="${Math.round(cfg.intensity * 100)}" style="flex:1;accent-color:var(--ai-gold);">
               <div class="mono" style="min-width:80px;text-align:right;font-size:13px;">

@@ -53,7 +53,7 @@ AIVA.Store = (() => {
    can promote via the Ranks page in-app.                                */
 AIVA.PILOTS_SEED = [
   /* Founder / admin */
-  { id:'AIV001', name:'Gunant Singh Pahwa',  email:'gunant.pahwa@aiv.in',     password:'Falcon-77W#42',  rank:'Captain',      base:'DEL', aircraft:['B77W','B788','B789','A359','A20N','A21N'], hireDate:'2026-01-01', medClass:'Class 1', medExpiry:'2027-05-12', avatar:'GP', role:'admin' },
+  { id:'AIV001', name:'Gunant Singh Pahwa',  email:'gunant.pahwa@aiv.in',     password:'Falcon-77W#42',  rank:'Cadet',        base:'DEL', aircraft:['A20N'], hireDate:'2026-01-01', medClass:'Class 1', medExpiry:'2027-05-12', avatar:'GP', role:'admin' },
   /* Cadets */
   { id:'AIV002', name:'Anvit Deshpande',     email:'anvit.deshpande@aiv.in',  password:'Spitfire-94$kn', rank:'Cadet',        base:'BOM', aircraft:['A20N'],          hireDate:'2026-05-01', medClass:'Class 1', medExpiry:'2028-05-01', avatar:'AD', role:'pilot' },
   { id:'AIV003', name:'Eshan Parmar',        email:'eshan.parmar@aiv.in',     password:'Lightning-23@uq',rank:'Cadet',        base:'BOM', aircraft:['A20N'],          hireDate:'2026-05-01', medClass:'Class 1', medExpiry:'2028-05-01', avatar:'EP', role:'pilot' },

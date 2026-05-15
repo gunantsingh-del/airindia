@@ -65,8 +65,31 @@ function createWindow() {
 
   mainWin.loadURL(APP_URL);
 
-  /* External links open in the user's real browser, not inside AIVA */
+  /* Window-open routing for the desktop app:
+       • Navigraph: opens in a NEW IN-APP BrowserWindow so the OAuth
+         flow + charts stay inside AIVA (cookies persist across the
+         shared session).
+       • Other http(s) links: bounced to the user's real browser via
+         shell.openExternal so unrelated sites don't pollute the app.
+   */
   mainWin.webContents.setWindowOpenHandler(({ url }) => {
+    if (/navigraph\.com/i.test(url)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 1280,
+          height: 860,
+          title: 'AIVA · Navigraph',
+          autoHideMenuBar: true,
+          backgroundColor: '#0A0709',
+          webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+          },
+        },
+      };
+    }
     if (url.startsWith('http://') || url.startsWith('https://')) {
       shell.openExternal(url);
       return { action: 'deny' };
@@ -74,14 +97,17 @@ function createWindow() {
     return { action: 'allow' };
   });
 
-  /* Same rule for normal navigation — only stay in-app for our own host */
+  /* In-place navigation: keep our own host + Navigraph subdomains
+     (charts.navigraph.com redirects to login.navigraph.com during OAuth);
+     everything else bounces to the user's browser. */
   mainWin.webContents.on('will-navigate', (e, url) => {
     try {
       const u = new URL(url);
-      if (u.host !== new URL(APP_URL).host) {
-        e.preventDefault();
-        shell.openExternal(url);
-      }
+      const ownHost = new URL(APP_URL).host;
+      if (u.host === ownHost) return;
+      if (/(^|\.)navigraph\.com$/i.test(u.host)) return;
+      e.preventDefault();
+      shell.openExternal(url);
     } catch {}
   });
 

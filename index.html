@@ -7,10 +7,10 @@
 <meta name="apple-mobile-web-app-title" content="AIVA">
 <meta name="theme-color" content="#A8101F">
 <title>AIVA</title>
-<link rel="icon" type="image/png" href="assets/img/vaic-mini-colour.png?v=20260515d">
-<link rel="apple-touch-icon" href="assets/img/vaic-mini-colour.png?v=20260515d">
-<link href="https://fonts.googleapis.com/css2?family=Mukta:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/base.css?v=20260515d">
+<link rel="icon" type="image/png" href="assets/img/vaic-mini-colour.png?v=20260515e">
+<link rel="apple-touch-icon" href="assets/img/vaic-mini-colour.png?v=20260515e">
+<link href="https://fonts.googleapis.com/css2?family=Mukta:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/base.css?v=20260515e">
 <style>
 /* ====== AIR INDIA RED LOGIN — MINIMAL ====== */
 body {
@@ -127,10 +127,14 @@ body::after {
 
 .login-form .field { margin-bottom: 12px; }
 .login-form .label {
-  font-family: var(--font-mono); font-size: 9.5px;
-  letter-spacing: .26em; text-transform: uppercase;
-  color: rgba(255,225,89,.85);
-  margin-bottom: 6px; display: block;
+  /* Premium label treatment — Cormorant Garamond, slim weight, generous tracking */
+  font-family: 'Cormorant Garamond', 'Mukta', serif;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .34em;
+  text-transform: uppercase;
+  color: #FFE9A8;
+  margin-bottom: 8px; display: block;
 }
 .login-form .input {
   width: 100%;
@@ -151,12 +155,18 @@ body::after {
 
 .login-form .demo {
   margin: 8px 0 16px;
-  padding: 10px 14px;
-  background: rgba(255,225,89,.08);
-  border: 1px dashed rgba(255,225,89,.4);
+  padding: 12px 14px;
+  background: rgba(255,225,89,.06);
+  border: 1px dashed rgba(255,225,89,.3);
   border-radius: 11px;
-  font-family: var(--font-mono); font-size: 11px;
-  color: var(--ai-cream); text-align: center; line-height: 1.6;
+  font-family: 'Cormorant Garamond', 'Mukta', serif;
+  font-size: 14px;
+  letter-spacing: .28em;
+  font-weight: 500;
+  text-transform: uppercase;
+  color: #FFE9A8;
+  text-align: center;
+  line-height: 1;
 }
 .login-form .demo a { color: #FFE159; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 
@@ -194,18 +204,24 @@ body::after {
    with a 60-second contact form. */
 .inquiry-tab {
   position: fixed; bottom: 0; left: 0; right: 0;
-  padding: 10px 18px;
-  background: rgba(10,7,9,.62);
+  padding: 14px 18px;
+  background: rgba(10,7,9,.66);
   backdrop-filter: blur(14px) saturate(160%);
   -webkit-backdrop-filter: blur(14px) saturate(160%);
   border-top: 1px solid rgba(255,225,89,.22);
-  display: flex; justify-content: center; align-items: center; gap: 10px;
-  font-family: var(--font-mono); font-size: 11px;
-  color: rgba(248,241,228,.78); letter-spacing: .14em;
+  display: flex; justify-content: center; align-items: center; gap: 14px;
+  font-family: 'Cormorant Garamond', 'Mukta', serif;
+  font-size: 16px;
+  font-weight: 400;
+  color: rgba(248,241,228,.82);
+  letter-spacing: .04em;
   z-index: 50;
 }
 .inquiry-tab a {
-  color: #FFE159; text-decoration: underline; text-underline-offset: 3px;
+  color: #FFE9A8;
+  font-style: italic;
+  text-decoration: underline; text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
   cursor: pointer;
 }
 .inq-modal {
@@ -266,9 +282,9 @@ body::after {
 
 <div class="stage">
   <div class="brand" id="brandTap" role="button" aria-label="Sign in">
-    <img class="logo" src="assets/img/vaic-logo-colour.png?v=20260515d" alt="Air India Virtual" onerror="this.onerror=null; this.src='assets/img/vaic-logo-colour.svg?v=20260515d'"/>
+    <img class="logo" src="assets/img/vaic-logo-colour.png?v=20260515e" alt="Air India Virtual" onerror="this.onerror=null; this.src='assets/img/vaic-logo-colour.svg?v=20260515e'"/>
     <div class="gold-rule" aria-hidden="true"></div>
-    <img class="maharaja" src="assets/img/maharaja.png?v=20260515d" alt="Air India Maharaja" onerror="this.onerror=null; this.src='assets/img/maharaja.svg?v=20260515d'"/>
+    <img class="maharaja" src="assets/img/maharaja.png?v=20260515e" alt="Air India Maharaja" onerror="this.onerror=null; this.src='assets/img/maharaja.svg?v=20260515e'"/>
   </div>
 
   <div class="login-stage" id="loginStage">
@@ -287,9 +303,7 @@ body::after {
         <label class="label">Password</label>
         <input class="input" type="text" id="password" name="aiva_pass_3917" required autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" placeholder="••••••••" style="-webkit-text-security:disc; text-security:disc; font-family:text-security-disc, var(--font-sans);"/>
       </div>
-      <div class="demo">
-        Crew only · 14 named pilots have access.
-      </div>
+      <div class="demo">Crew only</div>
       <button type="submit" class="submit">Begin Pre-flight →</button>
     </form>
   </div>
@@ -316,11 +330,11 @@ body::after {
   </div>
 </div>
 
-<script src="assets/js/store.js?v=20260515d"></script>
-<script src="assets/js/data.js?v=20260515d"></script>
-<script src="assets/js/util.js?v=20260515d"></script>
-<script src="assets/js/auth.js?v=20260515d"></script>
-<script src="assets/js/maharaja.js?v=20260515d"></script>
+<script src="assets/js/store.js?v=20260515e"></script>
+<script src="assets/js/data.js?v=20260515e"></script>
+<script src="assets/js/util.js?v=20260515e"></script>
+<script src="assets/js/auth.js?v=20260515e"></script>
+<script src="assets/js/maharaja.js?v=20260515e"></script>
 <script>
   const stage = document.getElementById('loginStage');
   const brand = document.getElementById('brandTap');

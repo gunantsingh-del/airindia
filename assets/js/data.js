@@ -834,6 +834,9 @@ AIVA.RAW = [
 
   /* === COK / BAH / DOH / SHJ Gulf network — added per published IX schedule === */
   ['373','COK','BAH','IX','B38M'], ['1475','COK','BLR','IX','B38M'], ['1546','COK','BLR','IX','B38M'], ['5312','COK','BLR','IX','B38M'], ['337','COK','MCT','IX','B38M'], ['375','COK','DOH','IX','B38M'], ['359','COK','DMM','IX','B38M'], ['385','COK','DMM','IX','B38M'], ['397','COK','JED','IX','B38M'], ['321','COK','RUH','IX','B38M'], ['347','COK','AUH','IX','B38M'], ['335','COK','AAN','IX','B38M'], ['351','COK','SHJ','IX','B38M'], ['863','BLR','BAH','IX','B38M'], ['427','COK','BAH','IX','B38M'], ['173','DEL','BAH','IX','A20N'], ['359','CCJ','BAH','IX','B38M'], ['385','CCJ','BAH','IX','B38M'], ['847','IXE','BAH','IX','B38M'], ['581','TRV','BAH','IX','B38M'], ['864','BAH','BLR','IX','B38M'], ['428','BAH','COK','IX','B38M'], ['174','BAH','DEL','IX','A20N'], ['386','BAH','CCJ','IX','B38M'], ['848','BAH','IXE','IX','B38M'], ['582','BAH','TRV','IX','B38M'], ['138','ATQ','SHJ','IX','B38M'], ['746','CNN','SHJ','IX','B38M'], ['352','CCJ','SHJ','IX','B38M'], ['546','TRV','SHJ','IX','B38M'], ['184','VNS','SHJ','IX','A320'], ['137','SHJ','ATQ','IX','B38M'], ['135','SHJ','DEL','IX','A20N'], ['205','SHJ','JAI','IX','B38M'], ['745','SHJ','CNN','IX','B38M'], ['351','SHJ','CCJ','IX','B38M'], ['545','SHJ','TRV','IX','B38M'], ['183','SHJ','VNS','IX','A320'],
+
+  /* === MCT / MAA / CCJ schedules — added per published IX listing === */
+  ['5305','BLR','MAA','IX','B738'], ['690','SIN','MAA','IX','B738'], ['611','DXB','MAA','IX','B738'], ['615','DXB','MAA','IX','B738'], ['5306','MAA','BLR','IX','B738'], ['689','MAA','SIN','IX','B738'], ['612','MAA','DXB','IX','B738'], ['616','MAA','DXB','IX','B738'], ['1489','BLR','CCJ','IX','B738'], ['5313','BLR','CCJ','IX','B38M'], ['5314','BLR','CCJ','IX','B38M'], ['398','JED','CCJ','IX','B38M'],
 ];
 
 /* ---------- HELPERS ---------- */

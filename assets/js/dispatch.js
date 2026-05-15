@@ -29,11 +29,18 @@ AIVA.Dispatch = (() => {
     const custom = (AIVA.Store?.get?.('hoppie_proxy', '') || '').trim();
     const list = [];
     if (custom) list.push(custom + enc);
+    /* ALL proxies must receive the target URL ENCODED — otherwise the
+       `&` between Hoppie query params (from=, to=, type=, packet=) gets
+       interpreted by the proxy as its OWN param separator, stripping
+       everything after `logon`. Hoppie then responds
+       `error {no from address}` which is exactly the bug pilots hit
+       when corsproxy.io rate-limited and the chain fell through to
+       codetabs/thingproxy with the raw URL. */
     list.push(
       'https://corsproxy.io/?' + enc,
       'https://api.allorigins.win/raw?url=' + enc,
-      'https://api.codetabs.com/v1/proxy?quest=' + url,   // codetabs takes raw URL
-      'https://thingproxy.freeboard.io/fetch/' + url,
+      'https://api.codetabs.com/v1/proxy?quest=' + enc,
+      'https://thingproxy.freeboard.io/fetch/' + enc,
     );
     return list;
   }

@@ -70,8 +70,7 @@ AIVA.FLEET = [
   /* === B737-800 (Express) === */
   ...['VT-AXA','VT-AXB','VT-AXC','VT-AXE','VT-AXF','VT-AXG','VT-AXH','VT-AXI','VT-AXJ','VT-AXK','VT-AXM','VT-AXN','VT-AXP','VT-AXQ','VT-AXR','VT-AXT','VT-AXU','VT-AXV','VT-AXX','VT-AXZ','VT-BXA','VT-BXB','VT-BXC','VT-BXD','VT-BXE','VT-BXF','VT-BXG','VT-BXH','VT-BXI','VT-BXJ','VT-BXK'].map(r => ({ reg:r, type:'B738', operator:'IX' })),
   /* === B737 MAX 8 (Express) === */
-  ...['VT-ATA','VT-ATB','VT-ATC','VT-ATD','VT-ATE','VT-ATF','VT-ATG','VT-ATH','VT-ATI','VT-ATJ','VT-ATK','VT-ATL','VT-ATM','VT-ATN','VT-ATO','VT-ATP','VT-ATQ','VT-ATR','VT-ATS'].map(r => ({ reg:r, type:'B38M', operator:'IX' })),
-];
+  ...['VT-ATA','VT-ATB','VT-ATC','VT-ATD','VT-ATE','VT-ATF','VT-ATG','VT-ATH','VT-ATI','VT-ATJ','VT-ATK','VT-ATL','VT-ATM','VT-ATN','VT-ATO','VT-ATP','VT-ATQ','VT-ATR','VT-ATS'].map(r => ({ reg:r, type:'B38M', operator:'IX' }))];
 
 /* ---------- AIRPORTS ---------- */
 AIVA.AIRPORTS = {
@@ -347,7 +346,7 @@ AIVA.RAW = [
   ['1176','BOM','IXB','IX','A20N'],['1547','IXB','BOM','IX','A20N'],
   ['1164','BOM','BBI','IX','A20N'],['1025','BBI','BOM','IX','A20N'],
   ['2398','BOM','PAT','IX','A20N'],['2401','PAT','BOM','IX','A20N'],
-  ['1237','BOM','IXR','IX','A20N'],['2373','IXR','BOM','IX','A20N'],
+  ['1237','IXR','BOM','IX','A20N'],['2373','BOM','IXR','IX','A20N'],
   ['5258','BOM','ATQ','IX','A20N'],['5259','ATQ','BOM','IX','A20N'],
   ['2396','BOM','IXC','IX','A20N'],['2397','IXC','BOM','IX','A20N'],
   ['2394','BOM','DED','IX','A20N'],['2395','DED','BOM','IX','A20N'],
@@ -404,9 +403,9 @@ AIVA.RAW = [
   ['1562','DIB','DEL','IX','A20N'],['1561','DEL','DIB','IX','A20N'],
   ['1348','PAT','DEL','IX','A20N'],['1346','DEL','PAT','IX','A20N'],
   ['1953','PAT','BLR','IX','A20N'],['1504','BLR','PAT','IX','A20N'],
-  ['1053','IXR','DEL','IX','A20N'],['1046','DEL','IXR','IX','A20N'],
-  ['2176','IXR','BLR','IX','A20N'],['1239','BLR','IXR','IX','A20N'],
-  ['2375','IXR','HYD','IX','A20N'],['2372','HYD','IXR','IX','A20N'],
+  ['1053','DEL','IXR','IX','A20N'],['1046','IXR','DEL','IX','A20N'],
+  ['2176','BLR','IXR','IX','A20N'],['1239','IXR','BLR','IX','A20N'],
+  ['2375','HYD','IXR','IX','A20N'],['2372','IXR','HYD','IX','A20N'],
   ['1684','ATQ','DEL','IX','A20N'],['1683','DEL','ATQ','IX','A20N'],
   ['1062','IXC','BLR','IX','A20N'],['1089','BLR','IXC','IX','A20N'],
   ['2017','DED','BLR','IX','A20N'],['1527','BLR','DED','IX','A20N'],
@@ -784,7 +783,6 @@ AIVA.RAW = [
   /* DEL → narrowbody hubs */
   ['1503','DEL','BLR','IX','B38M'],['1520','DEL','BLR','IX','B38M'],['1542','DEL','BLR','IX','B38M'],
   ['1026','DEL','BOM','IX','B38M'],['2402','DEL','BOM','IX','B38M'],
-  ['1618','DEL','PNQ','IX','A320'],
   ['193','DEL','DXB','IX','A320'],['164','DEL','MCT','IX','B738'],['174','DEL','DMM','IX','A20N'],
   ['178','DEL','AUH','IX','B738'],['136','DEL','SHJ','IX','A20N'],
   ['1294','DEL','STV','IX','B738'],['2386','DEL','AMD','IX','A320'],
@@ -826,12 +824,13 @@ AIVA.RAW = [
   /* IXC AXB */
   ['2385','IXC','AMD','IX','A320'],
   /* JAI AXB */
-  ['2458','JAI','PNQ','IX','B38M'],['206','JAI','SHJ','IX','B38M'],
+  ,['206','JAI','SHJ','IX','B38M'],
   /* LKO AXB */
   ['194','LKO','DXB','IX','A20N'],
   /* IMF AXB */
-  ['1369','IMF','GAU','IX','B38M'],['1218','IMF','BOM','IX','B38M'],
-  ['2712','IMF','PNQ','IX','B38M'],['205','IMF','SHJ','IX','B38M'],
+  ['1369','IMF','GAU','IX','B38M'],['1218','IMF','BOM','IX','B38M'],['205','IMF','SHJ','IX','B38M']
+  /* === Ranchi (IXR) + extra Pune (PNQ) frequencies — added per ops update === */
+  ['1244','BLR','IXR','IX','B38M'], ['1530','BLR','IXR','IX','B38M'], ['1047','DEL','IXR','IX','B38M'], ['1052','DEL','IXR','IX','B38M'], ['2379','DEL','IXR','IX','B38M'], ['1238','BOM','IXR','IX','B38M'], ['2053','IXR','BLR','IX','A20N'], ['2786','IXR','BLR','IX','B38M'], ['1050','IXR','DEL','IX','A20N'], ['1054','IXR','DEL','IX','B38M'], ['2378','IXR','DEL','IX','B38M'], ['2374','IXR','BOM','IX','B38M'], ['242','PNQ','BKK','IX','B38M'], ['241','BKK','PNQ','IX','B38M'], ['1231','PNQ','DEL','IX','B38M'], ['1257','DEL','PNQ','IX','A320'], ['1971','BLR','PNQ','IX','B38M'], ['2609','BLR','PNQ','IX','B38M'], ['2873','BLR','PNQ','IX','B38M'], ['2913','BLR','PNQ','IX','B38M'],
 ];
 
 /* ---------- HELPERS ---------- */

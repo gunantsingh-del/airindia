@@ -2626,10 +2626,31 @@ The SimBrief OFP — what's on each page:
     const addLayers = () => {
       if (liveMap.getSource('aiva-live-aircraft')) return;
       liveMap.addSource('aiva-live-trails',   { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
+      liveMap.addSource('aiva-live-route',    { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
       liveMap.addSource('aiva-live-aircraft', { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
+      /* Planned route — dashed gold great-circle from departure → arrival.
+         Sits UNDER the actual flown trail so the breadcrumb line clearly
+         overlays the plan. */
+      liveMap.addLayer({
+        id:'aiva-live-route-line', type:'line', source:'aiva-live-route',
+        layout: { 'line-cap':'round', 'line-join':'round' },
+        paint:{
+          'line-color':       '#FFE159',
+          'line-width':       1.8,
+          'line-opacity':     0.55,
+          'line-dasharray':   [3, 3],
+        },
+      });
+      /* Flown trail — brighter, wider, semi-glow for FR24 feel. */
       liveMap.addLayer({
         id:'aiva-live-trails-line', type:'line', source:'aiva-live-trails',
-        paint:{ 'line-color': ['get','color'], 'line-width': 2.5, 'line-opacity': 0.85 },
+        layout: { 'line-cap':'round', 'line-join':'round' },
+        paint:{
+          'line-color': ['get','color'],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2, 7, 3.5, 11, 5],
+          'line-opacity': 0.92,
+          'line-blur': 0.5,
+        },
       });
       /* Outer gold halo on the player's dot — drawn FIRST so the inner
          red dot sits on top. Makes the player impossible to miss against
@@ -2728,6 +2749,50 @@ The SimBrief OFP — what's on each page:
         <div style="margin-top:2px;text-align:center;font-family:var(--font-mono);font-size:10px;color:#FFE159;text-shadow:0 0 4px rgba(0,0,0,.9),0 0 2px rgba(0,0,0,1);font-weight:700;letter-spacing:.05em;" id="efbMeLabel">—</div>
       `;
       aivaLayer.appendChild(meDot);
+
+      /* ElevateX-style flight details card. Anchored top-right inside
+         the AIVA map layer. updateFlightCard() fills in the values on
+         every tick — booking data + live SimConnect telemetry. Hidden
+         when there's no active flight (just shows base position). */
+      const flightCard = document.createElement('div');
+      flightCard.id = 'efbFlightCard';
+      flightCard.style.cssText = [
+        'position:absolute','top:14px','right:14px',
+        'width:280px','padding:14px 16px',
+        'background:rgba(20,8,12,.86)','backdrop-filter:blur(18px)','-webkit-backdrop-filter:blur(18px)',
+        'border:1px solid rgba(255,225,89,.25)','border-radius:14px',
+        'box-shadow:0 18px 48px rgba(0,0,0,.55)','color:#F8F1E4',
+        'font-family:var(--font-sans)','font-size:12px','line-height:1.45',
+        'z-index:6','display:none',
+      ].join(';');
+      flightCard.innerHTML = `
+        <div id="efbFcHdr" style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding-bottom:10px;border-bottom:1px solid rgba(255,225,89,.18);">
+          <div>
+            <div class="mono" style="font-size:10px;letter-spacing:.18em;color:rgba(255,225,89,.7);text-transform:uppercase;">FLIGHT</div>
+            <div class="display" id="efbFcFno" style="font-size:18px;font-weight:700;color:var(--ai-cream);margin-top:2px;">—</div>
+            <div class="mono" id="efbFcCallsign" style="font-size:10.5px;color:rgba(255,225,89,.85);margin-top:1px;">—</div>
+          </div>
+          <div id="efbFcPhase" class="mono" style="font-size:9px;letter-spacing:.16em;padding:4px 9px;border-radius:99px;background:rgba(255,225,89,.12);color:#FFE159;border:1px solid rgba(255,225,89,.35);align-self:flex-start;">—</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 18px 1fr;gap:6px;align-items:center;padding:12px 0;">
+          <div>
+            <div class="display" id="efbFcDep" style="font-size:22px;font-weight:700;color:var(--ai-cream);line-height:1;">—</div>
+            <div class="mono" id="efbFcDepCity" style="font-size:10px;color:rgba(248,241,228,.55);margin-top:3px;">—</div>
+          </div>
+          <div style="text-align:center;color:rgba(255,225,89,.7);font-size:14px;">✈</div>
+          <div style="text-align:right;">
+            <div class="display" id="efbFcArr" style="font-size:22px;font-weight:700;color:var(--ai-cream);line-height:1;">—</div>
+            <div class="mono" id="efbFcArrCity" style="font-size:10px;color:rgba(248,241,228,.55);margin-top:3px;">—</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06);font-family:var(--font-mono);font-size:11.5px;">
+          <div><div style="font-size:9px;letter-spacing:.14em;color:rgba(248,241,228,.45);text-transform:uppercase;">Aircraft</div><div id="efbFcAc" style="margin-top:2px;color:#F8F1E4;">—</div></div>
+          <div><div style="font-size:9px;letter-spacing:.14em;color:rgba(248,241,228,.45);text-transform:uppercase;">Registration</div><div id="efbFcReg" style="margin-top:2px;color:#F8F1E4;">—</div></div>
+          <div><div style="font-size:9px;letter-spacing:.14em;color:rgba(248,241,228,.45);text-transform:uppercase;">Distance left</div><div id="efbFcDist" style="margin-top:2px;color:#F8F1E4;">—</div></div>
+          <div><div style="font-size:9px;letter-spacing:.14em;color:rgba(248,241,228,.45);text-transform:uppercase;">ETA</div><div id="efbFcEta" style="margin-top:2px;color:#F8F1E4;">—</div></div>
+        </div>
+      `;
+      aivaLayer.appendChild(flightCard);
 
       /* Reposition the HTML dot on every map movement. */
       const repositionMeDot = () => {
@@ -2862,6 +2927,61 @@ The SimBrief OFP — what's on each page:
   AIVA.FSUIPC?.on?.('connect',    () => updateLivePill(document));
   AIVA.FSUIPC?.on?.('disconnect', () => updateLivePill(document));
 
+  /* ElevateX-style flight details card updater. Pulls booking data
+     (flight number, route, aircraft, registration) + live SimConnect
+     telemetry (alt, gs, hdg, position) and renders into the floating
+     card we appended to the map's AIVA layer. Hidden when no flight
+     is booked / in progress. */
+  function updateFlightCard(host, fl, dep, arr, myPos, props) {
+    if (!host) return;
+    const card = host.querySelector('#efbFlightCard') || document.getElementById('efbFlightCard');
+    if (!card) return;
+    if (!fl || !arr) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+
+    const $c = (id) => card.querySelector('#' + id);
+    $c('efbFcFno').textContent     = fl.fno || '—';
+    $c('efbFcCallsign').textContent= (props?.callsign || fl.cs || '').toUpperCase();
+    $c('efbFcDep').textContent     = (dep?.iata || fl.from || '—').toUpperCase();
+    $c('efbFcDepCity').textContent = dep?.city || '';
+    $c('efbFcArr').textContent     = (arr.iata || fl.to || '—').toUpperCase();
+    $c('efbFcArrCity').textContent = arr.city || '';
+    $c('efbFcAc').textContent      = fl.ac || '—';
+    /* Registration: prefer the SimConnect ATC ID if exposed (future);
+       fall back to the booking's regOverride or the type, or em-dash. */
+    $c('efbFcReg').textContent     = fl.reg || '—';
+
+    /* Phase badge — read AIVA.FSUIPC.phase() if available. */
+    const phase = AIVA.FSUIPC?.phase?.() || '—';
+    $c('efbFcPhase').textContent = phase;
+
+    /* Distance + ETA — great-circle from current pos (or DEP) to ARR,
+       divided by current ground speed to get hours remaining. */
+    const lat1 = myPos ? myPos[1] : dep?.lat;
+    const lon1 = myPos ? myPos[0] : dep?.lon;
+    if (lat1 == null || lon1 == null) {
+      $c('efbFcDist').textContent = '—';
+      $c('efbFcEta').textContent  = '—';
+      return;
+    }
+    const toRad = d => d * Math.PI / 180;
+    const R = 3440.065; // nautical miles
+    const dlat = toRad(arr.lat - lat1);
+    const dlon = toRad(arr.lon - lon1);
+    const a = Math.sin(dlat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(arr.lat))*Math.sin(dlon/2)**2;
+    const distNm = Math.round(2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+    $c('efbFcDist').textContent = distNm.toLocaleString() + ' nm';
+
+    const gs = props?.gs;
+    if (gs && gs > 60) {
+      const minsLeft = (distNm / gs) * 60;
+      const eta = new Date(Date.now() + minsLeft * 60000);
+      $c('efbFcEta').textContent = eta.toISOString().slice(11,16) + 'z';
+    } else {
+      $c('efbFcEta').textContent = '—';
+    }
+  }
+
   function startLivePosBroadcast() {
     if (livePosTimer) clearInterval(livePosTimer);
     const me = AIVA.Auth.currentPilot();
@@ -2876,7 +2996,17 @@ The SimBrief OFP — what's on each page:
       if (lat == null || lon == null) return;
       const key = 'aiva.live.' + (me?.id || 'anon');
       const prev = JSON.parse(localStorage.getItem(key) || '{}');
-      const trail = (prev.trail || []).concat([[lon, lat]]).slice(-30);
+      /* Long trail — 240 points capped. At the 500ms-throttled state
+         broadcast + the 5 s tick, that's roughly 20-30 min of breadcrumbs,
+         enough for any short-haul to keep the full track visible on the
+         map FR24-style. We only push a new point if we've actually moved
+         (> 0.0003° latlon, ~30 m) to avoid burning the buffer while parked
+         at the gate. */
+      const lastPt = (prev.trail || []).slice(-1)[0];
+      const moved = !lastPt || Math.hypot(lastPt[0]-lon, lastPt[1]-lat) > 0.0003;
+      const trail = moved
+        ? (prev.trail || []).concat([[lon, lat]]).slice(-240)
+        : (prev.trail || []).slice(-240);
       localStorage.setItem(key, JSON.stringify({
         pilotId: me?.id, pilotName: me?.name, callsign: myCall,
         fno: f?.fno, ac: f?.ac, from: f?.from, to: f?.to,
@@ -2967,6 +3097,55 @@ The SimBrief OFP — what's on each page:
         console.warn('[AIVA Live] aircraft features ready but map source missing — style may not have loaded yet. Features:', aircraft);
       }
       liveMap?.getSource('aiva-live-trails')?.setData({ type:'FeatureCollection', features: trails });
+
+      /* Planned-route arc — from current SimConnect position (or DEP if
+         no telemetry yet) to ARR airport, as a great-circle line. Updates
+         every tick so the line shortens as the player progresses. */
+      const myPos = aircraft.find(f => f.properties.isMe)?.geometry?.coordinates;
+      const fp = P.get('flight_in_progress');
+      const fl = fp ? AIVA.findFlight(fp.fno) : activeFlight();
+      const dep = fl ? AIVA.airport(fl.from) : null;
+      const arr = fl ? AIVA.airport(fl.to)   : null;
+      let routeFeatures = [];
+      if (fl && arr) {
+        const startPt = myPos || (dep ? [dep.lon, dep.lat] : null);
+        if (startPt) {
+          /* Greater-circle approximation: 48 segments interpolated. */
+          const segs = 48;
+          const coords = [];
+          const toRad = d => d * Math.PI / 180;
+          const toDeg = r => r * 180 / Math.PI;
+          const lat1 = toRad(startPt[1]), lon1 = toRad(startPt[0]);
+          const lat2 = toRad(arr.lat),    lon2 = toRad(arr.lon);
+          const d = 2 * Math.asin(Math.sqrt(
+            Math.sin((lat2-lat1)/2)**2 +
+            Math.cos(lat1)*Math.cos(lat2) * Math.sin((lon2-lon1)/2)**2
+          ));
+          for (let i = 0; i <= segs; i++) {
+            const f = i / segs;
+            const A = Math.sin((1-f)*d) / Math.sin(d);
+            const B = Math.sin(f*d) / Math.sin(d);
+            const x = A*Math.cos(lat1)*Math.cos(lon1) + B*Math.cos(lat2)*Math.cos(lon2);
+            const y = A*Math.cos(lat1)*Math.sin(lon1) + B*Math.cos(lat2)*Math.sin(lon2);
+            const z = A*Math.sin(lat1) + B*Math.sin(lat2);
+            const ilat = Math.atan2(z, Math.sqrt(x*x + y*y));
+            const ilon = Math.atan2(y, x);
+            coords.push([toDeg(ilon), toDeg(ilat)]);
+          }
+          routeFeatures.push({
+            type:'Feature',
+            properties: {},
+            geometry: { type:'LineString', coordinates: coords },
+          });
+        }
+      }
+      liveMap?.getSource('aiva-live-route')?.setData({ type:'FeatureCollection', features: routeFeatures });
+
+      /* ElevateX-style flight details card — top-right of the map.
+         Booking info (flight no, route, ac type, reg) + live telemetry
+         (alt, vs, gs, hdg, distance remaining, ETA). Updated each tick
+         from the same aircraft feature we just pushed. */
+      updateFlightCard(host, fl, dep, arr, myPos, aircraft.find(f => f.properties.isMe)?.properties);
 
       /* Nearby panel */
       const nb = host.querySelector('#efbNearby');

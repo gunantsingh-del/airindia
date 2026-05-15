@@ -188,8 +188,12 @@
       const btn = document.getElementById('pwaInstall');
       if (btn) btn.hidden = true;
     });
-    /* Hide the install button if we're already running as an installed PWA */
-    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+    /* Hide the install button if we're already running as an installed PWA
+       OR inside the Electron desktop wrapper (electron/preload.js exposes
+       window.AIVA_DESKTOP). */
+    if (window.AIVA_DESKTOP?.isDesktop
+        || window.matchMedia('(display-mode: standalone)').matches
+        || window.navigator.standalone) {
       setTimeout(() => { const b = document.getElementById('pwaInstall'); if (b) b.hidden = true; }, 0);
     }
 

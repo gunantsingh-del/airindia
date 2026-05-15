@@ -1,1 +1,10 @@
 .DS_Store
+node_modules/
+dist-electron/
+*.exe.blockmap
+*.log
+package-lock.json
+
+# Keep the source files; ignore the build artifacts
+build/
+out/

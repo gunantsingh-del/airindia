@@ -34,10 +34,39 @@ AIVA.FSUIPC = (() => {
     lon:      { offset: 0x0568, length: 8, type:'double' },// longitude
   };
 
+  /* Build the candidate WebSocket URLs.
+     • If AIVA is served over HTTPS (airindiavirtual.online) the browser
+       blocks plain ws:// as Mixed Content even to localhost. Try wss://
+       first in that case so the SSL-enabled FSUIPC WebSockets Server
+       just works. Fall back to ws:// for users running locally / via
+       the Electron .exe / from http://.
+     • If AIVA is served over HTTP / file:// (Electron build) plain
+       ws:// is allowed and the SSL cert dance is unnecessary, so we
+       try ws:// first. */
+  function candidateUrls() {
+    const isHttps = (typeof location !== 'undefined' && location.protocol === 'https:');
+    return isHttps
+      ? ['wss://localhost:2048/fsuipc/', 'ws://localhost:2048/fsuipc/']
+      : ['ws://localhost:2048/fsuipc/',  'wss://localhost:2048/fsuipc/'];
+  }
+
   async function connect() {
     if (ws) try { ws.close(); } catch(_){}
+    /* Try each candidate URL in order. The first one that opens wins. */
+    const urls = candidateUrls();
+    for (let i = 0; i < urls.length; i++) {
+      try { return await connectAt(urls[i]); }
+      catch (e) {
+        if (i === urls.length - 1) throw e;
+        /* fall through to next protocol */
+      }
+    }
+    throw new Error('FSUIPC unreachable on any protocol');
+  }
+
+  async function connectAt(url) {
     return new Promise((resolve, reject) => {
-      try { ws = new WebSocket('ws://localhost:2048/fsuipc/'); }
+      try { ws = new WebSocket(url); }
       catch (e) { return reject(e); }
       ws.onopen = () => {
         connected = true;
@@ -126,18 +155,24 @@ AIVA.FSUIPC = (() => {
   let autoTimer = null;
   function probe() {
     if (connected || !autoStart) return;
-    try {
-      const test = new WebSocket('ws://localhost:2048/fsuipc/');
+    /* Probe BOTH protocols simultaneously so we don't add latency when
+       one is blocked by mixed content and the other works. The first one
+       to open wins; we close it and let connect() reopen the real socket. */
+    const urls = candidateUrls();
+    let resolved = false;
+    urls.forEach(url => {
+      let test;
+      try { test = new WebSocket(url); } catch { return; }
       const killTimer = setTimeout(() => { try { test.close(); } catch {} }, 1500);
       test.onopen = () => {
         clearTimeout(killTimer);
         try { test.close(); } catch {}
-        /* Server is alive — hand off to the real connect() which keeps
-           the socket open and subscribes to offsets. */
+        if (resolved) return;
+        resolved = true;
         connect().catch(() => {});
       };
       test.onerror = () => { clearTimeout(killTimer); };
-    } catch {}
+    });
   }
   function startAutoDetect() {
     autoStart = true;

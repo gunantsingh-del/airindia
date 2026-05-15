@@ -1,0 +1,62 @@
+{
+  "name": "aiva-desktop",
+  "productName": "Air India Virtual",
+  "version": "1.0.0",
+  "description": "Air India Virtual crew portal — Windows desktop wrapper around airindiavirtual.online. Loads the live site, auto-detects FSUIPC, runs from file:// so Mixed Content rules don't block the local WebSocket bridge.",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win --x64 --publish never",
+    "dist:winportable": "electron-builder --win portable --x64 --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:all": "electron-builder -mw --publish never"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "online.airindiavirtual.aiva",
+    "productName": "AIVA",
+    "copyright": "© 2026 Air India Virtual",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "assets/img/vaic-mini-colour.png",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "assets/img/vaic-mini-colour.png",
+      "publisherName": "Air India Virtual",
+      "artifactName": "AIVA-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "AIVA",
+      "uninstallDisplayName": "Air India Virtual",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "assets/img/vaic-mini-colour.png",
+      "uninstallerIcon": "assets/img/vaic-mini-colour.png"
+    },
+    "portable": {
+      "artifactName": "AIVA-Portable-${version}.${ext}"
+    },
+    "mac": {
+      "icon": "assets/img/vaic-mini-colour.png",
+      "category": "public.app-category.travel",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ]
+    }
+  }
+}

@@ -1632,18 +1632,23 @@
           we use FSUIPC7's built-in WebSocket Server instead so you don't need a second app.
           <b>If you're seeing "port 2048" errors, the server isn't running yet.</b>
         </p>
+        <div class="eyebrow mt-3" style="color:#FBBF24;">⚠ HTTPS Mixed-Content blocking</div>
+        <p class="text-dim" style="font-size:12.5px;line-height:1.6;margin-top:6px;">
+          If you're using AIVA in a normal browser at <code>airindiavirtual.online</code> (HTTPS), Chrome will <b>block</b> the plain <code>ws://localhost:2048</code> connection as Mixed Content. You'll see "Cannot reach FSUIPC" even when the server is clearly Running. Two ways around it:
+        </p>
+        <ol style="font-size:13px;color:var(--text-dim);line-height:1.9;padding-left:22px;margin-top:6px;">
+          <li><b>Quick fix:</b> In FSUIPC WebSockets Server, tick <b>Use SSL</b>, save, restart. The Client URL becomes <code>wss://localhost:2048/fsuipc/</code>. First time you connect, AIVA shows a "certificate not trusted" toast — open <a href="https://localhost:2048/fsuipc/" target="_blank" class="text-gold">https://localhost:2048/fsuipc/</a> in the same browser, click <b>Advanced → Proceed</b> to accept the self-signed cert. Then come back, it'll just work.</li>
+          <li><b>Permanent fix:</b> Install the AIVA desktop <code>.exe</code> (latest release on the <a href="https://github.com/gunantsingh-del/airindia/releases" target="_blank" class="text-gold">GitHub releases page</a>). It runs from <code>file://</code> so Mixed Content doesn't apply, and plain <code>ws://localhost:2048/fsuipc/</code> works directly with no cert dance.</li>
+        </ol>
         <div class="eyebrow mt-3">Setup — FSUIPC WebSockets Server (Paul Henty)</div>
         <ol style="font-size:13px;color:var(--text-dim);line-height:1.9;padding-left:22px;margin-top:8px;">
-          <li>Download <b>FSUIPC WebSockets Server</b> from <a href="https://www.fsuipc.com/" target="_blank" rel="noopener" class="text-gold">fsuipc.com</a> (free companion to FSUIPC7) — it's the <code>FSUIPC WebSockets Server - V1.x.x</code> app shown in the Chief Pilot's screenshot.</li>
-          <li>Open the app. Confirm <b>Listen on IP Address</b> = <code>localhost</code>, <b>Listen on Port</b> = <code>2048</code>, <b>Use SSL</b> = unchecked. Client URL should read <code>ws://localhost:2048/fsuipc/</code>.</li>
-          <li>Click the <b>Start</b> button (top right). <b>Web Services</b> badge flips to <span style="color:#6EE7B7;">Running</span>.</li>
-          <li>Launch MSFS, load aircraft. FSUIPC WebSockets Server automatically talks to FSUIPC7 once MSFS is up.</li>
-          <li>AIVA auto-detects within ~5 seconds — the topbar <span class="mono" style="color:#6EE7B7;">FSUIPC ●</span> chip lights up. Start Flight unlocks. Number of Sockets Connected in the FSUIPC WebSockets Server window goes from 0 to 1.</li>
+          <li>Download <b>FSUIPC WebSockets Server</b> from <a href="https://www.fsuipc.com/" target="_blank" rel="noopener" class="text-gold">fsuipc.com</a> (free companion to FSUIPC7).</li>
+          <li>Open the app. Listen on <code>localhost</code> + port <code>2048</code>. If you're using AIVA in a browser, tick <b>Use SSL</b>. If you're using the AIVA desktop .exe, leave SSL off.</li>
+          <li>Click <b>Start</b>. Web Services badge flips to <span style="color:#6EE7B7;">Running</span>.</li>
+          <li>Launch MSFS, load aircraft.</li>
+          <li>AIVA auto-detects within ~5 seconds — the topbar <span class="mono" style="color:#6EE7B7;">FSUIPC ●</span> chip lights up. Start Flight unlocks.</li>
         </ol>
-        <p class="text-dim" style="font-size:12.5px;line-height:1.6;margin-top:6px;">
-          <b>Want a fully native .exe install of AIVA itself?</b> Use the <b>Install AIVA</b> button in the portal topbar (Chrome / Edge). AIVA gets a Windows shortcut, opens in its own window without browser chrome, and auto-detects FSUIPC the same way.
-        </p>
-        <div class="eyebrow mt-3">Alternative bridge (if the above doesn't suit)</div>
+        <div class="eyebrow mt-3">Alternative bridge</div>
         <p class="text-dim" style="font-size:12.5px;line-height:1.6;margin-top:6px;">
           <a href="https://github.com/koesie10/fsuipc-websocket" target="_blank" rel="noopener" class="text-gold">koesie10/fsuipc-websocket</a> on GitHub —
           open-source single .exe with the same protocol. Run before MSFS.
@@ -1717,52 +1722,68 @@
           return;
         }
         setStatus('busy', 'CONNECTING…');
+        /* Mixed-content reality: an HTTPS-served page (airindiavirtual.online)
+           cannot open ws://, only wss://. Plain ws:// works in the Electron
+           .exe and from http:// origins. Try wss:// first when we're on
+           HTTPS, ws:// first when we're not. Whichever opens, we use. */
+        const isHttps = location.protocol === 'https:';
+        const urls = isHttps
+          ? ['wss://localhost:2048/fsuipc/', 'ws://localhost:2048/fsuipc/']
+          : ['ws://localhost:2048/fsuipc/',  'wss://localhost:2048/fsuipc/'];
         let opened = false;
-        try {
-          ws = new WebSocket('ws://localhost:2048/fsuipc/');
-        } catch (e) {
-          setStatus('off', 'OFFLINE');
-          setConnected(false);
-          return toast(`WebSocket failed: ${e.message}. Is FSUIPC's WebSocket server enabled?`, 'bad');
-        }
-        const timeout = setTimeout(() => {
-          if (!opened) {
-            try { ws.close(); } catch {}
+        let attempts = 0;
+
+        const tryNext = () => {
+          if (opened) return;
+          if (attempts >= urls.length) {
             setStatus('off', 'OFFLINE');
             setConnected(false);
-            toast('Timed out reaching ws://localhost:2048/fsuipc/. Open FSUIPC7 → Add-ons → WebSockets Server, tick Enable, restart FSUIPC.', 'bad', 6000);
+            const hint = isHttps
+              ? `Tried both wss:// and ws://. Most likely causes:
+                  1) FSUIPC WebSockets Server isn't running (start the .exe — green "Running" badge).
+                  2) Browser is blocking insecure ws:// from HTTPS (Mixed Content). Open FSUIPC WebSockets Server → tick "Use SSL" + Save → restart it → reconnect here. The address becomes wss://localhost:2048/fsuipc/ and the browser will let it through.
+                  3) Windows Firewall is blocking localhost:2048 — allow inbound on that port.
+                  4) Install the AIVA desktop .exe (Profile → Install AIVA) — it runs from file:// and skips Mixed Content entirely.`
+              : `Cannot reach FSUIPC at ws://localhost:2048/fsuipc/. Make sure FSUIPC WebSockets Server is Running.`;
+            toast(hint, 'bad', 12000);
+            return;
           }
-        }, 4000);
-        ws.onopen = () => {
-          opened = true;
-          clearTimeout(timeout);
-          setStatus('on', 'CONNECTED');
-          setConnected(true);
-          toast('FSUIPC connected · Start Flight unlocked.', 'ok');
-          ws.send(JSON.stringify({ command:'offsets.declare', name:'aiva', offsets:[
-            { name:'lat',  address:0x0560, type:'float64' },
-            { name:'lon',  address:0x0568, type:'float64' },
-            { name:'alt',  address:0x3324, type:'int32'   },
-            { name:'ias',  address:0x02BC, type:'int32'   },
-            { name:'gs',   address:0x02B4, type:'int32'   },
-            { name:'vs',   address:0x02C8, type:'int32'   },
-            { name:'hdg',  address:0x0580, type:'int32'   },
-            { name:'fuel', address:0x0B74, type:'int32'   },
-          ]}));
-          ws.send(JSON.stringify({ command:'offsets.read', name:'aiva', interval:1000 }));
+          const url = urls[attempts++];
+          setStatus('busy', attempts > 1 ? 'TRYING ALT…' : 'CONNECTING…');
+          try { ws = new WebSocket(url); }
+          catch (e) {
+            return tryNext();
+          }
+          const timeout = setTimeout(() => {
+            if (!opened) { try { ws.close(); } catch {} tryNext(); }
+          }, 3000);
+          ws.onopen = () => {
+            opened = true;
+            clearTimeout(timeout);
+            setStatus('on', 'CONNECTED');
+            setConnected(true);
+            toast(`FSUIPC connected via ${url.startsWith('wss') ? 'WSS (SSL)' : 'WS'} · Start Flight unlocked.`, 'ok');
+            ws.send(JSON.stringify({ command:'offsets.declare', name:'aiva', offsets:[
+              { name:'lat',  address:0x0560, type:'float64' },
+              { name:'lon',  address:0x0568, type:'float64' },
+              { name:'alt',  address:0x3324, type:'int32'   },
+              { name:'ias',  address:0x02BC, type:'int32'   },
+              { name:'gs',   address:0x02B4, type:'int32'   },
+              { name:'vs',   address:0x02C8, type:'int32'   },
+              { name:'hdg',  address:0x0580, type:'int32'   },
+              { name:'fuel', address:0x0B74, type:'int32'   },
+            ]}));
+            ws.send(JSON.stringify({ command:'offsets.read', name:'aiva', interval:1000 }));
+          };
+          ws.onmessage = (ev) => { try { update(JSON.parse(ev.data).data); } catch {} };
+          ws.onerror = () => { clearTimeout(timeout); if (!opened) tryNext(); };
+          ws.onclose = () => {
+            clearTimeout(timeout);
+            if (opened) { setStatus('off', 'DISCONNECTED'); setConnected(false); }
+            else tryNext();
+          };
         };
-        ws.onmessage = (ev) => { try { update(JSON.parse(ev.data).data); } catch {} };
-        ws.onerror = () => {
-          clearTimeout(timeout);
-          setStatus('off', 'OFFLINE');
-          setConnected(false);
-          if (!opened) toast('Cannot reach FSUIPC at ws://localhost:2048/fsuipc/. Check FSUIPC7 → Add-ons → WebSockets Server is enabled on port 2048.', 'bad', 6000);
-        };
-        ws.onclose = () => {
-          clearTimeout(timeout);
-          setStatus('off', 'DISCONNECTED');
-          setConnected(false);
-        };
+        tryNext();
       };
 
       $('#fsStart', c).onclick = () => {

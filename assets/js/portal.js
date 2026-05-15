@@ -32,6 +32,7 @@
       { id:'roster',     label:'My Roster',     icon:'calendar' },
       { id:'book',       label:'Book Roster',   icon:'plus', chip:'NEW' },
       { id:'flights',    label:'My Flights',    icon:'plane', chipDyn:'logCount' },
+      { id:'simbridge',  label:'Sim Bridge',    icon:'wifi' },
       { id:'import',     label:'Import',        icon:'upload' },
       { id:'stats',      label:'Statistics',    icon:'gauge' },
     ]},
@@ -237,8 +238,19 @@
       e.preventDefault();
       window.location.href = '/install?go=1';
     });
-    /* Hide the button if we're already inside the desktop wrapper. */
-    if (window.AIVA_DESKTOP?.isDesktop) {
+    /* Hide the "Install AIVA" pill in every place we know we're already
+       inside the desktop wrapper, not just AIVA_DESKTOP.isDesktop:
+         - file:// origin (Electron loads index from disk)
+         - user-agent contains "Electron" (older .exe builds without preload)
+         - AIVA_DESKTOP global is present in any shape
+       Belt-and-suspenders so pilots running an old .exe build still don't
+       see the redundant Install CTA. */
+    const insideDesktopApp =
+      !!window.AIVA_DESKTOP?.isDesktop ||
+      !!window.AIVA_DESKTOP ||
+      location.protocol === 'file:' ||
+      /Electron/i.test(navigator.userAgent || '');
+    if (insideDesktopApp) {
       setTimeout(() => { const b = document.getElementById('pwaInstall'); if (b) b.hidden = true; }, 0);
     } else {
       /* Show the button — the .exe is available to anyone on the website. */
@@ -529,6 +541,7 @@
     roster:    { title:'My Roster',       body:'Your full month at a glance. Tap any **green** day to see all sectors that day. Days with multiple legs show a "X sectors" header. Tap an empty day to book.' },
     book:      { title:'Book a roster',   body:'Three modes:\n• **Search & Book** — click a pin on the globe or type a city/IATA to filter flights, then add sectors to your basket and confirm.\n• **Generate Roster** — auto-build a 1–4 day rotation from your base.\n• **Monthly Bid** — bid the whole month with hour/off-day/aircraft filters.' },
     flights:   { title:'My Flights log',  body:'Every flight you\'ve completed, with block time, landing rate, and OFP attached. Import from SimBrief XML, or add manually. Use **Statistics** for trends.' },
+    simbridge: { title:'Sim Bridge',       body:'Live diagnostic of the AIVA ↔ MSFS link. Shows which protocol you\'re on (SimConnect inside the .exe, FSUIPC WebSocket in a browser), live telemetry, and a "Retry now" that\'s source-aware. The first place to check if the EFB or dashboard shows OFFLINE while telemetry is actually flowing.' },
     import:    { title:'Import flights',  body:'Drag an SBA XML, CSV, or Volanta export here. AIVA auto-detects the format, maps columns, and only adds new (de-duped) sectors.' },
     stats:     { title:'Statistics',      body:'Hours by month, by aircraft, by route, plus your landing rate distribution. All data is local to your pilot ID — nothing leaves the device.' },
     briefing:  { title:'Crew Briefing',   body:'Your today/tomorrow briefing pack — NOTAMs to acknowledge, weather summary, fuel policy, and crew bulletins. Always check before you push back.' },
@@ -2279,6 +2292,206 @@
       }
     },
 
+    /* ============ SIM BRIDGE ============
+       Source-of-truth status page for the link between AIVA and MSFS.
+       Most pilots never need to open this — the topbar chip + EFB pill
+       already show live/offline. But when things look broken (chip red
+       while telemetry IS flowing, or vice versa), this page lays the
+       wiring bare so we can spot which side is at fault:
+
+         • Desktop runtime — am I inside the .exe? Which version? Does
+           it expose the SimConnect bridge to the renderer?
+         • Source — SimConnect direct (.exe) or WebSocket-FSUIPC (browser
+           fallback)?
+         • Live status — is the singleton's `connected` true? When was
+           the last frame received? What was in it?
+         • Retry / restart controls — source-aware (won't fire the
+           legacy WebSocket attempts inside the .exe).                 */
+    simbridge: {
+      sub: 'AIVA ↔ MSFS link diagnostic',
+      render: (c) => {
+        const inDesktop = !!window.AIVA_DESKTOP?.isDesktop;
+        const hasSc     = !!window.AIVA_DESKTOP?.simConnect;
+        const fileProto = location.protocol === 'file:';
+        const source    = hasSc ? 'SimConnect (native)' : 'WebSocket-FSUIPC';
+        const desktopVer = inDesktop ? (window.AIVA_DESKTOP.version || '—') : '—';
+        const platform   = inDesktop ? (window.AIVA_DESKTOP.platform || '—') : 'browser';
+
+        c.appendChild(el('section', { html: `
+          <div class="card" style="padding:20px 22px;">
+            <div class="row between" style="align-items:flex-start;gap:18px;flex-wrap:wrap;">
+              <div style="flex:1;min-width:240px;">
+                <div class="eyebrow">Live sim link</div>
+                <h2 class="display mt-2" style="font-size:24px;line-height:1.1;" id="sbHeadline">Checking…</h2>
+                <div class="text-mute" style="font-size:13px;line-height:1.55;margin-top:8px;" id="sbHint">Reading bridge state from AIVA runtime…</div>
+              </div>
+              <div class="row gap-2" style="flex-wrap:wrap;align-self:flex-start;">
+                <button class="btn btn-primary btn-sm" id="sbRetry">${I('refresh',14)} Retry now</button>
+                <a class="btn btn-ghost btn-sm" href="efb.html#fsuipc">${I('plane',14)} Open in EFB</a>
+              </div>
+            </div>
+
+            <!-- Runtime fingerprint -->
+            <div class="grid grid-3 mt-4 mono" style="font-size:12.5px;gap:14px;">
+              <div>
+                <div class="text-mute" style="font-size:10.5px;letter-spacing:.14em;">DESKTOP APP</div>
+                <div style="margin-top:4px;"><b style="color:${inDesktop ? 'var(--ai-gold-bright)' : '#FCA5A5'};">${inDesktop ? 'YES · running inside .exe' : 'NO · browser tab'}</b></div>
+                <div class="text-mute" style="font-size:11px;margin-top:2px;">v${desktopVer} · ${platform}</div>
+              </div>
+              <div>
+                <div class="text-mute" style="font-size:10.5px;letter-spacing:.14em;">SIMCONNECT BRIDGE</div>
+                <div style="margin-top:4px;"><b style="color:${hasSc ? 'var(--ai-gold-bright)' : '#FCA5A5'};">${hasSc ? 'EXPOSED' : 'NOT AVAILABLE'}</b></div>
+                <div class="text-mute" style="font-size:11px;margin-top:2px;">${hasSc ? 'preload.js wired this renderer to the native MSFS link' : (inDesktop ? '⚠ .exe is OLD — rebuild needed' : 'Browsers can\'t use SimConnect — open the .exe')}</div>
+              </div>
+              <div>
+                <div class="text-mute" style="font-size:10.5px;letter-spacing:.14em;">PROTOCOL</div>
+                <div style="margin-top:4px;"><b>${source}</b></div>
+                <div class="text-mute" style="font-size:11px;margin-top:2px;">${fileProto ? 'file:// origin' : location.origin}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live status row -->
+          <div class="card mt-4" style="padding:18px 22px;">
+            <div class="row between" style="align-items:center;flex-wrap:wrap;gap:10px;">
+              <div>
+                <div class="eyebrow">Connection status</div>
+                <div class="row gap-2 mt-2" style="align-items:center;">
+                  <span class="pill" id="sbStatePill" style="font-size:11px;padding:5px 12px;">…</span>
+                  <span class="text-mute mono" id="sbLastFrame" style="font-size:11px;">last frame: —</span>
+                </div>
+              </div>
+              <div class="text-mute mono" style="font-size:11px;text-align:right;">
+                AIVA.FSUIPC.isConnected() = <b id="sbBool">…</b><br>
+                AIVA.FSUIPC.source()       = <b id="sbSrc">…</b>
+              </div>
+            </div>
+
+            <!-- Live telemetry snapshot -->
+            <div class="grid grid-4 mt-4 mono" style="gap:12px;font-size:12.5px;">
+              ${['lat','lon','alt','ias','tas','gs','vs','hdg','onGround','parkingBrake','flapsIdx','fuel'].map(k => `
+                <div>
+                  <div class="text-mute" style="font-size:10px;letter-spacing:.12em;">${k.toUpperCase()}</div>
+                  <div style="margin-top:3px;"><b id="sb_${k}">—</b></div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Help / next-step card, switches based on detected state -->
+          <div class="card mt-4" style="padding:18px 22px;" id="sbHelp"></div>
+        ` }));
+
+        const $$ = (sel) => c.querySelector(sel);
+        const setText = (sel, v) => { const e = $$(sel); if (e) e.textContent = v; };
+        const fmtN = (v, d=0) => (v == null || Number.isNaN(v)) ? '—' : (typeof v === 'number' ? v.toFixed(d) : v);
+
+        function tick() {
+          const live = AIVA.FSUIPC?.isConnected?.() === true;
+          const src  = AIVA.FSUIPC?.source?.() || (hasSc ? 'sim' : 'ws');
+          const last = AIVA.FSUIPC?.state?.() || {};
+
+          const pill = $$('#sbStatePill');
+          if (pill) {
+            pill.textContent = live ? '● LIVE · streaming' : (hasSc ? '○ WAITING FOR MSFS' : '○ NO LINK');
+            pill.className   = 'pill ' + (live ? 'pill-gold' : 'pill-red');
+            pill.style       = 'font-size:11px;padding:5px 12px;';
+          }
+          setText('#sbBool', live);
+          setText('#sbSrc',  src);
+          setText('#sbLastFrame', last.ts ? `last frame: ${new Date(last.ts).toLocaleTimeString()} (${Math.round((Date.now()-last.ts)/1000)}s ago)` : 'last frame: —');
+
+          /* Telemetry snapshot */
+          setText('#sb_lat',          fmtN(last.lat, 4));
+          setText('#sb_lon',          fmtN(last.lon, 4));
+          setText('#sb_alt',          last.alt != null ? Math.round(last.alt).toLocaleString() + ' ft' : '—');
+          setText('#sb_ias',          fmtN(last.ias, 0) + (last.ias != null ? ' kt' : ''));
+          setText('#sb_tas',          fmtN(last.tas, 0) + (last.tas != null ? ' kt' : ''));
+          setText('#sb_gs',           fmtN(last.gs, 0)  + (last.gs  != null ? ' kt' : ''));
+          setText('#sb_vs',           last.vs  != null ? Math.round(last.vs).toLocaleString() + ' fpm' : '—');
+          setText('#sb_hdg',          last.hdg != null ? Math.round(last.hdg) + '°' : '—');
+          setText('#sb_onGround',     last.onGround == null ? '—' : (last.onGround ? 'YES' : 'NO'));
+          setText('#sb_parkingBrake', last.parkingBrake == null ? '—' : (last.parkingBrake ? 'SET' : 'OFF'));
+          setText('#sb_flapsIdx',     last.flapsIdx == null ? '—' : String(last.flapsIdx));
+          setText('#sb_fuel',         last.fuel != null ? Math.round(last.fuel).toLocaleString() + ' kg' : '—');
+
+          /* Headline + help */
+          const h = $$('#sbHeadline'), hint = $$('#sbHint'), help = $$('#sbHelp');
+          if (h && hint && help) {
+            if (live) {
+              h.textContent = 'Sim link is live.';
+              hint.textContent = `Telemetry is streaming via ${source}. Map, EFB, phase detection, and ACARS auto-progress are all active.`;
+              help.innerHTML = `
+                <div class="row gap-2" style="align-items:center;">
+                  <span class="pill pill-gold" style="font-size:10px;">✓ HEALTHY</span>
+                  <span style="font-size:13px;">No action needed. If a downstream UI shows OFFLINE while this page says LIVE, hard-refresh (Ctrl+Shift+R).</span>
+                </div>`;
+            } else if (hasSc) {
+              h.textContent = 'Waiting for MSFS.';
+              hint.textContent = 'AIVA can talk to SimConnect — we just haven\'t found the sim yet. Start MSFS and load any aircraft.';
+              help.innerHTML = `
+                <div class="eyebrow" style="color:var(--ai-gold-bright);">Next step</div>
+                <ol class="mt-3" style="padding-left:22px;font-size:13px;line-height:1.7;color:var(--text-dim);">
+                  <li>Start <b>Microsoft Flight Simulator</b>.</li>
+                  <li>Load any aircraft to the gate or runway — free flight, career, doesn't matter.</li>
+                  <li>SimConnect auto-detects within ~5 seconds. This page flips green by itself.</li>
+                </ol>`;
+            } else if (inDesktop) {
+              h.textContent = 'Desktop bridge missing.';
+              hint.textContent = 'You\'re inside the .exe but the SimConnect bridge wasn\'t exposed to this page. The installed .exe is older than the current site code.';
+              help.innerHTML = `
+                <div class="row gap-2" style="align-items:center;flex-wrap:wrap;">
+                  <span class="pill pill-red" style="font-size:10px;">⚠ REBUILD</span>
+                  <span style="font-size:13px;">Download the latest <b>AIVA-Setup.exe</b> from the site root and reinstall — the new .exe carries the SimConnect bridge.</span>
+                </div>
+                <a class="btn btn-primary btn-sm mt-3" href="/AIVA-Setup.exe">${I('download',14)} Download AIVA-Setup.exe</a>`;
+            } else {
+              h.textContent = 'You\'re in a browser.';
+              hint.textContent = 'SimConnect can only run inside the AIVA desktop app. Browsers can\'t open the local Windows pipe MSFS uses.';
+              help.innerHTML = `
+                <div class="row gap-2" style="align-items:center;flex-wrap:wrap;">
+                  <span class="pill pill-gold" style="font-size:10px;">USE DESKTOP APP</span>
+                  <span style="font-size:13px;">Install + launch <b>AIVA</b> from your Start Menu. It loads this exact site but with the native MSFS link in the background.</span>
+                </div>
+                <a class="btn btn-primary btn-sm mt-3" href="/install?go=1">${I('download',14)} Install AIVA desktop</a>`;
+            }
+          }
+        }
+
+        /* Live state subscription — react instantly to connect / disconnect */
+        const onState = () => tick();
+        AIVA.FSUIPC?.on?.('connect',    onState);
+        AIVA.FSUIPC?.on?.('disconnect', onState);
+        AIVA.FSUIPC?.on?.('state',      onState);
+        tick();
+        const iv = setInterval(tick, 1000);
+        const cleanup = () => { clearInterval(iv); window.removeEventListener('hashchange', cleanup); };
+        window.addEventListener('hashchange', cleanup);
+
+        /* Retry button — source-aware, just like EFB. Never fires the
+           legacy WebSocket attempts in SimConnect mode. */
+        $$('#sbRetry').onclick = async () => {
+          if (hasSc) {
+            try {
+              const st = await window.AIVA_DESKTOP.simConnect.getState();
+              if (st === 'connected') toast('SimConnect link confirmed', 'ok');
+              else toast('MSFS not detected — start the sim and load a flight', 'warn', 5000);
+            } catch (e) {
+              toast('SimConnect bridge unreachable — try restarting AIVA', 'bad', 6000);
+            }
+          } else {
+            try {
+              await AIVA.FSUIPC?.connect?.();
+              toast('FSUIPC reconnect attempted', 'ok');
+            } catch (e) {
+              toast('FSUIPC unreachable — open AIVA desktop app or start FSUIPC WebSockets Server', 'bad', 6000);
+            }
+          }
+          tick();
+        };
+      },
+    },
+
     /* ============ MY FLIGHTS ============ */
     flights: {
       sub: 'Pilot log',
@@ -3850,7 +4063,19 @@
       sub: 'ACARS · datalink · CPDLC',
       render: (c) => {
         const code   = P.pref('hoppieCode', '');
-        const myCall = P.pref('my_callsign', 'AIC' + (pilot.id || '').replace(/[^0-9]/g,'').slice(-3) || 'AIC100');
+        /* Robust callsign derivation. Hoppie returns `error {no from address}`
+           if the `from=` field is missing or just "AIC" with no digits. Make
+           sure we ALWAYS end up with a valid AICxxx string:
+             1. honor saved my_callsign if it's well-formed
+             2. otherwise derive from pilot.id digits → "AIC" + last 3 digits
+             3. final fallback "AIC100" so Hoppie never sees an empty from */
+        const fallbackCallsign = (() => {
+          const digits = (pilot.id || '').replace(/[^0-9]/g, '');
+          if (digits) return 'AIC' + digits.slice(-3).padStart(3, '0');
+          return 'AIC100';
+        })();
+        const savedCs = (P.pref('my_callsign', '') || '').trim();
+        const myCall  = /^[A-Z]{2,3}\d{2,4}$/i.test(savedCs) ? savedCs.toUpperCase() : fallbackCallsign;
         const isAdmin = pilot.role === 'admin';
         let viewMode = P.pref('hop_view_mode', isAdmin ? 'admin' : 'pilot');
 
@@ -3880,13 +4105,20 @@
         }
 
         async function hopSend({ from, to, type, body }) {
-          if (!code) return { ok:false, error:'No Hoppie logon code' };
-          const params = new URLSearchParams({ logon: code, from, to, type, packet: body });
+          if (!code) return { ok:false, error:'No Hoppie logon code — set one in Profile' };
+          /* Hoppie strictly requires a non-empty `from`. If for any reason
+             the caller passed undefined / empty / 'AIC' (no digits), substitute
+             the derived myCall before sending. */
+          const fromClean = (from || '').toString().trim().toUpperCase();
+          const fromFinal = /^[A-Z]{2,3}\d{2,4}$/.test(fromClean) ? fromClean : myCall;
+          const toClean   = (to   || '').toString().trim().toUpperCase();
+          if (!toClean) return { ok:false, error:'Recipient callsign empty' };
+          const params = new URLSearchParams({ logon: code, from: fromFinal, to: toClean, type, packet: body || '' });
           try {
             const raw  = await hoppieRaw(params);
             const resp = parseHoppieResp(raw);
             const log  = AIVA.Store.get('hoppie_log', []);
-            log.push({ dir:'tx', from, to, type, body, ts: Date.now(), hoppie: resp.status, error: resp.error || null });
+            log.push({ dir:'tx', from: fromFinal, to: toClean, type, body, ts: Date.now(), hoppie: resp.status, error: resp.error || null });
             AIVA.Store.set('hoppie_log', log.slice(-200));
             return { ok: resp.status === 'ok', error: resp.error };
           } catch (e) { return { ok:false, error: e.message }; }
@@ -4229,45 +4461,119 @@
           $('#hopPoll', c).onclick = () => hopPoll(false);
         }
 
-        /* ============ PILOT VIEW ============ */
+        /* ============ PILOT VIEW (simplified) ============
+           Three clean panels:
+             1. INBOX  — auto-arrived messages (dispatch SimBrief packs,
+                weather warnings, 10k auto-progress) + replies from crew.
+             2. OUTBOX — everything you've sent.
+             3. SEND   — pick a crew member, type, hit send. No callsign
+                memorisation needed; we render the live AIVA crew roster
+                in a dropdown.
+           Diagnostics + auto-poll status sit in a slim footer card. */
         if (viewMode === 'pilot') {
+          /* Build the "to" dropdown options — every other AIVA pilot
+             with their derived AIC callsign, plus a free-text option. */
+          const crew = (AIVA.Auth.allPilots() || []).filter(p => p.id !== pilot.id);
+          const csFor = (p) => {
+            const digits = (p.id || '').replace(/[^0-9]/g, '');
+            return 'AIC' + (digits ? digits.slice(-3).padStart(3, '0') : '100');
+          };
+          const crewOpts = crew.map(p => `<option value="${csFor(p)}">${csFor(p)} · ${p.name}${p.role==='admin'?' (Dispatch)':''}</option>`).join('');
+
           c.appendChild(el('section', { html: `
             <div class="grid grid-2">
-              <div class="card">
-                <div class="eyebrow">Inbox · received messages</div>
-                <div id="pInbox" class="col gap-2 mt-3" style="max-height:520px;overflow-y:auto;">
+              <!-- INBOX -->
+              <div class="card" style="display:flex;flex-direction:column;">
+                <div class="row between" style="align-items:center;">
+                  <div class="eyebrow" style="color:var(--ai-gold-bright);">Inbox · received</div>
+                  <div class="row gap-1">
+                    <span class="pill" id="inboxCount" style="font-size:10px;">0</span>
+                    <button class="btn btn-ghost btn-sm" id="hopPoll2" title="Poll Hoppie now">${I('refresh',12)}</button>
+                  </div>
+                </div>
+                <div id="pInbox" class="col gap-2 mt-3" style="max-height:520px;overflow-y:auto;flex:1;">
+                  <div class="text-mute" style="font-size:12px;">Loading…</div>
+                </div>
+                <div class="row between mt-3" style="padding-top:10px;border-top:1px solid var(--border);">
+                  <span class="text-mute mono" style="font-size:10.5px;">${code ? 'auto-poll · 60s' : 'no logon code'}</span>
+                  <button class="btn btn-ghost btn-sm" id="prAckAll">${I('check',12)} Ack all</button>
+                </div>
+              </div>
+
+              <!-- OUTBOX -->
+              <div class="card" style="display:flex;flex-direction:column;">
+                <div class="row between" style="align-items:center;">
+                  <div class="eyebrow" style="color:#A8101F;">Outbox · sent</div>
+                  <span class="pill" id="outboxCount" style="font-size:10px;">0</span>
+                </div>
+                <div id="pOutbox" class="col gap-2 mt-3" style="max-height:520px;overflow-y:auto;flex:1;">
                   <div class="text-mute" style="font-size:12px;">Loading…</div>
                 </div>
               </div>
-              <div class="card">
-                <div class="eyebrow">Quick reply</div>
-                <div class="mt-3"><div class="label">To callsign</div><input class="input mono" id="prTo" placeholder="AIC001"></div>
-                <div class="mt-3"><div class="label">Type</div><select class="input" id="prType">
-                  <option value="telex">TELEX</option><option value="cpdlc">CPDLC reply</option><option value="progress">PROGRESS</option>
-                </select></div>
-                <div class="mt-3"><div class="label">Body</div><textarea class="input mono" id="prBody" rows="4" placeholder="Type your reply…"></textarea></div>
-                <div class="row gap-2 mt-3" style="flex-wrap:wrap;">
-                  <button class="btn btn-primary btn-sm" id="prSend">${I('send',14)} Send reply</button>
-                  <button class="btn btn-ghost btn-sm" id="hopPoll2">${I('refresh',14)} Poll now</button>
-                  <button class="btn btn-ghost btn-sm" id="prAckAll">${I('check',14)} Ack all</button>
-                </div>
-                <div class="row gap-2 mt-3" style="flex-wrap:wrap;border-top:1px solid var(--border);padding-top:10px;">
-                  <button class="btn btn-ghost btn-sm" id="hopVerify2">${I('shield',14)} Verify logon</button>
-                  <button class="btn btn-ghost btn-sm" id="hopSelfPing2">${I('star',14)} Self-ping cockpit</button>
-                </div>
-                <div class="text-mute mono mt-3" id="hopAutoStatus" style="font-size:11px;">auto-poll: ${code ? 'ON (60s)' : 'off'}</div>
-              </div>
             </div>
 
-            <div class="section-title mt-6"><div><h3 style="margin:0;">Outbound log</h3></div></div>
-            <div class="card mt-3"><div id="hopLog" class="hop-log"></div></div>
+            <!-- SEND PANEL -->
+            <div class="card mt-4">
+              <div class="row between" style="align-items:center;flex-wrap:wrap;gap:8px;">
+                <div>
+                  <div class="eyebrow">Send message</div>
+                  <div class="text-mute" style="font-size:11.5px;margin-top:2px;">From <b class="mono" style="color:var(--ai-cream);">${myCall}</b> · pick a crew member or type a callsign</div>
+                </div>
+                <div class="row gap-2">
+                  <button class="btn btn-ghost btn-sm" id="hopVerify2" title="Test that AIVA can reach Hoppie">${I('shield',12)} Verify logon</button>
+                  <button class="btn btn-ghost btn-sm" id="hopSelfPing2" title="Send a TELEX from you → to you. Lands in your inbox AND in your aircraft DCDU if everything's wired right.">${I('star',12)} Self-ping</button>
+                </div>
+              </div>
+              <div class="grid grid-3 mt-3" style="gap:10px;">
+                <div>
+                  <div class="label">To · crew member</div>
+                  <select class="input" id="prToSelect">
+                    <option value="">— pick crew —</option>
+                    ${crewOpts}
+                    <option value="__custom__">Other callsign…</option>
+                  </select>
+                </div>
+                <div>
+                  <div class="label">Or callsign (free text)</div>
+                  <input class="input mono" id="prTo" placeholder="e.g. AIC001 or KZNY">
+                </div>
+                <div>
+                  <div class="label">Type</div>
+                  <select class="input" id="prType">
+                    <option value="telex">TELEX (chat)</option>
+                    <option value="inforeq">INFOREQ (request)</option>
+                    <option value="cpdlc">CPDLC (ATC)</option>
+                    <option value="progress">PROGRESS report</option>
+                  </select>
+                </div>
+              </div>
+              <div class="mt-3">
+                <div class="label">Message</div>
+                <textarea class="input mono" id="prBody" rows="3" placeholder="Type your message — e.g. 'INBOUND HYD ETA 1340Z, REQUEST GATE ASSIGNMENT'"></textarea>
+              </div>
+              <div class="row gap-2 mt-3" style="flex-wrap:wrap;">
+                <button class="btn btn-primary btn-sm" id="prSend">${I('send',14)} Send</button>
+                <span class="text-mute mono" style="font-size:11px;align-self:center;">Most pilots use TELEX for crew chat, INFOREQ for ATIS/METAR requests, CPDLC for controller messages.</span>
+              </div>
+            </div>
           `}));
+
+          /* Wire the crew dropdown → callsign field. Picking a crew member
+             fills the free-text box. "Other callsign…" clears it for manual
+             entry. Keeps the simpler "type a callsign" path available for
+             ATC / external addressees. */
+          const ddl = $('#prToSelect', c);
+          ddl.onchange = () => {
+            if (ddl.value === '__custom__') { $('#prTo', c).value = ''; $('#prTo', c).focus(); }
+            else if (ddl.value) $('#prTo', c).value = ddl.value;
+          };
 
           /* Render inbox: show incoming messages with ACCEPT / REJECT / REPLY */
           function refreshInbox() {
             const inbox = AIVA.Store.get('hoppie_log', []).filter(m => m.dir === 'rx').slice().reverse();
+            const countEl = $('#inboxCount', c); if (countEl) countEl.textContent = inbox.length;
             const host = $('#pInbox', c);
-            if (!inbox.length) { host.innerHTML = '<div class="text-mute" style="font-size:12px;padding:8px;">No incoming messages yet.</div>'; return; }
+            if (!inbox.length) { host.innerHTML = '<div class="text-mute" style="font-size:12px;padding:8px;">No incoming messages yet. Auto-poll runs every 60s — dispatch packs and 10k progress reports land here automatically.</div>'; return; }
             host.innerHTML = inbox.map((m, idx) => {
               const isCpdlc = m.type === 'cpdlc';
               const status = m.acked ? 'ACK' : isCpdlc ? 'PENDING' : 'NEW';
@@ -4321,14 +4627,42 @@
             });
           }
 
+          /* Render outbox — what this pilot has sent. Newest first. */
+          function refreshOutbox() {
+            const out = AIVA.Store.get('hoppie_log', []).filter(m => m.dir === 'tx').slice().reverse();
+            const countEl = $('#outboxCount', c); if (countEl) countEl.textContent = out.length;
+            const host = $('#pOutbox', c);
+            if (!host) return;
+            if (!out.length) { host.innerHTML = '<div class="text-mute" style="font-size:12px;padding:8px;">Nothing sent yet. Use the Send card below to message any pilot or dispatch.</div>'; return; }
+            host.innerHTML = out.map(m => {
+              const ok = m.hoppie === 'ok';
+              return `
+                <div class="hop-row hop-tx">
+                  <div class="hop-meta">
+                    <span class="pill ${ok ? 'pill-gold' : 'pill-red'}" style="font-size:9.5px;">${ok ? 'SENT' : (m.hoppie || 'ERR').toUpperCase()}</span>
+                    <span class="mono"><b>${m.from || myCall}</b> → ${m.to}</span>
+                    <span class="mono text-mute" style="font-size:11px;">${m.type?.toUpperCase()}</span>
+                    ${m.auto ? '<span class="pill" style="font-size:9px;">AUTO</span>' : ''}
+                    <span class="mono text-mute" style="font-size:11px;margin-left:auto;">${new Date(m.ts).toLocaleTimeString()}</span>
+                  </div>
+                  <pre class="hop-body">${(m.body||'').replace(/</g,'&lt;')}</pre>
+                  ${m.error ? `<div class="hop-err">⚠ ${m.error}</div>` : ''}
+                </div>`;
+            }).join('');
+          }
+
           $('#prSend', c).onclick = async () => {
             const to = $('#prTo', c).value.trim().toUpperCase();
             const type = $('#prType', c).value;
             const body = $('#prBody', c).value.trim();
-            if (!to || !body) { toast('Need target + body', 'bad'); return; }
+            if (!to)   { toast('Pick a crew member or type a callsign', 'bad'); return; }
+            if (!body) { toast('Message body is empty', 'bad'); return; }
             const r = await hopSend({ from: myCall, to, type, body });
-            if (r.ok) { toast(`Sent to ${to}`, 'ok'); $('#prBody', c).value = ''; refreshLog(); }
-            else toast(r.error, 'bad');
+            if (r.ok) {
+              toast(`Sent to ${to}`, 'ok');
+              $('#prBody', c).value = '';
+              refreshOutbox(); refreshLog();
+            } else toast('Hoppie: ' + r.error, 'bad', 6000);
           };
           $('#hopPoll2', c).onclick = () => hopPoll(false);
           $('#prAckAll', c).onclick = () => {
@@ -4357,11 +4691,13 @@
             const stamp = new Date().toISOString().slice(11,19);
             const r = await hopSend({ from: myCall, to: myCall, type:'telex', body:`AIVA SELF-PING @ ${stamp}Z · if this appears in your cockpit DCDU, Hoppie is wired correctly` });
             if (r.ok) {
-              toast('Self-ping sent · checking AIVA inbox in 2s · check your cockpit DCDU too', 'ok', 6000);
-              setTimeout(() => { hopPoll(false); refreshInbox(); }, 2000);
-            } else toast('Self-ping failed: ' + r.error, 'bad');
+              toast('Self-ping sent · polling in 2s · check your cockpit DCDU too', 'ok', 6000);
+              refreshOutbox();
+              setTimeout(() => { hopPoll(false); refreshInbox(); refreshOutbox(); }, 2000);
+            } else toast('Self-ping failed: ' + r.error, 'bad', 6000);
           };
           refreshInbox();
+          refreshOutbox();
         }
 
         /* ============ Shared log renderer ============ */

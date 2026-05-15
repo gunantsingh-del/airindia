@@ -307,17 +307,47 @@
         autoFireWeather();
       }
     });
-    /* Per-frame gate-dwell check. 3 minutes after the first GATE
-       detection, fire the pre-flight pack. */
+    /* Per-frame gate-dwell check. Pre-flight pack fires 30 s after the
+       first GATE detection — long enough for the pilot to finish their
+       cold-and-dark scan, short enough that the pack lands well before
+       pushback. Pilots who started AIVA after spawning at the gate still
+       get the pack within 30 s of the first connect. */
     AIVA.FSUIPC?.on?.('state', () => {
       if (firedAcars.has('preflight')) return;
       const phase = AIVA.FSUIPC?.phase?.();
       if (phase !== 'GATE') return;
       if (!gateEnteredAt) gateEnteredAt = Date.now();
-      if (Date.now() - gateEnteredAt > 180_000) {
+      if (Date.now() - gateEnteredAt > 30_000) {
         autoFirePreflight();
       }
     });
+    /* Defensive: if the pilot was already at the gate when AIVA
+       connected (common case — load the sim, start AIVA after, OR
+       hard-refresh mid-flight on the ground), fire the pre-flight
+       pack as soon as the bridge confirms a live frame. 10 s delay
+       so we can read SimConnect state for parking-brake/on-ground
+       confirmation. */
+    AIVA.FSUIPC?.on?.('connect', () => {
+      setTimeout(() => {
+        if (firedAcars.has('preflight')) return;
+        const s = AIVA.FSUIPC?.state?.();
+        const fl = activeFlightForACARS();
+        if (!s || !fl) return;
+        /* On-ground + slow → safe assumption that pilot is at gate. */
+        if (s.onGround && (s.gs || 0) < 5) {
+          if (!gateEnteredAt) gateEnteredAt = Date.now();
+          autoFirePreflight();
+        }
+      }, 10_000);
+    });
+    /* Expose the auto-fire functions so the Hoppie page's manual
+       "Fire pre-flight pack now" button can re-arm + fire even if
+       the auto-trigger has already run (clears firedAcars). */
+    AIVA._autoDispatch = {
+      firePreflight: () => { firedAcars.delete('preflight'); return autoFirePreflight(); },
+      fireWeather:   () => { firedAcars.delete('weather');   return autoFireWeather();   },
+      reset:         () => { firedAcars.clear(); gateEnteredAt = null; },
+    };
     /* Arrival gate goes out as the pilot crosses 10k descending. */
     AIVA.FSUIPC?.on?.('descent10k', async (info) => {
       if (firedAcars.has('arrival')) return;
@@ -4316,6 +4346,7 @@
             <div class="actions">
               <span class="pill ${code ? 'pill-gold' : 'pill-red'}" id="hopLogonBadge">${code ? 'Logon set' : 'No logon'}</span>
               <span class="pill" style="margin-left:6px;">${myCall}</span>
+              <button class="btn btn-primary btn-sm" id="hopFirePreflight" style="margin-left:10px;" title="Fire pre-flight pack to your cockpit now — bypasses the 30s gate-dwell timer">${I('send',14)} Fire pre-flight now</button>
               ${isAdmin ? `
                 <div class="row" style="margin-left:12px;background:rgba(255,255,255,.05);border-radius:99px;padding:3px;">
                   <button class="hop-mode-btn ${viewMode==='admin'?'on':''}" data-mode="admin">Admin</button>
@@ -4324,6 +4355,29 @@
             </div>
           </div>
         ` }));
+        /* Manual "Fire pre-flight pack now" — re-arms + fires the same
+           auto-dispatch function so the message goes to the pilot's
+           current flight callsign with their SimBrief OFP attached.
+           Bypasses the 30 s gate-dwell wait. */
+        const fireBtn = c.querySelector('#hopFirePreflight');
+        if (fireBtn) {
+          fireBtn.onclick = async () => {
+            fireBtn.disabled = true;
+            fireBtn.innerHTML = '⏳ Firing…';
+            try {
+              if (AIVA._autoDispatch?.firePreflight) {
+                await AIVA._autoDispatch.firePreflight();
+              } else {
+                toast('Auto-dispatch not initialized — try hard-refreshing AIVA.', 'bad', 6000);
+              }
+            } finally {
+              setTimeout(() => {
+                fireBtn.disabled = false;
+                fireBtn.innerHTML = `${I('send',14)} Fire pre-flight now`;
+              }, 3000);
+            }
+          };
+        }
         if (isAdmin) {
           c.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
             viewMode = b.dataset.mode;

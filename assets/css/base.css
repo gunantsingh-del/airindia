@@ -452,13 +452,16 @@ a { color: inherit; text-decoration: none; }
   position: absolute;
   top: calc(100% + 4px);
   left: 0; right: 0;
-  background: var(--surface);
+  /* Solid surface — was leaking the section-title underneath through.
+     Layered colour + opaque fallback so the next section never bleeds in. */
+  background: #14080C;
+  background: var(--surface, #14080C);
   border: 1px solid var(--border);
   border-radius: 12px;
-  z-index: 80;
+  z-index: 200;
   max-height: 280px;
   overflow: auto;
-  box-shadow: 0 18px 48px rgba(0,0,0,.45);
+  box-shadow: 0 18px 48px rgba(0,0,0,.55);
   display: none;
 }
 .airport-drop .airport-row {

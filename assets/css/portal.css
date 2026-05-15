@@ -149,6 +149,14 @@
   width: 100%;
 }
 .content > section { margin-bottom: 26px; animation: fadeUp .32s var(--ease-emph) both; }
+/* Sections that host floating autocomplete dropdowns need a higher
+   stacking context than their following siblings, otherwise the
+   per-section CSS animation creates a stacking context at z=0 and
+   the next section paints over the open dropdown. */
+.content > section:has(.airport-drop) {
+  position: relative;
+  z-index: 50;
+}
 .section-title {
   display: flex; align-items: flex-end; justify-content: space-between;
   margin-bottom: 14px; gap: 16px; flex-wrap: wrap;

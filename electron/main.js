@@ -64,6 +64,17 @@ function createWindow() {
   });
 
   mainWin.once('ready-to-show', () => mainWin.show());
+
+  /* Chromium disk-cache nuker. Without this the .exe holds onto stale
+     HTML/JS for days even when Vercel returns Cache-Control: no-cache
+     — Chromium just doesn't bother revalidating disk-cached responses.
+     Pilots install a fresh .exe and still see old UI because the
+     per-user cache dir survived the reinstall. Clearing on every boot
+     is overkill but the right tradeoff: a one-time ~500ms extra fetch
+     vs. days of "I reinstalled but nothing changed". */
+  mainWin.webContents.session.clearCache().catch(() => {});
+  mainWin.webContents.session.clearStorageData({ storages: ['shadercache', 'cachestorage'] }).catch(() => {});
+
   mainWin.loadURL(APP_URL);
 
   /* Closing the window minimises to tray on Windows/Linux. On macOS the

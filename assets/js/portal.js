@@ -93,6 +93,7 @@
         </div>
         <div class="row" style="gap:6px;">
           <button class="btn btn-primary btn-sm" id="openEfb" title="Open EFB" style="flex:1;">${I('plane', 14)} Open EFB</button>
+          <button class="btn btn-ghost btn-sm" id="hardReload" title="Force-refresh AIVA · pulls the latest site code" style="width:34px; padding:6px;">${I('refresh', 14)}</button>
           <button class="btn btn-ghost btn-sm" id="doLogout" title="Logout" style="width:34px; padding:6px;">${I('logout', 14)}</button>
         </div>
       </div>
@@ -409,6 +410,13 @@
     $('#doLogout').addEventListener('click', AIVA.Auth.logout);
     $('#openEfb').addEventListener('click', () => location.href = 'efb.html');
     $('#burger').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+    /* Hard-reload button (always visible in the sidebar foot). Forces a
+       cache-bypass reload so pilots running an old .exe still get latest
+       site code without having to know Ctrl+Shift+R exists. */
+    $('#hardReload')?.addEventListener('click', () => {
+      toast('Forcing reload — pulling latest AIVA code…', 'ok', 2000);
+      setTimeout(() => location.reload(true), 200);
+    });
     window.addEventListener('hashchange', route);
     /* Theme toggle */
     const applyTheme = (t) => {

@@ -181,6 +181,18 @@ AIVA.FSUIPC = (() => {
        engine combustion, pushback state, tas) that the legacy WS path won't
        supply — pass them through as undefined-safe so consumers can rely on
        presence checks. */
+    /* DEFENSIVE: any frame arrival means the bridge is alive. The user
+       hit a recurring bug where SimConnect telemetry was streaming into
+       the renderer but `connected` stayed false — usually because the
+       page reloaded AFTER the 'connected' state event fired, and the
+       initial sc.getState() check raced. Now we just trust that any
+       frame = live, flip connected + emit 'connect' on first arrival.
+       This guarantees the FSUIPC chip, EFB pill, Sim Bridge status,
+       and live-map dot all reflect reality. */
+    if (!connected) {
+      connected = true;
+      emit('connect');
+    }
     const state = {
       alt:      d.alt      ?? d[FSUIPC_OFFSETS.alt.offset.toString()],
       gs:       d.gs       ?? d[FSUIPC_OFFSETS.gs.offset.toString()],
@@ -201,6 +213,10 @@ AIVA.FSUIPC = (() => {
       pushback:     d.pushback,
       ts: Date.now(),
     };
+    /* Hold the prior frame for delta-based detectors (descent10k, landing)
+       BEFORE we overwrite lastState. */
+    const prev = lastState;
+    lastState = state;
     emit('state', state);
     maybePhaseChange(state);
     /* Bookkeeping */
@@ -208,18 +224,17 @@ AIVA.FSUIPC = (() => {
     if (state.alt > 1500 && !state.onGround) inFlight = true;
 
     /* Descent through 10,000 ft (only after climbing above it, only once per sector) */
-    if (arrivalArmed && topAlt > 11000 && lastState.alt > 10000 && state.alt <= 10000 && !state.onGround) {
+    if (arrivalArmed && topAlt > 11000 && (prev?.alt || 0) > 10000 && state.alt <= 10000 && !state.onGround) {
       arrivalArmed = false;
       emit('descent10k', { ...state, fno: AIVA._activeFlight?.fno });
     }
     /* Landing detection: was airborne, now on ground with low GS */
-    if (landingArmed && inFlight && state.onGround && state.gs < 60 && (lastState.gs || 0) > 60) {
+    if (landingArmed && inFlight && state.onGround && state.gs < 60 && (prev?.gs || 0) > 60) {
       landingArmed = false;
       emit('landing', { ...state, fno: AIVA._activeFlight?.fno });
       /* After landing, reset for next sector */
       setTimeout(() => { resetSector(); }, 30_000);
     }
-    lastState = state;
   }
 
   function resetSector() {

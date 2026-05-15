@@ -2724,12 +2724,30 @@
         }
       }
 
-      /* FSUIPC status pill */
+      /* FSUIPC status pill — labels itself based on the source:
+         - SimConnect (desktop app): "SIM: LIVE" / "SIM: SEARCHING"
+         - WebSocket-FSUIPC (browser fallback): "FSUIPC: LIVE" / "FSUIPC: OFFLINE"
+         The hover tooltip explains the browser-Mixed-Content gotcha so the
+         pilot knows to launch the .exe instead of the website. */
       const lp = host.querySelector('#efbLivePill');
       const lbl = host.querySelector('#efbLiveLbl');
       const fsConn = AIVA.FSUIPC?.isConnected?.();
-      if (lp) lp.classList.toggle('on', !!fsConn);
-      if (lbl) lbl.textContent = fsConn ? 'FSUIPC: LIVE' : 'FSUIPC: OFFLINE';
+      const usingSc = !!window.AIVA_DESKTOP?.simConnect;
+      const inDesktop = !!window.AIVA_DESKTOP?.isDesktop;
+      if (lp) {
+        lp.classList.toggle('on', !!fsConn);
+        lp.title = fsConn
+          ? `${usingSc ? 'SimConnect' : 'FSUIPC'} live — tracking your aircraft`
+          : (inDesktop
+              ? 'Waiting for MSFS to load a flight. SimConnect picks it up within ~5s.'
+              : 'No sim link — your browser blocks the local sim bridge. Launch AIVA from Start Menu (the .exe) for live telemetry.');
+      }
+      if (lbl) {
+        const tag = usingSc ? 'SIM' : 'FSUIPC';
+        lbl.textContent = fsConn
+          ? `${tag}: LIVE`
+          : (inDesktop ? `${tag}: SEARCHING` : `${tag}: USE DESKTOP APP`);
+      }
     }
     tick();
     liveDrawTimer = setInterval(tick, 2000);

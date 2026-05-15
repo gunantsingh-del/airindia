@@ -422,17 +422,23 @@
 
     /* FSUIPC status chip — driven by the AIVA.FSUIPC singleton which runs
        a 5-second auto-detect probe in the background. The pilot doesn't
-       have to click anything: turn on MSFS + FSUIPC WebSockets Server, the
-       chip flips green within ~5 seconds. */
+       have to click anything: in the .exe, SimConnect picks MSFS up
+       automatically; on the web, FSUIPC WebSockets Server is the path
+       (blocked by Mixed Content unless you load the desktop app). */
     const chip = $('#fsChip');
+    const isDesktopApp = !!window.AIVA_DESKTOP?.isDesktop;
+    const usingSimConnect = !!window.AIVA_DESKTOP?.simConnect;
     const setFsChip = (state) => {
       if (!chip) return;
       chip.classList.remove('fs-on','fs-off');
       chip.classList.add(state === 'on' ? 'fs-on' : 'fs-off');
-      chip.textContent = state === 'on' ? 'FSUIPC ●' : 'FSUIPC ○';
+      const label = usingSimConnect ? 'SIM' : 'FSUIPC';
+      chip.textContent = state === 'on' ? `${label} ●` : `${label} ○`;
       chip.title = state === 'on'
-        ? 'FSUIPC connected · tracking live'
-        : 'FSUIPC not connected — start MSFS + FSUIPC WebSockets Server (auto-detects every 5s)';
+        ? `${usingSimConnect ? 'SimConnect' : 'FSUIPC'} connected · tracking live`
+        : (isDesktopApp
+            ? 'Waiting for MSFS — start the sim and load a flight. SimConnect detects it within ~5s.'
+            : 'No sim link — your browser blocks the local sim bridge. Open AIVA from your Start Menu (the .exe) instead.');
     };
     if (AIVA.FSUIPC) {
       setFsChip(AIVA.FSUIPC.isConnected() ? 'on' : 'off');

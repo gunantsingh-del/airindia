@@ -12,23 +12,69 @@ AIVA.Dispatch = (() => {
 
   /* CORS proxy used for everything that doesn't allow cross-origin reads.
      Reads `hoppie_proxy` from store so the user's choice covers all third-
-     party calls. */
+     party calls. Returns a SINGLE proxy URL — use proxyList() when you
+     want to try multiple. */
   function proxy(url) {
     const custom = (AIVA.Store?.get?.('hoppie_proxy', '') || '').trim();
     const base = custom || 'https://corsproxy.io/?';
     return base + encodeURIComponent(url);
   }
 
+  /* Ordered list of public CORS proxies. corsproxy.io intermittently
+     returns 403 (rate-limit / abuse blocklist), so we fall through to
+     alternates. The pilot's custom `hoppie_proxy` (if any) is tried
+     FIRST so they can override entirely. */
+  function proxyList(url) {
+    const enc = encodeURIComponent(url);
+    const custom = (AIVA.Store?.get?.('hoppie_proxy', '') || '').trim();
+    const list = [];
+    if (custom) list.push(custom + enc);
+    list.push(
+      'https://corsproxy.io/?' + enc,
+      'https://api.allorigins.win/raw?url=' + enc,
+      'https://api.codetabs.com/v1/proxy?quest=' + url,   // codetabs takes raw URL
+      'https://thingproxy.freeboard.io/fetch/' + url,
+    );
+    return list;
+  }
+
+  /* Try a fetch through each proxy in order. Returns the first response
+     with HTTP 2xx; throws with the last status if all fail. Useful for
+     SimBrief / weather endpoints that block direct CORS. */
+  async function fetchViaProxies(url, opts = {}) {
+    const proxies = proxyList(url);
+    let lastErr = null;
+    for (const p of proxies) {
+      try {
+        const r = await fetch(p, opts);
+        if (r.ok) return r;
+        lastErr = new Error('HTTP ' + r.status);
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error('all proxies failed');
+  }
+
   /* ============================================================
      SimBrief — pull the latest OFP for a configured username.
      Endpoint returns XML; we extract just what we need.
+     Falls through a chain of CORS proxies so a single one returning
+     403 (corsproxy.io rate-limit) doesn't break the briefing.
      ============================================================ */
   async function fetchSimbriefOFP(username) {
     if (!username) throw new Error('No SimBrief username set in Profile');
     const url = `https://www.simbrief.com/api/xml.fetcher.php?username=${encodeURIComponent(username)}`;
-    const r = await fetch(proxy(url));
-    if (!r.ok) throw new Error('SimBrief fetch HTTP ' + r.status);
+    let r;
+    try {
+      r = await fetchViaProxies(url);
+    } catch (e) {
+      throw new Error('SimBrief fetch ' + (e.message || 'failed') + ' — check username + try again, or set a custom proxy in Profile');
+    }
     const xml = await r.text();
+    if (!xml || xml.length < 200 || /<error>/i.test(xml)) {
+      throw new Error('SimBrief returned no OFP for "' + username + '" — dispatch a flight plan at simbrief.com first');
+    }
     return parseSimbriefXML(xml);
   }
 
@@ -189,7 +235,7 @@ AIVA.Dispatch = (() => {
   }
 
   return {
-    proxy,
+    proxy, proxyList, fetchViaProxies,
     fetchSimbriefOFP, parseSimbriefXML,
     fetchMETAR, scoreSeverity,
     preflightPack, arrivalGate, goodbye, weatherWarning,

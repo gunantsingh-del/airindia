@@ -2631,16 +2631,33 @@ The SimBrief OFP — what's on each page:
         id:'aiva-live-trails-line', type:'line', source:'aiva-live-trails',
         paint:{ 'line-color': ['get','color'], 'line-width': 2.5, 'line-opacity': 0.85 },
       });
-      /* Pilot's own aircraft: small red dot with a brighter gold ring so
+      /* Outer gold halo on the player's dot — drawn FIRST so the inner
+         red dot sits on top. Makes the player impossible to miss against
+         busy airport ground textures (Delhi gate area was eating the
+         smaller dot during testing). */
+      liveMap.addLayer({
+        id:'aiva-live-me-halo', type:'circle', source:'aiva-live-aircraft',
+        filter: ['==', ['get','isMe'], true],
+        paint:{
+          'circle-radius':       16,
+          'circle-color':        '#FFE159',
+          'circle-opacity':      0.30,
+          'circle-stroke-color': '#FFE159',
+          'circle-stroke-width': 1,
+          'circle-stroke-opacity': 0.55,
+        },
+      });
+      /* Pilot's own aircraft: brighter red dot with a thick gold ring so
          it's instantly recognisable against the dark base map. Other
-         pilots: aubergine with thin white border. */
+         pilots: aubergine with thin white border. Sized up from the
+         original 8px because the airport-zoom layer was eating it. */
       liveMap.addLayer({
         id:'aiva-live-aircraft-dot', type:'circle', source:'aiva-live-aircraft',
         paint:{
-          'circle-radius':       ['case', ['get','isMe'], 8, 6],
+          'circle-radius':       ['case', ['get','isMe'], 10, 6],
           'circle-color':        ['case', ['get','isMe'], '#E61926', '#4A1B41'],
           'circle-stroke-color': ['case', ['get','isMe'], '#FFE159', '#FFFFFF'],
-          'circle-stroke-width': ['case', ['get','isMe'], 2.5, 1.5],
+          'circle-stroke-width': ['case', ['get','isMe'], 3, 1.5],
         },
       });
       /* Heading triangle layered on top of the player's dot — a tiny
@@ -2680,6 +2697,31 @@ The SimBrief OFP — what's on each page:
           .addTo(liveMap);
       });
       liveMap.on('mouseleave','aiva-live-aircraft-dot', () => { popup?.remove(); popup=null; });
+
+      /* "Center on me" floating button — always pans the map to the
+         pilot's current SimConnect position. Adds a manual recenter
+         affordance because the auto-pan only fires the first time a
+         valid position is seen; if the user pans away or boots the
+         map before MSFS is ready, they need a quick way back. */
+      const recenterBtn = document.createElement('button');
+      recenterBtn.className = 'efb-map-recenter';
+      recenterBtn.title = 'Center map on my aircraft';
+      recenterBtn.innerHTML = '⊕';
+      recenterBtn.style.cssText = 'position:absolute;right:14px;bottom:18px;width:42px;height:42px;border-radius:50%;background:rgba(20,8,12,.9);color:#FFE159;border:1.5px solid rgba(255,225,89,.45);font-size:20px;font-weight:700;cursor:pointer;z-index:7;box-shadow:0 4px 16px rgba(0,0,0,.5);';
+      recenterBtn.onclick = () => {
+        const me = AIVA.Auth.currentPilot();
+        try {
+          const pos = JSON.parse(localStorage.getItem('aiva.live.' + me?.id) || '{}');
+          if (pos.lat && pos.lon) {
+            liveMap.flyTo({ center: [pos.lon, pos.lat], zoom: 9, duration: 600 });
+            toast(`Centered on ${pos.callsign || me?.id} @ ${pos.lat.toFixed(4)}, ${pos.lon.toFixed(4)}`, 'ok', 3000);
+          } else {
+            toast('No live position yet — start MSFS and load a flight', 'warn', 4000);
+          }
+        } catch { toast('No live position found', 'warn'); }
+      };
+      aivaLayer.appendChild(recenterBtn);
+
       startLivePosBroadcast();
       startLiveDraw(host);
     };
@@ -2858,7 +2900,16 @@ The SimBrief OFP — what's on each page:
           $m('msFuel').textContent = pos.fuel != null ? Math.round(pos.fuel) : '—';
         }
       }
-      liveMap?.getSource('aiva-live-aircraft')?.setData({ type:'FeatureCollection', features: aircraft });
+      /* Feed features to MapLibre. If the source is missing (race with
+         style load) we log so the user can copy/paste from DevTools
+         instead of staring at an empty map. */
+      const src = liveMap?.getSource('aiva-live-aircraft');
+      if (src) {
+        src.setData({ type:'FeatureCollection', features: aircraft });
+      } else if (aircraft.length && !window.__aivaDotWarned) {
+        window.__aivaDotWarned = true;
+        console.warn('[AIVA Live] aircraft features ready but map source missing — style may not have loaded yet. Features:', aircraft);
+      }
       liveMap?.getSource('aiva-live-trails')?.setData({ type:'FeatureCollection', features: trails });
 
       /* Nearby panel */

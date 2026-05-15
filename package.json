@@ -25,6 +25,8 @@
     },
     "files": [
       "electron/**/*",
+      "assets/img/icon.ico",
+      "assets/img/icon.png",
       "assets/img/vaic-mini-colour.png",
       "package.json"
     ],
@@ -33,7 +35,7 @@
         { "target": "nsis", "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }
       ],
-      "icon": "assets/img/vaic-mini-colour.png",
+      "icon": "assets/img/icon.ico",
       "publisherName": "Air India Virtual",
       "artifactName": "AIVA-Setup.${ext}"
     },
@@ -45,14 +47,14 @@
       "uninstallDisplayName": "Air India Virtual",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "installerIcon": "assets/img/vaic-mini-colour.png",
-      "uninstallerIcon": "assets/img/vaic-mini-colour.png"
+      "installerIcon": "assets/img/icon.ico",
+      "uninstallerIcon": "assets/img/icon.ico"
     },
     "portable": {
       "artifactName": "AIVA-Portable.${ext}"
     },
     "mac": {
-      "icon": "assets/img/vaic-mini-colour.png",
+      "icon": "assets/img/icon.png",
       "category": "public.app-category.travel",
       "target": [
         { "target": "dmg", "arch": ["arm64", "x64"] }

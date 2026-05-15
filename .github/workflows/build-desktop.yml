@@ -48,17 +48,26 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Verify icon assets
+        shell: bash
+        run: |
+          test -f assets/img/icon.ico || { echo "::error::assets/img/icon.ico missing"; exit 1; }
+          test -f assets/img/icon.png || { echo "::error::assets/img/icon.png missing"; exit 1; }
+          ls -la assets/img/icon.*
+
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund --loglevel=warn
 
       - name: Build Windows installer + portable
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEBUG: electron-builder
         run: npm run dist:win
 
       - name: List build output
+        if: always()
         shell: bash
-        run: ls -lh dist-electron/
+        run: ls -lh dist-electron/ || echo "no dist-electron directory"
 
       - name: Upload artifacts (always)
         uses: actions/upload-artifact@v4

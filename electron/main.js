@@ -44,7 +44,7 @@ function createWindow() {
     show: false,
     backgroundColor: '#0A0709',
     title: 'AIVA',
-    icon: path.join(__dirname, '..', 'assets', 'img', 'vaic-mini-colour.png'),
+    icon: path.join(__dirname, '..', 'assets', 'img', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

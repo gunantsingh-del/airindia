@@ -162,15 +162,15 @@
     AIVA.FSUIPC?.connect?.().catch(() => { /* swallow — auto-detect handles retries */ });
 
     /* === "Install AIVA" button ===
-       Always takes the pilot to /install.html — that page has the
-       branded CTA + step-by-step guide + auto-kicks the .exe download
-       when navigated to with ?go=1. The button is hidden when AIVA is
-       already running inside the Electron wrapper (no point installing
-       what you're already using). */
+       Takes the pilot to /install — branded landing page with the
+       step-by-step guide. The page reads ?go=1 and auto-kicks the
+       static .exe download (/AIVA-Setup.exe) so the pilot lands AND
+       starts downloading in one click. Hidden inside the desktop
+       wrapper (already installed). */
     document.addEventListener('click', (e) => {
       if (!(e.target.id === 'pwaInstall' || e.target.closest('#pwaInstall'))) return;
       e.preventDefault();
-      window.location.href = '/install';
+      window.location.href = '/install?go=1';
     });
     /* Hide the button if we're already inside the desktop wrapper. */
     if (window.AIVA_DESKTOP?.isDesktop) {

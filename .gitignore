@@ -8,3 +8,7 @@ package-lock.json
 # Keep the source files; ignore the build artifacts
 build/
 out/
+
+# NOTE: AIVA-Setup.exe is intentionally tracked — it's the static
+# installer the site serves at /AIVA-Setup.exe. Rebuild locally
+# (npm run dist:win) and commit overwrites to update it.

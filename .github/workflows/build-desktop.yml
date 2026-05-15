@@ -1,30 +1,23 @@
 # =====================================================================
-# AIVA Desktop · auto-build the Windows .exe and publish to a single
-# "latest" GitHub Release.
+# AIVA Desktop · MANUAL build only.
 #
-# What this gives us:
-#   • Every push to main rebuilds the .exe.
-#   • The "latest" release tag gets overwritten with the freshest build.
-#   • The stable URL
-#       https://github.com/gunantsingh-del/airindia/releases/latest/download/AIVA-Setup.exe
-#     always points at the most recent .exe — no version juggling.
-#   • airindiavirtual.online/download → 302 redirect → that URL, so the
-#     14 crew never see GitHub in their address bar.
+# We no longer auto-build on every push — the .exe lives as a static
+# asset in the repo (/AIVA-Setup.exe), bound directly to the Install
+# button. No releases, no API, no caching.
 #
-# Skip the build for a commit by adding [skip ci] to its message.
+# Use this workflow only when you actually want a fresh build:
+#   GitHub → Actions tab → "Build AIVA Desktop (.exe)" → Run workflow
+#
+# On a successful run, download AIVA-Setup.exe from the workflow's
+# Artifacts panel and commit it to the repo root (overwriting the
+# existing /AIVA-Setup.exe). Vercel auto-deploys; the install link
+# now serves the new build.
 # =====================================================================
 
 name: Build AIVA Desktop (.exe)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
-    tags: [ 'v*' ]
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
-      - 'docs/**'
 
 concurrency:
   group: build-desktop-${{ github.ref }}
@@ -32,12 +25,8 @@ concurrency:
 
 jobs:
   build:
-    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: windows-latest
     timeout-minutes: 25
-
-    permissions:
-      contents: write   # needed to manage the "latest" Release
 
     steps:
       - name: Checkout
@@ -53,14 +42,12 @@ jobs:
         run: |
           test -f assets/img/icon.ico || { echo "::error::assets/img/icon.ico missing"; exit 1; }
           test -f assets/img/icon.png || { echo "::error::assets/img/icon.png missing"; exit 1; }
-          ls -la assets/img/icon.*
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund --loglevel=warn
 
-      - name: Build Windows installer + portable
+      - name: Build Windows installer
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEBUG: electron-builder
         run: npm run dist:win
 
@@ -69,48 +56,11 @@ jobs:
         shell: bash
         run: ls -lh dist-electron/ || echo "no dist-electron directory"
 
-      - name: Upload artifacts (always)
+      - name: Upload .exe as workflow artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: aiva-desktop-windows
-          path: |
-            dist-electron/AIVA-Setup.exe
-            dist-electron/AIVA-Portable.exe
-            dist-electron/latest.yml
+          name: AIVA-Setup-exe
+          path: dist-electron/AIVA-Setup.exe
           if-no-files-found: error
-
-      - name: Compute release notes
-        id: notes
-        shell: bash
-        run: |
-          echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "build_date=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
-
-      - name: Delete previous "latest" release (if any)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release delete latest --yes --cleanup-tag || echo "No previous latest release to delete"
-
-      - name: Create / update "latest" release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: "AIVA Desktop · auto-build"
-          body: |
-            **Automated build** from commit [`${{ steps.notes.outputs.sha_short }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
-            Built ${{ steps.notes.outputs.build_date }} on `windows-latest`.
-
-            ## Download
-            - [`AIVA-Setup.exe`](https://github.com/${{ github.repository }}/releases/latest/download/AIVA-Setup.exe) — NSIS installer (recommended). Creates Start Menu + Desktop shortcuts.
-            - [`AIVA-Portable.exe`](https://github.com/${{ github.repository }}/releases/latest/download/AIVA-Portable.exe) — single-file portable. No install, drop it anywhere.
-
-            Or just go to <https://airindiavirtual.online/download> — it redirects here.
-          make_latest: true
-          prerelease: false
-          files: |
-            dist-electron/AIVA-Setup.exe
-            dist-electron/AIVA-Portable.exe
-            dist-electron/latest.yml
-          fail_on_unmatched_files: false
+          retention-days: 30

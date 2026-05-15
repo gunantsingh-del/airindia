@@ -1,9 +1,18 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "rewrites": [
-    { "source": "/download",          "destination": "/api/download?file=AIVA-Setup.exe" },
-    { "source": "/download/portable", "destination": "/api/download?file=AIVA-Portable.exe" },
-    { "source": "/aiva-setup.exe",    "destination": "/api/download?file=AIVA-Setup.exe" }
+  "headers": [
+    {
+      "source": "/AIVA-Setup.exe",
+      "headers": [
+        { "key": "Content-Disposition", "value": "attachment; filename=\"AIVA-Setup.exe\"" },
+        { "key": "Cache-Control",       "value": "public, max-age=3600" }
+      ]
+    }
+  ],
+  "redirects": [
+    { "source": "/download",       "destination": "/AIVA-Setup.exe", "permanent": false },
+    { "source": "/install.exe",    "destination": "/AIVA-Setup.exe", "permanent": false },
+    { "source": "/aiva-setup.exe", "destination": "/AIVA-Setup.exe", "permanent": false }
   ],
   "cleanUrls": true,
   "trailingSlash": false

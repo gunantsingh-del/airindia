@@ -259,7 +259,7 @@
         certificate dance, no Chrome address bar. Just open it, start
         MSFS, and the portal lights up.
       </p>
-      <a class="ins-cta" id="dlBtn" href="/download">
+      <a class="ins-cta" id="dlBtn" href="/AIVA-Setup.exe" download="AIVA-Setup.exe">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
           <polyline points="7 10 12 15 17 10"/>
@@ -268,11 +268,9 @@
         Download for Windows
       </a>
       <div class="ins-secondary">
-        <a href="/download/portable">Portable version (no install)</a>
-        <span class="sep">·</span>
         <a href="portal.html">Use in browser instead</a>
         <span class="sep">·</span>
-        <a href="https://github.com/gunantsingh-del/airindia/releases/latest" target="_blank" rel="noopener">All release artifacts</a>
+        <a href="/AIVA-Setup.exe" download="AIVA-Setup.exe">Direct .exe link</a>
       </div>
     </div>
 
@@ -332,7 +330,7 @@
 </div>
 
 <div class="toast-dl" id="toastDl">
-  <b>Download starting…</b> If nothing happens, <a href="/download" style="color:#FFE9A8;">click here</a>.
+  <b>Download starting…</b> If nothing happens, <a href="/AIVA-Setup.exe" download="AIVA-Setup.exe" style="color:#FFE9A8;">click here</a>.
 </div>
 
 <script>
@@ -346,7 +344,7 @@
       const toast = document.getElementById('toastDl');
       toast.classList.add('show');
       const link = document.createElement('a');
-      link.href = '/download';
+      link.href = '/AIVA-Setup.exe';
       link.download = 'AIVA-Setup.exe';
       document.body.appendChild(link);
       link.click();

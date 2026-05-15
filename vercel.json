@@ -1,21 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "redirects": [
-    {
-      "source": "/download",
-      "destination": "https://github.com/gunantsingh-del/airindia/releases/latest/download/AIVA-Setup.exe",
-      "permanent": false
-    },
-    {
-      "source": "/download/portable",
-      "destination": "https://github.com/gunantsingh-del/airindia/releases/latest/download/AIVA-Portable.exe",
-      "permanent": false
-    },
-    {
-      "source": "/aiva-setup.exe",
-      "destination": "https://github.com/gunantsingh-del/airindia/releases/latest/download/AIVA-Setup.exe",
-      "permanent": false
-    }
+  "rewrites": [
+    { "source": "/download",          "destination": "/api/download?file=AIVA-Setup.exe" },
+    { "source": "/download/portable", "destination": "/api/download?file=AIVA-Portable.exe" },
+    { "source": "/aiva-setup.exe",    "destination": "/api/download?file=AIVA-Setup.exe" }
   ],
   "cleanUrls": true,
   "trailingSlash": false

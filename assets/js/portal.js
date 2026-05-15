@@ -2264,15 +2264,15 @@
 
     /* ============ NOTAM ============ */
     notam: {
-      sub: 'Authoritative NOTAM links · AAI eAIP · FAA · EUROCONTROL EAD',
+      sub: 'Live NOTAMs from your SimBrief OFP · ICAO live · authoritative fallbacks',
       render: (c) => {
         const default3 = ['VIDP','VABB','EGLL'];
         c.appendChild(el('section', { html: `
           <div class="section-title">
-            <div><h2>NOTAM &amp; AIP</h2><div class="sub">Type any ICAO/IATA · space-separated for multiple airports</div></div>
+            <div><h2>NOTAM &amp; AIP</h2><div class="sub">Live NOTAMs pulled from your dispatched SimBrief OFP</div></div>
             <div class="actions">
+              <a href="https://dispatch.simbrief.com/" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">${I('external', 14)} SimBrief Dispatch</a>
               <a href="https://aim-india.aai.aero/" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">${I('external', 14)} AAI eAIP</a>
-              <a href="https://www.notams.faa.gov/" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">${I('external', 14)} FAA NOTAMs</a>
             </div>
           </div>
           <div class="card mb-4" style="padding:16px 22px;">
@@ -2283,37 +2283,149 @@
               <button id="ntRt"  class="btn btn-ghost btn-sm" title="Load my active route">${I('plane',14)} My route</button>
             </div>
             <div class="row mt-2" style="flex-wrap:wrap;gap:6px;font-size:11px;color:var(--text-mute);" id="ntChips"></div>
+            <div class="text-mute mt-2" style="font-size:11.5px;" id="ntStatus"></div>
           </div>
           <div id="ntOut"></div>
         ` }));
 
         const out = $('#ntOut', c);
+        const status = $('#ntStatus', c);
 
-        /* NOTAM live fetch is genuinely hard now:
-            • AWC decommissioned their public NOTAM endpoint in late 2025
-              (returns 404 "Not found").
-            • FAA NotamSearch API requires a key + agreement.
-            • AAI eAIP serves HTML only — no machine-readable feed.
-           Rather than chase another broken proxy chain, we surface the
-           official sources as one-click links per airport. Pilots get
-           accurate NOTAMs from the authoritative office; we stop lying
-           about having "live" data we can't deliver. */
-        function fetchNotams(icaos) {
-          out.innerHTML = '';
-          icaos.forEach((icao) => {
-            const a = AIVA.airportByIcao(icao);
-            const region = (a?.country === 'India') ? 'india' : (a?.country === 'USA') ? 'usa' : 'intl';
-            const card = el('div', { class:'card mb-3' });
+        /* =====================================================================
+           NOTAM live source: SimBrief OFP
+           ---------------------------------------------------------------------
+           Free NOTAM APIs (Notamify, FAA NotamSearch, AVWX Premium) all gate
+           real data behind keys + paid agreements. SimBrief, however, ships
+           full FAA + ICAO NOTAM text inside every dispatched OFP — origin,
+           destination, alternates, and en-route stations. Their API is
+           CORS-open and free for any pilot with a username, so we lean on it.
+
+           Flow:
+             1) Pilot sets SimBrief username in Profile (already done for OFP).
+             2) Pilot dispatches an OFP on simbrief.com for whatever route.
+             3) This page fetches their latest OFP, indexes NOTAMs by ICAO,
+                filters to currently-effective only, and renders cards.
+             4) For any requested ICAO not in the OFP, falls back to a
+                one-click authoritative-source link (AAI / FAA / EUROCONTROL).
+           ===================================================================== */
+
+        const sbUser = P.pref('simbrief_user', '');
+        /* Per-session cache so re-running searches doesn't hammer SimBrief. */
+        let cachedOfp = null;
+        let cachedAt  = 0;
+        const OFP_CACHE_MS = 5 * 60 * 1000;   // 5 min
+
+        async function loadSimBriefOFP() {
+          if (!sbUser) return null;
+          if (cachedOfp && (Date.now() - cachedAt) < OFP_CACHE_MS) return cachedOfp;
+          try {
+            const r = await fetch(`https://www.simbrief.com/api/xml.fetcher.php?username=${encodeURIComponent(sbUser)}&json=1`);
+            if (!r.ok) return null;
+            const j = await r.json();
+            cachedOfp = j;
+            cachedAt = Date.now();
+            return j;
+          } catch { return null; }
+        }
+
+        /* SimBrief uses YYYYMMDDHHMM strings — turn into JS Date. */
+        const sbDate = (s) => {
+          if (!s || s.length < 12) return null;
+          return new Date(Date.UTC(+s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8), +s.slice(8,10), +s.slice(10,12)));
+        };
+        const fmtZ = (d) => d ? `${String(d.getUTCDate()).padStart(2,'0')}${['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][d.getUTCMonth()]} ${String(d.getUTCHours()).padStart(2,'0')}${String(d.getUTCMinutes()).padStart(2,'0')}Z` : '—';
+
+        /* Group OFP NOTAMs by ICAO, keep only currently-effective ones. */
+        function indexNotams(ofp) {
+          const idx = {};
+          if (!ofp?.notams?.notamdrec) return idx;
+          const recs = Array.isArray(ofp.notams.notamdrec) ? ofp.notams.notamdrec : [ofp.notams.notamdrec];
+          const now = Date.now();
+          recs.forEach(r => {
+            const icao = (r.icao_id || '').toUpperCase();
+            if (!icao) return;
+            const eff = sbDate(r.notam_effective_dtg);
+            const exp = sbDate(r.notam_expire_dtg);
+            /* Skip expired / not-yet-active. SimBrief includes PERMs which
+               have exp far in the future; those pass naturally. */
+            if (eff && eff.getTime() > now + 24 * 3600 * 1000) return;
+            if (exp && exp.getTime() < now) return;
+            (idx[icao] = idx[icao] || []).push({
+              id:    r.notam_id || '',
+              qcode: r.notam_qcode || '',
+              eff, exp,
+              text:  (r.notam_text || '').replace(/\\n/g, '\n').trim(),
+              report:r.notam_report || '',
+            });
+          });
+          /* Sort each ICAO's NOTAMs: critical Q-codes first, then by effective desc */
+          Object.values(idx).forEach(list => list.sort((a, b) => {
+            const aCrit = /^Q[MR]/.test(a.qcode) ? 1 : 0;
+            const bCrit = /^Q[MR]/.test(b.qcode) ? 1 : 0;
+            if (aCrit !== bCrit) return bCrit - aCrit;
+            return (b.eff?.getTime() || 0) - (a.eff?.getTime() || 0);
+          }));
+          return idx;
+        }
+
+        /* Q-code severity — Q[MR]xx are runway/movement-area which is what
+           gets pilots reading NOTAMs. The rest is mostly advisory.  */
+        const sevOf = (q, text) => {
+          const t = (text || '').toUpperCase();
+          if (/^QM[RNSX]|^QR/.test(q) || /\bCLSD|CLOSED|EMERG|HAZARD\b/.test(t)) return 'red';
+          if (/^Q[LFOS]|^QM/.test(q) || /\bU\/S|UNSERVICEABLE|INOP|RESTRIC|LIMIT|WIP\b/.test(t)) return 'gold';
+          return 'info';
+        };
+        const sevLabel = (s) => s === 'red' ? 'CRITICAL' : s === 'gold' ? 'ADVISORY' : 'INFO';
+
+        /* ===== Render: one card per requested ICAO =====
+           If we have OFP-sourced NOTAMs for that ICAO, render them; otherwise
+           show the authoritative-source link as a fallback. */
+        function renderForIcao(icao, notamsForIcao) {
+          const a = AIVA.airportByIcao(icao);
+          const region = (a?.country === 'India') ? 'india' : (a?.country === 'USA') ? 'usa' : 'intl';
+          const card = el('div', { class:'card mb-3' });
+
+          if (notamsForIcao && notamsForIcao.length) {
+            const shown = notamsForIcao.slice(0, 20);
             card.innerHTML = `
               <div class="row between mb-2">
                 <div>
                   <h3 style="margin:0;font-size:18px;">${icao}${a ? ` · ${a.city}` : ''}</h3>
                   <div class="text-mute" style="font-size:12px;">${a?.name || ''}</div>
                 </div>
-                <span class="pill pill-info" style="font-size:9px;">OFFICIAL SOURCES</span>
+                <span class="pill pill-gold" style="font-size:9px;">${notamsForIcao.length} NOTAM${notamsForIcao.length === 1 ? '' : 'S'}</span>
+              </div>
+              ${shown.map(n => {
+                const sev = sevOf(n.qcode, n.text);
+                return `
+                  <div class="card mb-2" style="background:rgba(255,255,255,.02);padding:12px 14px;">
+                    <div class="row gap-2 mb-1" style="flex-wrap:wrap;align-items:center;">
+                      <span class="pill pill-${sev}" style="font-size:9px;">${sevLabel(sev)}</span>
+                      <span class="mono" style="font-size:11px;color:var(--ai-gold);">${n.id || ''}</span>
+                      ${n.qcode ? `<span class="mono text-mute" style="font-size:10.5px;">${n.qcode}</span>` : ''}
+                      <span class="mono text-mute" style="font-size:10.5px;margin-left:auto;">${fmtZ(n.eff)} → ${fmtZ(n.exp)}</span>
+                    </div>
+                    <div class="mono" style="font-size:12px;line-height:1.55;white-space:pre-wrap;color:var(--text);max-height:240px;overflow:auto;">${(n.text || '').slice(0, 1200)}</div>
+                  </div>
+                `;
+              }).join('')}
+              ${notamsForIcao.length > 20 ? `<div class="text-mute" style="font-size:11px;">… ${notamsForIcao.length - 20} more not shown</div>` : ''}
+            `;
+          } else {
+            /* Fallback — authoritative source */
+            card.innerHTML = `
+              <div class="row between mb-2">
+                <div>
+                  <h3 style="margin:0;font-size:18px;">${icao}${a ? ` · ${a.city}` : ''}</h3>
+                  <div class="text-mute" style="font-size:12px;">${a?.name || ''}</div>
+                </div>
+                <span class="pill pill-info" style="font-size:9px;">OFFICIAL SOURCE</span>
               </div>
               <p class="text-mute" style="font-size:12.5px;line-height:1.6;margin:0 0 12px;">
-                NOTAMs change hour-to-hour. Pulling them in-app reliably means brokering an API key with the FAA / EUROCONTROL, which AIVA doesn't have. Use the source-of-truth link for ${icao} below.
+                ${sbUser
+                  ? `Your latest SimBrief OFP doesn't include ${icao}. Dispatch a flight plan that has ${icao} as origin, destination, alternate or an en-route fix to see live NOTAMs here, or open the official source below.`
+                  : `Set your SimBrief username in <a href="#profile" class="text-gold">Profile</a> to see live NOTAMs from your dispatched OFPs here. Until then, open the official source below.`}
               </p>
               <div class="row gap-2" style="flex-wrap:wrap;">
                 ${region === 'india' ? `
@@ -2328,9 +2440,33 @@
                   <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://notaminfo.com/airportmap/${icao}">${I('external',12)} NotamInfo</a>
                 `}
               </div>
-              <div class="text-mute mono mt-3" style="font-size:10.5px;letter-spacing:.18em;">${a?.country || 'INTERNATIONAL'} · ${icao}</div>
             `;
-            out.appendChild(card);
+          }
+          return card;
+        }
+
+        async function fetchNotams(icaos) {
+          out.innerHTML = `<div class="row gap-2" style="padding:18px;"><div class="chakra-spin"></div><span class="text-mute">Pulling NOTAMs from your SimBrief OFP for ${icaos.length} airport${icaos.length>1?'s':''}…</span></div>`;
+          if (!sbUser) {
+            status.innerHTML = `<span style="color:#FBBF24;">No SimBrief username set.</span> Add yours in <a href="#profile" class="text-gold">Profile</a> to enable live NOTAMs.`;
+          } else {
+            status.innerHTML = `Pulling latest dispatched OFP for <span class="mono" style="color:var(--ai-gold);">${sbUser}</span>…`;
+          }
+
+          const ofp = await loadSimBriefOFP();
+          const idx = ofp ? indexNotams(ofp) : {};
+          const ofpRoute = ofp ? `${ofp.origin?.icao_code || '?'} → ${ofp.destination?.icao_code || '?'} (${ofp.aircraft?.icaocode || '?'})` : '';
+
+          if (sbUser && ofp) {
+            const totalNotams = Object.values(idx).reduce((s, a) => s + a.length, 0);
+            status.innerHTML = `Latest OFP: <span class="mono" style="color:var(--ai-gold);">${ofpRoute}</span> · ${totalNotams} active NOTAM${totalNotams===1?'':'s'} indexed across ${Object.keys(idx).length} airport${Object.keys(idx).length===1?'':'s'}`;
+          } else if (sbUser) {
+            status.innerHTML = `<span style="color:#FBBF24;">Couldn't reach SimBrief.</span> Dispatch an OFP at <a href="https://dispatch.simbrief.com/" target="_blank" class="text-gold">dispatch.simbrief.com</a> then refresh.`;
+          }
+
+          out.innerHTML = '';
+          icaos.forEach(icao => {
+            out.appendChild(renderForIcao(icao, idx[icao]));
           });
         }
 
@@ -2339,7 +2475,6 @@
             .map(s => s.toUpperCase())
             .map(s => s.length === 3 ? (AIVA.airport(s)?.icao || s) : s);
           if (!codes.length) return;
-          /* Render chips */
           $('#ntChips', c).innerHTML = codes.map(x => `<span class="pill pill-info" style="font-size:10px;">${x}</span>`).join(' ');
           fetchNotams(codes);
         }

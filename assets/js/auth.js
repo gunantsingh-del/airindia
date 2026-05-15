@@ -10,7 +10,7 @@ AIVA.Auth = (() => {
      re-seed from the new locked roster. v5 → Gunant deranked to Cadet
      (rank now computed live from hours; admin role kept), and live-rank
      wiring lands in currentPilot(). */
-  const ROSTER_VERSION = 'v5-live-rank-2026-05-15';
+  const ROSTER_VERSION = 'v6-add-samyo-2026-05-15';
   const ensureSeed = () => {
     const ver = AIVA.Store.get('roster_version');
     if (ver !== ROSTER_VERSION) {

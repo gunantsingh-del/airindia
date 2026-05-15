@@ -2698,6 +2698,59 @@ The SimBrief OFP — what's on each page:
       });
       liveMap.on('mouseleave','aiva-live-aircraft-dot', () => { popup?.remove(); popup=null; });
 
+      /* HTML overlay dot — belt-and-suspenders backup for the player's
+         marker. MapLibre's circle-layer rendering has been failing
+         silently for the Chief Pilot during testing (gold halo, dot,
+         heading triangle ALL invisible while the source clearly held
+         the feature). An absolute-positioned div tied to map.project()
+         coords sidesteps every paint expression and renders no matter
+         what. Updated each tick + on every map 'move'/'zoom' so it
+         tracks the camera. */
+      const meDot = document.createElement('div');
+      meDot.id = 'efbMeDot';
+      meDot.style.cssText = [
+        'position:absolute',
+        'left:0','top:0',
+        'transform:translate(-50%,-50%)',
+        'pointer-events:none',
+        'z-index:6',
+        'display:none',
+      ].join(';');
+      meDot.innerHTML = `
+        <div style="position:relative;width:48px;height:48px;">
+          <!-- outer pulsing gold halo -->
+          <div style="position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,rgba(255,225,89,.55) 0%,rgba(255,225,89,.2) 45%,rgba(255,225,89,0) 70%);"></div>
+          <!-- red dot -->
+          <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:#E61926;border:3px solid #FFE159;box-shadow:0 0 10px rgba(230,25,38,.7);"></div>
+          <!-- heading triangle -->
+          <div id="efbMeHdg" style="position:absolute;left:50%;top:50%;transform-origin:50% 50%;transform:translate(-50%,-130%) rotate(0deg);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:11px solid #FFE159;filter:drop-shadow(0 0 3px rgba(0,0,0,.8));"></div>
+        </div>
+        <div style="margin-top:2px;text-align:center;font-family:var(--font-mono);font-size:10px;color:#FFE159;text-shadow:0 0 4px rgba(0,0,0,.9),0 0 2px rgba(0,0,0,1);font-weight:700;letter-spacing:.05em;" id="efbMeLabel">—</div>
+      `;
+      aivaLayer.appendChild(meDot);
+
+      /* Reposition the HTML dot on every map movement. */
+      const repositionMeDot = () => {
+        const me = AIVA.Auth.currentPilot();
+        if (!me) return;
+        let pos = null;
+        try { pos = JSON.parse(localStorage.getItem('aiva.live.' + me.id) || '{}'); } catch {}
+        if (!pos || !pos.lat || !pos.lon) { meDot.style.display = 'none'; return; }
+        const pt = liveMap.project([pos.lon, pos.lat]);
+        meDot.style.display = 'block';
+        meDot.style.left = pt.x + 'px';
+        meDot.style.top  = pt.y + 'px';
+        const hdg = meDot.querySelector('#efbMeHdg');
+        if (hdg) hdg.style.transform = `translate(-50%,-130%) rotate(${pos.hdg || 0}deg)`;
+        const lbl = meDot.querySelector('#efbMeLabel');
+        if (lbl) lbl.textContent = `${pos.callsign || ''} ${pos.fno || ''}`.trim();
+      };
+      liveMap.on('move', repositionMeDot);
+      liveMap.on('zoom', repositionMeDot);
+      liveMap.on('render', repositionMeDot);
+      /* Also re-position on each broadcast tick (when localStorage updates). */
+      window.__aivaRepositionMeDot = repositionMeDot;
+
       /* "Center on me" floating button — always pans the map to the
          pilot's current SimConnect position. Adds a manual recenter
          affordance because the auto-pan only fires the first time a
@@ -2832,6 +2885,9 @@ The SimBrief OFP — what's on each page:
         ts: Date.now(),
         trail,
       }));
+      /* Nudge the HTML overlay dot to repaint right after each new pos
+         write — independent of MapLibre's circle-layer rendering path. */
+      try { window.__aivaRepositionMeDot?.(); } catch {}
     };
     livePosTimer = setInterval(writePos, 5000);
     /* Throttled per-frame writer — ≈2 Hz max to localStorage. */

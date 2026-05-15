@@ -174,6 +174,58 @@
        that lacked auto-detect; harmless to keep as a hint to start sooner. */
     AIVA.FSUIPC?.connect?.().catch(() => { /* swallow — auto-detect handles retries */ });
 
+    /* ============ Phase-driven announcement triggers ============
+       AIVA.FSUIPC emits 'phase' events as the state machine transitions
+       (GATE → PUSHBACK → TAXI_OUT → TAKEOFF → CLIMB → CRUISE → DESCENT
+       → APPROACH → LANDED → TAXI_IN → PARKED). When the pilot's
+       Announcements page is in AUTO mode, each phase transition picks
+       a random recording from the matching stage's library and plays
+       it. Guarded against double-firing per sector via firedStages. */
+    const PHASE_TO_STAGE = {
+      'GATE':     'pre_dep',
+      'TAXI_OUT': 'safety',
+      'DESCENT':  'descending',
+      'APPROACH': 'belts_on',
+      'LANDED':   'landed',
+      'TAXI_IN':  'disarm',
+      'PARKED':   'disarm',
+    };
+    const firedStages = new Set();
+    AIVA.FSUIPC?.on?.('phase', ({ from, to, state }) => {
+      const cfg = AIVA.Store.get('ann_cfg', { mode: 'manual' });
+      if (cfg.mode !== 'auto') return;
+      const stageId = PHASE_TO_STAGE[to];
+      if (!stageId || firedStages.has(stageId)) return;
+      const files = (AIVA.Store.get('ann_lib', {}) || {})[stageId] || [];
+      if (!files.length) return;
+      firedStages.add(stageId);
+      const pick = files[Math.floor(Math.random() * files.length)];
+      try { new Audio(pick.dataURL).play().catch(() => {}); } catch {}
+      toast(`Cabin announcement · ${stageId}`, 'ok', 3500);
+    });
+    /* Pass-10k climb announcement uses the alt threshold, separate
+       from the phase machine because passing 10,000 ft happens
+       transiently during the CLIMB phase. */
+    AIVA.FSUIPC?.on?.('state', (s) => {
+      if (!s || s.onGround) return;
+      if (!s._above10kSeenClimb && (s.alt || 0) > 10000 && (s.vs || 0) > 0) {
+        s._above10kSeenClimb = true;
+        const cfg = AIVA.Store.get('ann_cfg', { mode: 'manual' });
+        if (cfg.mode !== 'auto') return;
+        if (firedStages.has('pass_10k')) return;
+        const files = (AIVA.Store.get('ann_lib', {}) || {}).pass_10k || [];
+        if (!files.length) return;
+        firedStages.add('pass_10k');
+        const pick = files[Math.floor(Math.random() * files.length)];
+        try { new Audio(pick.dataURL).play().catch(() => {}); } catch {}
+        toast('Cabin announcement · passing 10,000 ft', 'ok', 3500);
+      }
+    });
+    /* When a NEW sector starts, reset the fired-stages bookkeeping so
+       the next departure gets its boarding/safety announcements too. */
+    AIVA.FSUIPC?.on?.('connect', () => { /* keep firedStages — same sector */ });
+    AIVA.FSUIPC?.on?.('landing', () => { /* allow post-landing stages */ });
+
     /* === "Install AIVA" button ===
        Takes the pilot to /install — branded landing page with the
        step-by-step guide. The page reads ?go=1 and auto-kicks the

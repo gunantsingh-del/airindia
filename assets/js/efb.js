@@ -2510,18 +2510,44 @@
         id:'aiva-live-trails-line', type:'line', source:'aiva-live-trails',
         paint:{ 'line-color': ['get','color'], 'line-width': 2.5, 'line-opacity': 0.85 },
       });
+      /* Pilot's own aircraft: small red dot with a brighter gold ring so
+         it's instantly recognisable against the dark base map. Other
+         pilots: aubergine with thin white border. */
       liveMap.addLayer({
         id:'aiva-live-aircraft-dot', type:'circle', source:'aiva-live-aircraft',
         paint:{
-          'circle-radius':       ['case', ['get','isMe'], 11, 7],
-          'circle-color':        ['case', ['get','isMe'], '#FFFFFF', '#DA192F'],
-          'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 2,
+          'circle-radius':       ['case', ['get','isMe'], 8, 6],
+          'circle-color':        ['case', ['get','isMe'], '#E61926', '#4A1B41'],
+          'circle-stroke-color': ['case', ['get','isMe'], '#FFE159', '#FFFFFF'],
+          'circle-stroke-width': ['case', ['get','isMe'], 2.5, 1.5],
+        },
+      });
+      /* Heading triangle layered on top of the player's dot — a tiny
+         airplane-shaped indicator pointing along the current heading.
+         Rendered as a unicode airplane symbol rotated by `hdg`. */
+      liveMap.addLayer({
+        id:'aiva-live-me-heading', type:'symbol', source:'aiva-live-aircraft',
+        filter: ['==', ['get','isMe'], true],
+        layout: {
+          'text-field': '▲',
+          'text-font': ['Open Sans Bold','Arial Unicode MS Bold'],
+          'text-size': 14,
+          'text-rotate': ['get','hdg'],
+          'text-rotation-alignment': 'map',
+          'text-allow-overlap': true,
+          'text-ignore-placement': true,
+          'text-offset': [0, 0],
+        },
+        paint: {
+          'text-color': '#FFE159',
+          'text-halo-color': 'rgba(10,7,9,.85)',
+          'text-halo-width': 1.5,
         },
       });
       liveMap.addLayer({
         id:'aiva-live-aircraft-label', type:'symbol', source:'aiva-live-aircraft',
         layout:{ 'text-field': ['get','label'], 'text-font':['Open Sans Semibold','Arial Unicode MS Bold'],
-                 'text-size':11, 'text-offset':[0,1.4], 'text-anchor':'top', 'text-allow-overlap':false },
+                 'text-size':11, 'text-offset':[0,1.6], 'text-anchor':'top', 'text-allow-overlap':false },
         paint:{ 'text-color':'#FFFFFF', 'text-halo-color':'rgba(8,5,7,.9)', 'text-halo-width':1.5 },
       });
       let popup=null;
@@ -2577,15 +2603,19 @@
     switchSource(currentSource);
   }
 
-  /* Write our own position into localStorage every 5s.
-     Reads from AIVA.FSUIPC.state() if connected, otherwise falls back to the
-     pilot's home base coordinates (so other pilots see a stationary dot). */
+  /* Write own position into localStorage. Two triggers:
+       1) Every 5s on a timer (fallback so the broadcast stays alive
+          even when telemetry isn't flowing — keeps the home-base dot
+          live for other crew to see).
+       2) Immediately on every FSUIPC 'state' event (≈5 Hz from
+          SimConnect) so the player's plane updates on the map within
+          ~200 ms, not 5 s. */
   function startLivePosBroadcast() {
     if (livePosTimer) clearInterval(livePosTimer);
     const me = AIVA.Auth.currentPilot();
     const myCall = P.pref('my_callsign', 'AIC' + (me?.id || '001').replace(/[^0-9]/g,'').slice(-3));
     const myBase = me?.base ? AIVA.airport(me.base) : null;
-    livePosTimer = setInterval(() => {
+    const writePos = () => {
       const s  = AIVA.FSUIPC?.state?.() || {};
       const fp = P.get('flight_in_progress');
       const f  = fp ? AIVA.findFlight(fp.fno) : activeFlight();
@@ -2598,11 +2628,23 @@
       localStorage.setItem(key, JSON.stringify({
         pilotId: me?.id, pilotName: me?.name, callsign: myCall,
         fno: f?.fno, ac: f?.ac, from: f?.from, to: f?.to,
-        lat, lon, alt: s.alt, gs: s.gs, hdg: s.hdg, vs: s.vs, onGround: s.onGround,
+        lat, lon, alt: s.alt, gs: s.gs, hdg: s.hdg, vs: s.vs,
+        onGround: s.onGround, fuel: s.fuel,
         ts: Date.now(),
         trail,
       }));
-    }, 5000);
+    };
+    livePosTimer = setInterval(writePos, 5000);
+    /* Throttled per-frame writer — ≈2 Hz max to localStorage. */
+    let lastFrameWrite = 0;
+    AIVA.FSUIPC?.on?.('state', () => {
+      const now = Date.now();
+      if (now - lastFrameWrite < 500) return;
+      lastFrameWrite = now;
+      writePos();
+    });
+    /* Kick one off immediately so the map has a position to render. */
+    writePos();
   }
 
   /* Re-draw the live-map data layers every 2 s from all live.<pilotId> keys. */
@@ -2610,6 +2652,7 @@
     if (liveDrawTimer) clearInterval(liveDrawTimer);
     const me = AIVA.Auth.currentPilot();
     const myId = me?.id;
+    let pannedToMe = false;        // first-time map-recenter on own aircraft
     function tick() {
       const aircraft = [], trails = [];
       const nearbyList = [];
@@ -2625,10 +2668,19 @@
           properties: {
             isMe, callsign: pos.callsign, pilotName: pos.pilotName,
             fno: pos.fno, alt: pos.alt, gs: pos.gs,
+            hdg: pos.hdg || 0,
             label: pos.callsign + (pos.fno ? ` ${pos.fno}` : ''),
           },
           geometry: { type:'Point', coordinates: [pos.lon, pos.lat] },
         });
+        /* First time we see the pilot's own aircraft with real position,
+           fly the map there. Otherwise the camera stays parked at the
+           home base and the player's plane is hundreds of miles off-
+           screen — the exact bug the Chief Pilot hit. */
+        if (isMe && !pannedToMe && liveMap) {
+          pannedToMe = true;
+          liveMap.flyTo({ center: [pos.lon, pos.lat], zoom: 7, duration: 800 });
+        }
         if (pos.trail && pos.trail.length > 1) {
           trails.push({
             type:'Feature',

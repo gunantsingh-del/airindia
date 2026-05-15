@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Install AIVA · Air India Virtual</title>
 <meta name="theme-color" content="#0A0709">
-<link rel="icon" type="image/png" href="assets/img/vaic-mini-colour.png?v=20260515B">
-<link rel="apple-touch-icon" href="assets/img/vaic-mini-colour.png?v=20260515B">
+<link rel="icon" type="image/png" href="assets/img/vaic-mini-colour.png?v=20260515C">
+<link rel="apple-touch-icon" href="assets/img/vaic-mini-colour.png?v=20260515C">
 <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/base.css?v=20260515B">
+<link rel="stylesheet" href="assets/css/base.css?v=20260515C">
 <style>
   html, body { margin: 0; padding: 0; background: #0A0709; color: var(--ai-cream); min-height: 100vh; font-family: var(--font-sans); }
   body {
@@ -238,7 +238,7 @@
 <div class="ins-wrap">
 
   <div class="ins-head">
-    <img src="assets/img/vaic-mini-colour.png?v=20260515B" alt="AIVA chakra logo">
+    <img src="assets/img/vaic-mini-colour.png?v=20260515C" alt="AIVA chakra logo">
     <div class="brand">
       <div class="name">Air India Virtual</div>
       <div class="sub">Crew Portal · Desktop App</div>
@@ -334,10 +334,37 @@
 </div>
 
 <script>
+  /* If we're INSIDE the AIVA desktop wrapper, the user shouldn't see
+     an install CTA — they're already running it. Replace the hero
+     content with a friendly "already installed" panel and suppress
+     the auto-download. */
+  const isDesktop = !!(window.AIVA_DESKTOP && window.AIVA_DESKTOP.isDesktop);
+  if (isDesktop) {
+    const hero = document.querySelector('.hero > div:first-child');
+    if (hero) {
+      hero.innerHTML = `
+        <div class="badge-row">
+          <span class="badge" style="color:#6EE7B7;border-color:rgba(110,231,183,.45);background:rgba(110,231,183,.08);">✓ Installed</span>
+          <span class="badge">v${(window.AIVA_DESKTOP.version || '').split('.').slice(0,2).join('.')}</span>
+        </div>
+        <h1>You're already flying AIVA</h1>
+        <p class="lede">
+          This window IS the AIVA desktop app — there's nothing to install. Head back to the portal and the EFB; SimConnect runs in the background and MSFS pairs automatically.
+        </p>
+        <a class="ins-cta" href="portal.html" style="background:linear-gradient(180deg,#10B981 0%,#059669 100%);color:#0A0709;">
+          Back to portal →
+        </a>
+      `;
+    }
+    document.querySelector('.hero > .preview-card')?.remove();
+    document.querySelectorAll('.section-title, .steps, .specs').forEach(n => n.remove());
+  }
+
   /* If the page is loaded with ?go=1 (e.g. from the in-app "Install AIVA"
-     button) we kick off the download automatically AFTER the page paints
-     so the pilot sees what they're getting. */
+     button) we kick off the download automatically AFTER the page paints.
+     Skipped when we're inside the .exe. */
   (function () {
+    if (isDesktop) return;
     const params = new URLSearchParams(location.search);
     if (params.get('go') !== '1') return;
     setTimeout(() => {
@@ -354,7 +381,7 @@
   })();
 
   /* Click animation on the CTA */
-  document.getElementById('dlBtn').addEventListener('click', () => {
+  document.getElementById('dlBtn')?.addEventListener('click', () => {
     const toast = document.getElementById('toastDl');
     toast.classList.add('show');
     setTimeout(() => toast.classList.remove('show'), 5000);

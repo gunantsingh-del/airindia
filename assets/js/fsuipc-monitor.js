@@ -18,7 +18,66 @@ AIVA.FSUIPC = (() => {
   let arrivalArmed = true;        /* fire the 10k ft event once per sector */
   let landingArmed = true;        /* fire the landing event once per sector */
   let inFlight = false;
-  const listeners = { connect:[], disconnect:[], state:[], descent10k:[], landing:[], crash:[] };
+  const listeners = { connect:[], disconnect:[], state:[], descent10k:[], landing:[], crash:[], phase:[] };
+  /* Flight-phase state machine.
+     States: GATE → PUSHBACK → TAXI_OUT → TAKEOFF → CLIMB → CRUISE →
+             DESCENT → APPROACH → LANDED → TAXI_IN → PARKED
+     Each transition emits a 'phase' event with {from, to, state}.
+     Announcement triggers (boarding / pushback / takeoff / landing /
+     disembark) hook into these. */
+  let phase = 'GATE';
+  let topAltSeen = 0;
+  function detectPhase(s, prev) {
+    const og = !!s.onGround;
+    const gs = s.gs || 0;
+    const alt = s.alt || 0;
+    const vs = s.vs || 0;
+    const pb = !!s.parkingBrake;
+    const eng = !!(s.eng1 || s.eng2);
+    /* Ground + brake set + no movement */
+    if (og && gs < 1 && pb) {
+      /* If we arrived (came from a landed/taxi-in state), it's PARKED.
+         Otherwise it's GATE (initial state, pre-departure). */
+      if (prev === 'LANDED' || prev === 'TAXI_IN' || prev === 'PARKED') return 'PARKED';
+      return 'GATE';
+    }
+    /* Ground + brake released + slow = pushback or beginning of taxi */
+    if (og && gs < 5) {
+      if (prev === 'GATE' || prev === 'PUSHBACK') return 'PUSHBACK';
+      if (prev === 'LANDED' || prev === 'TAXI_IN') return 'TAXI_IN';
+      return prev || 'PUSHBACK';
+    }
+    /* Ground + moderate ground speed = taxi (out vs in depends on history) */
+    if (og && gs >= 5 && gs < 80) {
+      if (prev === 'LANDED' || prev === 'TAXI_IN') return 'TAXI_IN';
+      return 'TAXI_OUT';
+    }
+    /* Ground + high speed (takeoff roll) */
+    if (og && gs >= 80) return 'TAKEOFF';
+    /* Airborne, low + climbing fast = TAKEOFF/INITIAL CLIMB */
+    if (!og && alt < 1000 && vs > 500) return 'TAKEOFF';
+    /* Airborne, climbing */
+    if (!og && vs > 200) return 'CLIMB';
+    /* Airborne, descending below 10k = APPROACH */
+    if (!og && vs < -200 && alt < 10000) return 'APPROACH';
+    /* Airborne, descending above 10k = DESCENT */
+    if (!og && vs < -200) return 'DESCENT';
+    /* Airborne, low alt, level-ish = APPROACH */
+    if (!og && alt < 5000) return 'APPROACH';
+    /* Airborne, stable = CRUISE */
+    if (!og) return 'CRUISE';
+    /* Just touched down */
+    if (og && prev && (prev === 'APPROACH' || prev === 'TAKEOFF' || prev === 'CLIMB' || prev === 'CRUISE' || prev === 'DESCENT')) return 'LANDED';
+    return prev || 'GATE';
+  }
+  function maybePhaseChange(state) {
+    const next = detectPhase(state, phase);
+    if (next !== phase) {
+      const from = phase;
+      phase = next;
+      emit('phase', { from, to: next, state });
+    }
+  }
 
   function on(evt, cb) { listeners[evt]?.push(cb); }
   function emit(evt, payload) { (listeners[evt] || []).forEach(cb => { try { cb(payload); } catch(_){} }); }
@@ -109,16 +168,33 @@ AIVA.FSUIPC = (() => {
   }
 
   function handleFrame(d) {
-    /* d is an object keyed by offset hex, but our wrapper normalises to names */
+    /* d is an object keyed by offset hex, but our wrapper normalises to names.
+       SimConnect bridge passes extended fields (parkingBrake, flaps, throttle,
+       engine combustion, pushback state, tas) that the legacy WS path won't
+       supply — pass them through as undefined-safe so consumers can rely on
+       presence checks. */
     const state = {
       alt:      d.alt      ?? d[FSUIPC_OFFSETS.alt.offset.toString()],
       gs:       d.gs       ?? d[FSUIPC_OFFSETS.gs.offset.toString()],
       onGround: !!(d.onGround ?? d[FSUIPC_OFFSETS.onGround.offset.toString()]),
       lat:      d.lat      ?? d[FSUIPC_OFFSETS.lat.offset.toString()],
       lon:      d.lon      ?? d[FSUIPC_OFFSETS.lon.offset.toString()],
+      ias:          d.ias,
+      tas:          d.tas,
+      vs:           d.vs,
+      hdg:          d.hdg,
+      fuel:         d.fuel,
+      parkingBrake: d.parkingBrake,
+      flapsIdx:     d.flapsIdx,
+      flapsPct:     d.flapsPct,
+      throttle1:    d.throttle1,
+      eng1:         d.eng1,
+      eng2:         d.eng2,
+      pushback:     d.pushback,
       ts: Date.now(),
     };
     emit('state', state);
+    maybePhaseChange(state);
     /* Bookkeeping */
     if (state.alt > topAlt) topAlt = state.alt;
     if (state.alt > 1500 && !state.onGround) inFlight = true;
@@ -140,6 +216,8 @@ AIVA.FSUIPC = (() => {
 
   function resetSector() {
     topAlt = 0; arrivalArmed = true; landingArmed = true; inFlight = false;
+    phase = 'GATE';
+    topAltSeen = 0;
   }
 
   /* ============ AUTO-DETECT loop ============
@@ -249,6 +327,7 @@ AIVA.FSUIPC = (() => {
     /* Alias used by the EFB progress ribbon and portal dashboard */
     lastTelemetry: () => connected ? lastState : null,
     source: () => simSource,
+    phase:  () => phase,
     resetSector,
     startAutoDetect, stopAutoDetect,
     /* For UI debugging / manual triggers */

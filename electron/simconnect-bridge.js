@@ -29,17 +29,27 @@
 const { EventEmitter } = require('events');
 
 /* The set of SimVars we subscribe to. Order matters — readers in the
-   simObjectData handler decode in the same order. */
+   simObjectData handler decode in the same order. Extended in May
+   2026 to support the phase-detection state machine (parking brake,
+   flaps, throttle, true airspeed, pushback state). */
 const VARS = [
-  ['PLANE LATITUDE',                   'degrees',         'lat'],
-  ['PLANE LONGITUDE',                  'degrees',         'lon'],
-  ['PLANE ALTITUDE',                   'feet',            'alt'],
-  ['AIRSPEED INDICATED',               'knots',           'ias'],
-  ['GROUND VELOCITY',                  'knots',           'gs'],
-  ['VERTICAL SPEED',                   'feet per minute', 'vs'],
-  ['PLANE HEADING DEGREES MAGNETIC',   'degrees',         'hdg'],
-  ['SIM ON GROUND',                    'bool',            'onGround', 'int32'],
-  ['FUEL TOTAL QUANTITY WEIGHT',       'kilograms',       'fuel'],
+  ['PLANE LATITUDE',                          'degrees',         'lat'],
+  ['PLANE LONGITUDE',                         'degrees',         'lon'],
+  ['PLANE ALTITUDE',                          'feet',            'alt'],
+  ['AIRSPEED INDICATED',                      'knots',           'ias'],
+  ['AIRSPEED TRUE',                           'knots',           'tas'],
+  ['GROUND VELOCITY',                         'knots',           'gs'],
+  ['VERTICAL SPEED',                          'feet per minute', 'vs'],
+  ['PLANE HEADING DEGREES MAGNETIC',          'degrees',         'hdg'],
+  ['SIM ON GROUND',                           'bool',            'onGround',     'int32'],
+  ['BRAKE PARKING POSITION',                  'bool',            'parkingBrake', 'int32'],
+  ['FLAPS HANDLE INDEX',                      'number',          'flapsIdx',     'int32'],
+  ['FLAPS HANDLE PERCENT',                    'percent',         'flapsPct'],
+  ['GENERAL ENG THROTTLE LEVER POSITION:1',   'percent',         'throttle1'],
+  ['ENG COMBUSTION:1',                        'bool',            'eng1',         'int32'],
+  ['ENG COMBUSTION:2',                        'bool',            'eng2',         'int32'],
+  ['PUSHBACK STATE',                          'number',          'pushback',     'int32'],
+  ['FUEL TOTAL QUANTITY WEIGHT',              'kilograms',       'fuel'],
 ];
 
 const DEF_ID = 0;     // single data definition for all of the above

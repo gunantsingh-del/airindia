@@ -360,7 +360,7 @@ body.efb-body:not(:has(.efb-home-v2)) {
 .efb2-grid {
   display: grid;
   grid-template-columns: 92px 1fr 92px;
-  grid-template-rows:    100px auto 1fr;
+  grid-template-rows:    132px auto 1fr;
   grid-template-areas:
     "top   top    top"
     "prog  prog   prog"
@@ -372,9 +372,12 @@ body.efb-body:not(:has(.efb-home-v2)) {
   padding: 12px;
   box-sizing: border-box;
 }
-/* When no in-progress ribbon, the prog row collapses to zero */
+/* When no in-progress ribbon, the prog row collapses to zero.
+   Top row is 132 px (was 100) to fit the stacked clocks pill + date
+   + welcome message comfortably; the old height clipped the welcome
+   strip into the tile rails below. */
 .efb2-grid:not(:has(.efb-progress)) {
-  grid-template-rows: 100px 1fr;
+  grid-template-rows: 132px 1fr;
   grid-template-areas:
     "top   top    top"
     "left  centre right";

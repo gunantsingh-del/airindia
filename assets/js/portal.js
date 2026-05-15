@@ -4822,7 +4822,7 @@
 
     /* ============ ANNOUNCEMENTS ============ */
     announce: {
-      sub: 'Cabin announcements · upload audio + auto/manual playback',
+      sub: 'Cabin announcements · auto/manual playback',
       render: (c) => {
         const STAGES = [
           { id:'pre_dep',    label:'Pre-departure',         desc:'Doors closed, before pushback' },
@@ -4837,10 +4837,13 @@
         ];
         const cfg = AIVA.Store.get('ann_cfg', { mode: 'manual' });
         const lib = AIVA.Store.get('ann_lib', {});   /* { stageId: [{name, dataURL}], ... } */
+        /* Upload is gated to the admin (Captain Gunant, AIV001). Cadets see the
+           library read-only and can play clips, but cannot upload or delete. */
+        const isAdmin = pilot.role === 'admin';
 
         c.appendChild(el('section', { html: `
           <div class="section-title">
-            <div><h2>Cabin Announcements</h2><div class="sub">${STAGES.length} stages · upload your own audio (MP3/WAV) · shuffled per flight</div></div>
+            <div><h2>Cabin Announcements</h2><div class="sub">${STAGES.length} stages${isAdmin ? ' · upload audio (MP3/WAV)' : ' · play in flight'} · shuffled per leg</div></div>
             <div class="actions">
               <div class="row gap-2" style="background:var(--surface);padding:4px;border-radius:99px;border:1px solid var(--border);">
                 <button class="btn btn-sm ${cfg.mode==='manual'?'btn-primary':'btn-ghost'}" data-mode="manual">Manual</button>
@@ -4850,9 +4853,11 @@
           </div>
 
           <div class="note-callout mb-4">
-            <b>Auto mode</b> plays announcements automatically at the right phase of flight based on FSUIPC telemetry.
-            <b>Manual mode</b> shows a play button for each stage in the EFB — you decide when.
-            <b>Multiple files per stage</b> are shuffled flight-to-flight so it doesn't sound identical every leg.
+            <b>Auto mode</b> plays announcements automatically at the right phase of flight using FSUIPC telemetry.
+            <b>Manual mode</b> shows a play button for each stage in the EFB — pilot decides when.
+            ${isAdmin
+              ? '<b>Admin-only upload:</b> only Captain Gunant manages the library. Crew can listen but not change it.'
+              : '<b>Read-only library:</b> the Chief Pilot maintains the recordings — tap any stage to preview.'}
           </div>
 
           <div class="grid grid-2" id="annGrid">
@@ -4872,14 +4877,16 @@
                       <div class="ann-file-row">
                         <button class="ann-play" data-play="${stage.id}:${i}" title="Play">▶</button>
                         <span class="ann-file-name">${f.name}</span>
-                        <button class="ann-del" data-del="${stage.id}:${i}" title="Delete">✕</button>
+                        ${isAdmin ? `<button class="ann-del" data-del="${stage.id}:${i}" title="Delete">✕</button>` : ''}
                       </div>
-                    `).join('') || `<div class="text-mute" style="font-size:11.5px;padding:8px 0;">No audio uploaded yet.</div>`}
+                    `).join('') || `<div class="text-mute" style="font-size:11.5px;padding:8px 0;">${isAdmin ? 'No audio uploaded yet.' : 'No clip on file for this stage yet.'}</div>`}
                   </div>
-                  <label class="btn btn-ghost btn-sm mt-3" style="display:inline-flex;cursor:pointer;">
-                    ${I('upload',12)} Upload audio
-                    <input type="file" data-up="${stage.id}" accept="audio/*" multiple style="display:none;">
-                  </label>
+                  ${isAdmin ? `
+                    <label class="btn btn-ghost btn-sm mt-3" style="display:inline-flex;cursor:pointer;">
+                      ${I('upload',12)} Upload audio
+                      <input type="file" data-up="${stage.id}" accept="audio/*" multiple style="display:none;">
+                    </label>
+                  ` : ''}
                 </div>
               `;
             }).join('')}
@@ -4894,35 +4901,38 @@
           route();
         });
 
-        c.querySelectorAll('input[data-up]').forEach(inp => {
-          inp.onchange = async (e) => {
-            const stageId = inp.dataset.up;
-            const files = Array.from(e.target.files || []);
-            if (!files.length) return;
-            const cur = AIVA.Store.get('ann_lib', {});
-            cur[stageId] = cur[stageId] || [];
-            for (const f of files) {
-              if (f.size > 5 * 1024 * 1024) {
-                toast(`${f.name} is over 5 MB — please use shorter clips.`, 'bad');
-                continue;
+        if (isAdmin) {
+          c.querySelectorAll('input[data-up]').forEach(inp => {
+            inp.onchange = async (e) => {
+              const stageId = inp.dataset.up;
+              const files = Array.from(e.target.files || []);
+              if (!files.length) return;
+              const cur = AIVA.Store.get('ann_lib', {});
+              cur[stageId] = cur[stageId] || [];
+              for (const f of files) {
+                if (f.size > 5 * 1024 * 1024) {
+                  toast(`${f.name} is over 5 MB — please use shorter clips.`, 'bad');
+                  continue;
+                }
+                const dataURL = await new Promise(res => {
+                  const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f);
+                });
+                cur[stageId].push({ name: f.name, dataURL });
               }
-              const dataURL = await new Promise(res => {
-                const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f);
-              });
-              cur[stageId].push({ name: f.name, dataURL });
-            }
+              updateLib(cur);
+              toast(`${files.length} file${files.length===1?'':'s'} added.`, 'ok');
+            };
+          });
+
+          c.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+            const [stage, idx] = b.dataset.del.split(':');
+            const cur = AIVA.Store.get('ann_lib', {});
+            cur[stage]?.splice(+idx, 1);
             updateLib(cur);
-            toast(`${files.length} file${files.length===1?'':'s'} added.`, 'ok');
-          };
-        });
+          });
+        }
 
-        c.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
-          const [stage, idx] = b.dataset.del.split(':');
-          const cur = AIVA.Store.get('ann_lib', {});
-          cur[stage]?.splice(+idx, 1);
-          updateLib(cur);
-        });
-
+        /* Play buttons available to ALL pilots — that's the whole point. */
         c.querySelectorAll('[data-play]').forEach(b => b.onclick = () => {
           const [stage, idx] = b.dataset.play.split(':');
           const f = AIVA.Store.get('ann_lib', {})[stage]?.[+idx];

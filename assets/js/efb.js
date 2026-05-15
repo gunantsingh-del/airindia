@@ -1283,7 +1283,7 @@
         <span class="dot"></span> Cabin PA · ${cfg.mode === 'auto' ? 'AUTO' : 'MANUAL'} mode
         <span class="right">
           <button class="btn btn-ghost btn-sm" id="annMode">${I('refresh',12)} Switch to ${cfg.mode === 'auto' ? 'MANUAL' : 'AUTO'}</button>
-          <a class="btn btn-ghost btn-sm" href="portal.html#announce">${I('upload',12)} Manage library</a>
+          ${pilot.role === 'admin' ? `<a class="btn btn-ghost btn-sm" href="portal.html#announce">${I('upload',12)} Manage library</a>` : ''}
         </span>
       `}));
 

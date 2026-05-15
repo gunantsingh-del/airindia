@@ -282,20 +282,41 @@
     async function autoFireWeather() {
       if (firedAcars.has('weather')) return;
       const fl = activeFlightForACARS();
-      if (!fl) return;
+      if (!fl) { toast('Weather: no active flight to address', 'warn', 5000); return; }
       const dest = AIVA.airport(fl.to)?.icao || fl.to;
       firedAcars.add('weather');
       try {
-        const wx = await AIVA.Dispatch.fetchMETAR(dest);
-        if (!wx) return;
-        /* Always send the dest METAR — even if "OK" — so the pilot has
-           it on the CDU for cross-check during cruise. */
-        const body = wx.severity?.level === 'OK'
-          ? `${dest} WX SUMMARY · NOMINAL\n${wx.raw}`
-          : AIVA.Dispatch.weatherWarning(dest, wx);
+        let wx = null;
+        try { wx = await AIVA.Dispatch.fetchMETAR(dest); } catch (e) { /* fall through */ }
+        const body = wx
+          ? (wx.severity?.level === 'OK'
+              ? `${dest} WX SUMMARY · NOMINAL\n${wx.raw || ''}`
+              : (AIVA.Dispatch.weatherWarning?.(dest, wx) || `${dest} WX\n${wx.raw || ''}`))
+          : `${dest} WX REQUEST\nUNABLE TO FETCH METAR — CHECK MANUALLY ON BRIEFING PAGE\nSOURCE: aviationweather.gov`;
         await hoppieAutoSend(pilotCallsign(), 'inforeq', body);
-        toast(`✓ Destination weather auto-sent (${dest})`, 'ok', 5000);
-      } catch (e) { /* swallow — non-blocking */ }
+        toast(`✓ Destination weather auto-sent to your cockpit (${dest})`, 'ok', 5000);
+      } catch (e) {
+        toast(`Weather auto-dispatch failed: ${e.message}`, 'bad', 7000);
+        firedAcars.delete('weather');
+      }
+    }
+    async function autoFireArrival() {
+      if (firedAcars.has('arrival')) return;
+      const fl = activeFlightForACARS();
+      if (!fl) { toast('Arrival: no active flight', 'warn', 5000); return; }
+      firedAcars.add('arrival');
+      try {
+        const dest = AIVA.airport(fl.to);
+        const iata = dest?.iata || fl.to;
+        const firstName = (pilot?.name || '').split(' ')[0] || '';
+        const body = AIVA.Dispatch.arrivalGate?.(iata, fl.ac, firstName) ||
+          `ARRIVAL · ${fl.fno}\nINBOUND ${iata}\nEXPECT GATE ASSIGNMENT ON GROUND`;
+        await hoppieAutoSend(pilotCallsign(), 'telex', body);
+        toast(`✓ Arrival info uplinked (${iata})`, 'ok', 5000);
+      } catch (e) {
+        toast(`Arrival send failed: ${e.message}`, 'bad', 7000);
+        firedAcars.delete('arrival');
+      }
     }
 
     /* Drive auto-fires off the phase machine + a gate timer. */
@@ -346,6 +367,7 @@
     AIVA._autoDispatch = {
       firePreflight: () => { firedAcars.delete('preflight'); return autoFirePreflight(); },
       fireWeather:   () => { firedAcars.delete('weather');   return autoFireWeather();   },
+      fireArrival:   () => { firedAcars.delete('arrival');   return autoFireArrival();   },
       reset:         () => { firedAcars.clear(); gateEnteredAt = null; },
     };
     /* Arrival gate goes out as the pilot crosses 10k descending. */
@@ -4346,7 +4368,9 @@
             <div class="actions">
               <span class="pill ${code ? 'pill-gold' : 'pill-red'}" id="hopLogonBadge">${code ? 'Logon set' : 'No logon'}</span>
               <span class="pill" style="margin-left:6px;">${myCall}</span>
-              <button class="btn btn-primary btn-sm" id="hopFirePreflight" style="margin-left:10px;" title="Fire pre-flight pack to your cockpit now — bypasses the 30s gate-dwell timer">${I('send',14)} Fire pre-flight now</button>
+              <button class="btn btn-primary btn-sm" id="hopFirePreflight" style="margin-left:10px;" title="Fire pre-flight pack to your cockpit now — bypasses the 30s gate-dwell timer">${I('send',14)} Pre-flight</button>
+              <button class="btn btn-primary btn-sm" id="hopFireWeather" style="margin-left:6px;" title="Fire destination weather METAR to your cockpit now">${I('cloud',14)} Weather</button>
+              <button class="btn btn-ghost btn-sm" id="hopFireArrival" style="margin-left:6px;" title="Fire arrival gate info now (skip waiting for 10k descent)">${I('plane',14)} Arrival</button>
               ${isAdmin ? `
                 <div class="row" style="margin-left:12px;background:rgba(255,255,255,.05);border-radius:99px;padding:3px;">
                   <button class="hop-mode-btn ${viewMode==='admin'?'on':''}" data-mode="admin">Admin</button>
@@ -4355,29 +4379,28 @@
             </div>
           </div>
         ` }));
-        /* Manual "Fire pre-flight pack now" — re-arms + fires the same
-           auto-dispatch function so the message goes to the pilot's
-           current flight callsign with their SimBrief OFP attached.
-           Bypasses the 30 s gate-dwell wait. */
-        const fireBtn = c.querySelector('#hopFirePreflight');
-        if (fireBtn) {
-          fireBtn.onclick = async () => {
-            fireBtn.disabled = true;
-            fireBtn.innerHTML = '⏳ Firing…';
+        /* Manual "Fire X now" buttons — each re-arms the firedAcars
+           guard + invokes the same auto-dispatch helpers that the phase
+           machine calls. Pilot can fire any stage independently if the
+           auto trigger missed (or fired too early). */
+        const wireFireBtn = (selector, label, fn) => {
+          const btn = c.querySelector(selector);
+          if (!btn) return;
+          btn.onclick = async () => {
+            btn.disabled = true;
+            const orig = btn.innerHTML;
+            btn.innerHTML = '⏳ Firing…';
             try {
-              if (AIVA._autoDispatch?.firePreflight) {
-                await AIVA._autoDispatch.firePreflight();
-              } else {
-                toast('Auto-dispatch not initialized — try hard-refreshing AIVA.', 'bad', 6000);
-              }
+              if (fn) await fn();
+              else toast('Auto-dispatch not initialized — hard-refresh AIVA.', 'bad', 6000);
             } finally {
-              setTimeout(() => {
-                fireBtn.disabled = false;
-                fireBtn.innerHTML = `${I('send',14)} Fire pre-flight now`;
-              }, 3000);
+              setTimeout(() => { btn.disabled = false; btn.innerHTML = orig; }, 2500);
             }
           };
-        }
+        };
+        wireFireBtn('#hopFirePreflight', 'Pre-flight', AIVA._autoDispatch?.firePreflight);
+        wireFireBtn('#hopFireWeather',   'Weather',   AIVA._autoDispatch?.fireWeather);
+        wireFireBtn('#hopFireArrival',   'Arrival',   AIVA._autoDispatch?.fireArrival);
         if (isAdmin) {
           c.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
             viewMode = b.dataset.mode;

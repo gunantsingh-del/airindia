@@ -254,16 +254,17 @@
     });
 
     /* Small helper — fires a Hoppie POST (no response needed for one-way
-       auto-messages). Uses the configured proxy. */
+       auto-messages). Goes through AIVA.Dispatch.fetchViaProxies so a
+       rate-limited corsproxy.io doesn't silently swallow phase-trigger
+       progress reports. */
     async function hoppieAutoSend(to, type, body) {
       const code = P.pref('hoppieCode', '');
       if (!code) return;
       const myCall = P.pref('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
-      const proxy  = (P.pref('hoppie_proxy','') || 'https://corsproxy.io/?');
-      const url = proxy + encodeURIComponent('https://www.hoppie.nl/acars/system/connect.html?' +
-        new URLSearchParams({ logon: code, from: myCall, to, type, packet: body }));
+      const url = 'https://www.hoppie.nl/acars/system/connect.html?' +
+        new URLSearchParams({ logon: code, from: myCall, to, type, packet: body });
       try {
-        await fetch(url);
+        await AIVA.Dispatch.fetchViaProxies(url);
         /* Log locally so it appears in the pilot's Hoppie log */
         const log = AIVA.Store.get('hoppie_log', []);
         log.push({ dir:'tx', from: myCall, to, type, body, ts: Date.now(), hoppie:'ok', auto:true });
@@ -3854,14 +3855,16 @@
         let viewMode = P.pref('hop_view_mode', isAdmin ? 'admin' : 'pilot');
 
         const HOPPIE_URL = 'https://www.hoppie.nl/acars/system/connect.html';
-        function proxyURL() {
-          const custom = (P.pref('hoppie_proxy', '') || '').trim();
-          return custom || 'https://corsproxy.io/?';
-        }
+        /* Hoppie's connect.html doesn't allow direct CORS, so we have to
+           go through a proxy. corsproxy.io intermittently returns 403
+           (rate-limit / abuse blocklist), which is why pilots kept seeing
+           "Poll failed: HTTP 403" toasts. Use AIVA.Dispatch.fetchViaProxies
+           — it falls through corsproxy → allorigins → codetabs → thingproxy
+           and returns the first 2xx, so a single proxy outage no longer
+           breaks ACARS delivery. */
         async function hoppieRaw(params) {
-          const url = proxyURL() + encodeURIComponent(HOPPIE_URL + '?' + params.toString());
-          const r = await fetch(url, { method: 'GET' });
-          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const url = HOPPIE_URL + '?' + params.toString();
+          const r = await AIVA.Dispatch.fetchViaProxies(url, { method: 'GET' });
           return (await r.text()).trim();
         }
         function parseHoppieResp(text) {

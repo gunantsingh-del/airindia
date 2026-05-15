@@ -2054,7 +2054,45 @@
         }
       });
 
-      $('#fsConnect', c).onclick = () => {
+      $('#fsConnect', c).onclick = async () => {
+        /* DIRECT (SimConnect) MODE — we're inside the .exe and the
+           main process owns the MSFS link. There is no WebSocket to
+           open from the renderer; firing the legacy retry path here
+           is what produced the stacked "Tried both wss:// and ws://"
+           toasts. Instead, just ask the singleton how it's doing and
+           reflect that back. */
+        if (directMode) {
+          const live = AIVA.FSUIPC?.isConnected?.() === true;
+          if (live) {
+            setStatus('on', 'CONNECTED');
+            setConnected(true);
+            toast('SimConnect already live · tracking telemetry from MSFS.', 'ok', 4000);
+            return;
+          }
+          setStatus('busy', 'WAITING FOR MSFS…');
+          try {
+            /* Force the main process to re-check by reading current state.
+               If MSFS is open and SimConnect is healthy, the next frame
+               flips us connected. */
+            const st = await window.AIVA_DESKTOP.simConnect.getState();
+            if (st === 'connected') {
+              setStatus('on', 'CONNECTED');
+              setConnected(true);
+              toast('SimConnect link confirmed.', 'ok', 4000);
+            } else {
+              setStatus('off', 'WAITING FOR MSFS');
+              toast('MSFS not detected yet. Start the sim and load a flight — SimConnect picks it up within ~5 seconds.', 'warn', 6000);
+            }
+          } catch (e) {
+            setStatus('off', 'BRIDGE ERROR');
+            toast('SimConnect bridge unreachable — try restarting AIVA.', 'bad', 6000);
+          }
+          return;
+        }
+
+        /* WEBSOCKET-FSUIPC FALLBACK — only used when we're NOT in the
+           .exe (i.e. you opened the site in a browser). This path needs
+           the FSUIPC WebSockets Server running on localhost:2048. */
         if (ws && ws.readyState === 1) {
           toast('Already connected to FSUIPC.', 'info');
           return;

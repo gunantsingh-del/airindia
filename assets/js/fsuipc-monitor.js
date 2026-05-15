@@ -110,6 +110,14 @@ AIVA.FSUIPC = (() => {
   }
 
   async function connect() {
+    /* SimConnect-direct (Electron .exe) — main process owns the MSFS
+       link. Calling the legacy WebSocket connect here would attempt
+       ws://localhost:2048 even though there's no FSUIPC bridge involved,
+       producing the stale "Tried both wss:// and ws://" errors. Short-
+       circuit so the singleton stays clean. */
+    if (typeof window !== 'undefined' && window.AIVA_DESKTOP?.simConnect) {
+      return; // SimConnect bridge handles everything
+    }
     if (ws) try { ws.close(); } catch(_){}
     /* Try each candidate URL in order. The first one that opens wins. */
     const urls = candidateUrls();

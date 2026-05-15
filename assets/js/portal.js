@@ -872,7 +872,16 @@
         /* ============ LIVE FLIGHT IN PROGRESS — pinned at top ============ */
         const fpRec = P.get('flight_in_progress');
         if (fpRec) {
-          const fpFlight = AIVA.findFlight(fpRec.fno);
+          /* Prefer the merged-from-booking flight (right direction + ac).
+             Falls back to findFlight if the active flight isn't on the
+             roster anymore. */
+          const fpFlight = (() => {
+            const today = ymd();
+            const bookings = P.get('roster_bookings', []) || [];
+            const todayBks = bookings.filter(b => b.date <= today + 'z');
+            const bk = todayBks.find(b => b.fno === fpRec.fno);
+            return bk ? bookingFlight(bk) : AIVA.findFlight(fpRec.fno);
+          })();
           if (fpFlight) {
             const fromA = AIVA.airport(fpFlight.from), toA = AIVA.airport(fpFlight.to);
             c.appendChild(el('section', { html: `
@@ -884,59 +893,77 @@
                     <div class="text-mute" style="font-size:12.5px;">${fromA?.city} to ${toA?.city} · ${fpFlight.ac} · ${fpFlight.dur} block</div>
                   </div>
                   <div style="text-align:right;">
-                    <div class="fp-phase" id="fpPhase">PUSHBACK</div>
+                    <div class="fp-phase" id="fpPhase">AWAITING SIM</div>
                     <div class="mono text-mute mt-1" style="font-size:11px;" id="fpEta">ETA —</div>
                   </div>
                 </div>
                 <div class="fp-bar"><div class="fp-fill" id="fpFill" style="width:0%"></div></div>
                 <div class="row between mt-2 mono" style="font-size:10.5px;color:var(--text-mute);">
                   <span id="fpPct">0% complete</span>
-                  <a href="efb.html" class="btn btn-ghost btn-sm">${I('plane',12)} Open EFB</a>
+                  <span class="row gap-2">
+                    <a href="efb.html" class="btn btn-ghost btn-sm">${I('plane',12)} Open EFB</a>
+                    <button class="btn btn-ghost btn-sm" id="fpCancel" title="Stop this flight without filing">${I('close',12)} End flight</button>
+                  </span>
                 </div>
               </div>
             ` }));
 
-            /* Reuse the same algorithm as the EFB ribbon */
+            /* "End flight" hard-stop on the dashboard card itself —
+               pilots don't have to go to the EFB → FSUIPC tile just to
+               clear a stuck flight_in_progress record. */
+            const cancelBtn = $('#fpCancel', c);
+            if (cancelBtn) cancelBtn.onclick = () => {
+              if (!confirm('Stop the in-progress flight without filing a PSR? Any auto-detected events (10k descent, landing) will reset.')) return;
+              P.remove('flight_in_progress');
+              toast('Flight stopped.', 'ok');
+              AIVA.FSUIPC?.resetSector?.();
+              route();
+            };
+
+            /* Progress source: ONLY drive the bar when AIVA.FSUIPC is
+               actively reporting telemetry. The old elapsed-time
+               fallback was the bug — even without a sim attached, the
+               bar would keep ticking off wall-clock minutes. With no
+               telemetry we stay at 0% and show "AWAITING SIM" so the
+               pilot knows nothing's actually happening. */
             const totalDist = fromA && toA ? AIVA.U.distance(fromA.lat, fromA.lon, toA.lat, toA.lon) : 0;
             const totalMins = fpFlight.durMins || 60;
             const tickFP = () => {
-              if (!document.getElementById('fpFill')) return;
-              let pct = 0, phase = 'PUSHBACK';
-              const live = AIVA.FSUIPC?.lastTelemetry?.();
+              const fillEl = document.getElementById('fpFill');
+              if (!fillEl) return;
+              const pctEl  = document.getElementById('fpPct');
+              const phEl   = document.getElementById('fpPhase');
+              const etaEl  = document.getElementById('fpEta');
+              const live = AIVA.FSUIPC?.isConnected?.() ? AIVA.FSUIPC.lastTelemetry?.() : null;
               if (live && live.lat != null && live.lon != null && totalDist) {
                 const flown = AIVA.U.distance(fromA.lat, fromA.lon, live.lat, live.lon);
-                pct = Math.max(0, Math.min(100, (flown / totalDist) * 100));
+                const pct = Math.max(0, Math.min(100, (flown / totalDist) * 100));
                 const alt = live.alt || 0;
+                let phase;
                 if (alt < 50) phase = pct < 1 ? 'PUSHBACK' : 'TAXI-IN';
                 else if (alt < 1000) phase = pct < 50 ? 'TAKEOFF' : 'APPROACH';
                 else if (alt < 10000) phase = pct < 50 ? 'CLIMB' : 'DESCENT';
                 else phase = 'CRUISE';
+                fillEl.style.width = pct.toFixed(1) + '%';
+                if (pctEl) pctEl.textContent = pct.toFixed(0) + '% complete';
+                if (phEl)  phEl.textContent  = phase;
+                if (etaEl) {
+                  const remainMins = totalMins * (1 - pct/100);
+                  const eta = new Date(Date.now() + remainMins * 60000);
+                  etaEl.textContent = `ETA ${String(eta.getUTCHours()).padStart(2,'0')}:${String(eta.getUTCMinutes()).padStart(2,'0')}z`;
+                }
               } else {
-                const elapsedMins = (Date.now() - fpRec.startedAt) / 60000;
-                pct = Math.max(0, Math.min(100, (elapsedMins / totalMins) * 100));
-                if (pct < 2)  phase = 'TAXI-OUT';
-                else if (pct < 8)   phase = 'TAKEOFF';
-                else if (pct < 22)  phase = 'CLIMB';
-                else if (pct < 78)  phase = 'CRUISE';
-                else if (pct < 92)  phase = 'DESCENT';
-                else if (pct < 99)  phase = 'APPROACH';
-                else                phase = 'TAXI-IN';
-              }
-              const fillEl = document.getElementById('fpFill');
-              const pctEl  = document.getElementById('fpPct');
-              const phEl   = document.getElementById('fpPhase');
-              const etaEl  = document.getElementById('fpEta');
-              if (fillEl) fillEl.style.width = pct.toFixed(1) + '%';
-              if (pctEl)  pctEl.textContent  = pct.toFixed(0) + '% complete';
-              if (phEl)   phEl.textContent   = phase;
-              if (etaEl) {
-                const remainMins = totalMins * (1 - pct/100);
-                const eta = new Date(Date.now() + remainMins * 60000);
-                etaEl.textContent = `ETA ${String(eta.getUTCHours()).padStart(2,'0')}:${String(eta.getUTCMinutes()).padStart(2,'0')}z`;
+                /* No live data — stay frozen at 0% and label clearly. */
+                fillEl.style.width = '0%';
+                if (pctEl) pctEl.textContent = 'Awaiting sim telemetry';
+                if (phEl)  phEl.textContent  = 'AWAITING SIM';
+                if (etaEl) etaEl.textContent = 'ETA —';
               }
             };
             tickFP();
             const fpTimer = setInterval(tickFP, 5000);
+            AIVA.FSUIPC?.on?.('connect',    tickFP);
+            AIVA.FSUIPC?.on?.('disconnect', tickFP);
             const fpObs = new MutationObserver(() => {
               if (!document.getElementById('fpFill')) { clearInterval(fpTimer); fpObs.disconnect(); }
             });

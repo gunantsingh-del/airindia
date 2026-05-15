@@ -1,10 +1,22 @@
 /* =====================================================================
    EFB — iPad-style home + app surfaces
+   Anchored in the Air India "Vista" rebrand:
+     • Air India Sans / Inter Tight / Mukta stack for body + labels
+     • Deep red + aubergine + gold palette
+     • Window-frame motifs on cards (subtle gold corners on hover)
+     • Reduced mono-everywhere to match the portal sidebar feel
    ===================================================================== */
 
 body.efb-body {
   background: var(--bg);
   min-height: 100vh;
+  /* EFB-wide font swap — match the portal sidebar stack (the display
+     font that resolves to "Air India Sans" via --font-display). Mono
+     stays for technical readouts (METARs, callsigns, clock values). */
+  font-family: var(--font-display);
+}
+body.efb-body, body.efb-body input, body.efb-body button, body.efb-body select, body.efb-body textarea {
+  font-family: var(--font-display);
 }
 
 .efb-frame {
@@ -395,27 +407,53 @@ body.efb-body:not(:has(.efb-home-v2)) {
   border: 1px solid rgba(255,255,255,.12);
   border-radius: 14px;
 }
-/* Clocks block — Z huge, date + local below */
-.efb2-clocks { justify-self: start; display: flex; flex-direction: column; gap: 4px; }
-.efb2-clocks .z-time {
+/* ============================================================
+   Clocks — two simple side-by-side cells (Z + IST).
+   Inspired by an analog/digital cockpit panel: large numerals,
+   small gold label above, no seconds. The thin gold divider in
+   between is the Vista "window frame" motif used as a hairline.
+   ============================================================ */
+.efb2-clocks { justify-self: start; display: flex; flex-direction: column; gap: 8px; }
+.efb2-clocks .clock-row {
+  display: inline-flex; align-items: stretch; gap: 18px;
+  padding: 6px 14px;
+  background: rgba(20,8,12,.4);
+  border: 1px solid rgba(255,225,89,.18);
+  border-radius: 14px;
+  box-shadow: 0 4px 18px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.04);
+}
+.efb2-clocks .clock-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  min-width: 68px;
+}
+.efb2-clocks .clock-lbl {
+  font-family: var(--font-display);
+  font-size: 9.5px; letter-spacing: .28em; text-transform: uppercase;
+  color: #FFE9A8;
+  font-weight: 600;
+}
+.efb2-clocks .clock-val {
   font-family: var(--font-mono);
-  font-size: clamp(26px, 3.4vw, 36px);
-  font-weight: 700;
+  font-size: clamp(22px, 2.6vw, 30px);
+  font-weight: 600;
   letter-spacing: .04em;
   color: #FFFFFF;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
   text-shadow: 0 2px 10px rgba(0,0,0,.35);
 }
-.efb2-clocks .z-meta {
-  display: flex; align-items: center; gap: 6px;
-  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em;
-  color: rgba(255,255,255,.7);
+.efb2-clocks .clock-divider {
+  width: 1px;
+  background: linear-gradient(180deg, transparent, rgba(255,225,89,.4), transparent);
+  align-self: stretch;
 }
-.efb2-clocks .z-label { color: #FFE159; }   /* tiny gold accent OK */
-.efb2-clocks .z-sep   { color: rgba(255,255,255,.3); }
-.efb2-clocks .z-date  { color: rgba(255,255,255,.85); }
-.efb2-clocks .z-local { color: rgba(255,255,255,.85); }
-.efb2-clocks .loc-lbl { color: rgba(255,255,255,.55); font-size: 9.5px; letter-spacing: .22em; }
+.efb2-clocks .clock-date {
+  font-family: var(--font-display);
+  font-size: 11px; letter-spacing: .22em; text-transform: uppercase;
+  color: rgba(255,255,255,.6);
+  font-weight: 500;
+  margin-left: 2px;
+}
 
 /* Welcome strip — "Good morning, Captain Gunant" under the clocks */
 .efb-welcome {
@@ -530,43 +568,87 @@ body.efb-body:not(:has(.efb-home-v2)) {
 }
 .efb2-flight .endbtn { background: rgba(255,255,255,.15); color: #FFFFFF; border: 1px solid rgba(255,255,255,.35); }
 
-/* ----- Tile rails ----- */
+/* ============================================================
+   Tile rails — Maharaja brand identity.
+
+   Visual language is now Air India's "Vista" rebrand:
+     • Deep red + aubergine + gold accents
+     • Gold-hairline frame around each tile (the "window of
+       possibilities" motif) on hover
+     • Premium card depth — subtle inner highlight + outer shadow
+     • Air India Sans for tile labels (sentence case, no shouty
+       ALL-CAPS mono)
+   ============================================================ */
 .efb2-rail {
   display: flex; flex-direction: column; gap: 10px;
-  background: rgba(0,0,0,.18);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255,255,255,.12);
-  border-radius: 14px;
-  padding: 10px 8px;
+  background:
+    linear-gradient(180deg, rgba(168,16,31,.12) 0%, rgba(74,27,65,.10) 100%),
+    rgba(0,0,0,.28);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid rgba(255,225,89,.16);
+  border-radius: 18px;
+  padding: 12px 10px;
   overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 16px 36px rgba(0,0,0,.36);
 }
 .efb2-tile {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 4px;
-  padding: 10px 4px;
-  background: rgba(255,255,255,.06);
+  gap: 6px;
+  padding: 12px 4px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.08) 0%, rgba(255,255,255,.03) 100%);
   border: 1px solid rgba(255,255,255,.10);
-  border-radius: 12px;
-  text-decoration: none; color: #FFFFFF;
+  border-radius: 13px;
+  text-decoration: none; color: #F8F1E4;
   flex: 1 1 0;
   min-height: 0;
   position: relative;
-  transition: background .12s ease, transform .12s ease;
+  overflow: hidden;
+  transition: background .18s var(--ease, ease), transform .18s var(--ease, ease), border-color .18s ease, box-shadow .18s ease;
 }
-.efb2-tile:hover { background: rgba(255,255,255,.14); transform: translateY(-1px); }
+/* "Vista" window-frame gold corner accents — quietly suggest the
+   shape on hover only, so the resting state stays clean. */
+.efb2-tile::before, .efb2-tile::after {
+  content: '';
+  position: absolute;
+  width: 12px; height: 12px;
+  border: 1px solid transparent;
+  transition: border-color .18s ease;
+}
+.efb2-tile::before { top: 5px; left: 5px; border-top-color: transparent; border-left-color: transparent; border-radius: 6px 0 0 0; }
+.efb2-tile::after  { bottom: 5px; right: 5px; border-bottom-color: transparent; border-right-color: transparent; border-radius: 0 0 6px 0; }
+.efb2-tile:hover {
+  background:
+    linear-gradient(180deg, rgba(255,225,89,.10) 0%, rgba(168,16,31,.12) 100%);
+  border-color: rgba(255,225,89,.45);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px rgba(0,0,0,.42), 0 0 0 1px rgba(255,225,89,.18);
+}
+.efb2-tile:hover::before { border-top-color: rgba(255,225,89,.7); border-left-color: rgba(255,225,89,.7); }
+.efb2-tile:hover::after  { border-bottom-color: rgba(255,225,89,.7); border-right-color: rgba(255,225,89,.7); }
 .efb2-tile:active { transform: translateY(0) scale(.97); }
 .efb2-tile .ico {
-  width: 36px; height: 36px;
-  border-radius: 10px;
+  width: 38px; height: 38px;
+  border-radius: 11px;
   display: grid; place-items: center;
-  background: rgba(255,255,255,.10);
-  color: #FFFFFF;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255,225,89,.18), rgba(255,255,255,.05) 70%);
+  color: #FFE9A8;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
 }
+.efb2-tile:hover .ico { color: #FFFFFF; }
 .efb2-tile .nm {
-  font-family: var(--font-mono); font-size: 9px; letter-spacing: .14em;
-  text-transform: uppercase; color: #FFFFFF;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  letter-spacing: .04em;
+  font-weight: 600;
+  color: rgba(248,241,228,.82);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.efb2-tile:hover .nm { color: #FFFFFF; }
 .efb2-tile .live-dot {
   position:absolute; top:6px; right:6px; width:7px; height:7px; border-radius:50%;
   background: #4ADE80; box-shadow: 0 0 6px rgba(74,222,128,.7);

@@ -130,6 +130,19 @@
 
     /* Mount the group crew chat — floating panel bottom-left */
     AIVA.CrewChat?.mount();
+    /* Pipe incoming chat to native OS notifications when the window
+       isn't focused. Skips own messages + reactions + avatar updates. */
+    AIVA.CrewChat?.onMessage?.((msg) => {
+      if (!msg || msg.type === 'reaction' || msg.type === 'avatar_set') return;
+      if (msg.pilotId === pilot.id) return;
+      const me = pilot.id;
+      const visible = !msg.to || msg.to === me;
+      if (!visible) return;
+      const who = msg.pilotName?.split(' ')[0] || 'crew';
+      const dmLabel = msg.to === me ? `${who} (DM)` : who;
+      desktopNotify(msg.type === 'event' ? 'AIVA · crew event' : `AIVA · ${dmLabel}`,
+                    msg.type === 'event' ? `${who} ${msg.text}` : msg.text);
+    });
     /* Post a login event once per session — the panel doubles as an ops feed */
     if (!sessionStorage.getItem('aiva.cc_login_posted')) {
       AIVA.CrewChat?.event(`just signed on at ${pilot.base}`);
@@ -371,10 +384,25 @@
     };
     if (AIVA.FSUIPC) {
       setFsChip(AIVA.FSUIPC.isConnected() ? 'on' : 'off');
-      AIVA.FSUIPC.on('connect',    () => setFsChip('on'));
-      AIVA.FSUIPC.on('disconnect', () => setFsChip('off'));
+      AIVA.FSUIPC.on('connect',    () => { setFsChip('on');  desktopNotify('FSUIPC connected', 'Bridge live · Start Flight unlocked.'); });
+      AIVA.FSUIPC.on('disconnect', () => { setFsChip('off'); desktopNotify('FSUIPC disconnected', 'Bridge offline. Reconnect from the EFB.'); });
+      AIVA.FSUIPC.on('descent10k', (info) => desktopNotify('Passing 10,000 ft', `${info?.fno || 'Flight'} descending through FL100.`));
+      AIVA.FSUIPC.on('landing',    (info) => desktopNotify('Touchdown', `${info?.fno || 'Flight'} on the ground.`));
+      AIVA.FSUIPC.on('crash',      (info) => desktopNotify('Sim disconnect', `${info?.fno || 'Flight'} lost telemetry mid-air — crash report queued.`));
     }
   }
+
+  /* Desktop-only native notification helper. Silently no-ops in the
+     browser. Honors the per-pilot opt-out (Profile → OS notifications).
+     Only fires when the window isn't focused — in-foreground we use
+     toasts, OS notifications would just be noise. */
+  function desktopNotify(title, body) {
+    if (!window.AIVA_DESKTOP?.isDesktop) return;
+    if (AIVA.Store.get('desktop_notif', true) === false) return;
+    if (document.hasFocus()) return;
+    try { window.AIVA_DESKTOP.notify({ title, body }); } catch {}
+  }
+  AIVA._desktopNotify = desktopNotify;
   function route() {
     const id = (location.hash.replace('#','').split('/')[0] || 'dashboard');
     $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.route === id));
@@ -4787,9 +4815,8 @@
             </div>
             <div class="card">
               <div class="eyebrow">Your callsign</div>
-              <input class="input mt-3" id="myCallsign" value="${P.pref('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3))}" placeholder="AIC100">
-              <button class="btn btn-ghost btn-sm mt-3" id="saveCs">Save</button>
-              <p class="text-mute mt-2" style="font-size:11px;">Used as the FROM field for any Hoppie message you send.</p>
+              <div class="mono mt-3" style="font-size:18px;color:var(--ai-gold-bright);font-family:var(--font-mono);letter-spacing:.08em;">${P.pref('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3))}</div>
+              <p class="text-mute mt-2" style="font-size:11px;">Locked by dispatch. Derived from your crew ID (${pilot.id}). Per Chief Pilot direction, callsigns aren't editable — every Hoppie / VATSIM contact uses this one identity.</p>
             </div>
             <div class="card">
               <div class="eyebrow">Hoppie CORS proxy (advanced)</div>
@@ -4798,6 +4825,59 @@
               <p class="text-mute mt-2" style="font-size:11px;">Default: <code>https://corsproxy.io/?</code> · Set your own Cloudflare Worker / Vercel function URL if the default rate-limits.</p>
             </div>
           </div>
+
+          ${window.AIVA_DESKTOP?.isDesktop ? `
+            <div class="section-title mt-6"><div><h2>Desktop app settings</h2><div class="sub">Features only available inside the AIVA Windows app</div></div></div>
+            <div class="grid grid-2">
+              <div class="card">
+                <div class="row between">
+                  <div>
+                    <div class="display" style="font-size:15px;">Always on top</div>
+                    <div class="text-mute" style="font-size:11.5px;margin-top:3px;">Pin the AIVA window above MSFS. Useful as a HUD during cruise.</div>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="dskAOT"><span class="switch-track"></span></label>
+                </div>
+              </div>
+              <div class="card">
+                <div class="row between">
+                  <div>
+                    <div class="display" style="font-size:15px;">Launch at startup</div>
+                    <div class="text-mute" style="font-size:11.5px;margin-top:3px;">AIVA opens automatically when Windows boots.</div>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="dskAutoStart"><span class="switch-track"></span></label>
+                </div>
+              </div>
+              <div class="card">
+                <div class="row between">
+                  <div>
+                    <div class="display" style="font-size:15px;">OS notifications</div>
+                    <div class="text-mute" style="font-size:11.5px;margin-top:3px;">Chat messages, FSUIPC connect, descent through 10k, sim crash — surface as Windows toasts when the window isn't focused.</div>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="dskNotif"><span class="switch-track"></span></label>
+                </div>
+              </div>
+              <div class="card">
+                <div class="row between">
+                  <div>
+                    <div class="display" style="font-size:15px;">Test notification</div>
+                    <div class="text-mute" style="font-size:11.5px;margin-top:3px;">Verify Windows is allowing AIVA notifications.</div>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" id="dskTestNotif">${I('bell',12)} Send test</button>
+                </div>
+              </div>
+            </div>
+          ` : `
+            <div class="card mt-6" style="padding:18px;border-color:rgba(255,225,89,.3);">
+              <div class="row between" style="gap:14px;flex-wrap:wrap;">
+                <div>
+                  <div class="eyebrow" style="color:var(--ai-gold-bright);">Desktop app</div>
+                  <div class="display mt-1" style="font-size:16px;">Install AIVA on Windows</div>
+                  <div class="text-mute" style="font-size:12px;margin-top:4px;">Native window, system tray, OS notifications, always-on-top HUD over MSFS. Bypasses the HTTPS Mixed-Content rule so FSUIPC works without an SSL cert.</div>
+                </div>
+                <a class="btn btn-primary btn-sm" href="/install?go=1">${I('download',12)} Install</a>
+              </div>
+            </div>
+          `}
 
           <div class="section-title mt-6"><div><h2>Data</h2><div class="sub">Your account · this device</div></div></div>
           <div class="card">
@@ -4812,53 +4892,211 @@
         ` }));
         $('#saveSb', c).onclick = () => { P.set('simbrief_user', $('#sbUsername').value.trim()); toast('SimBrief username saved.', 'ok'); };
         $('#saveHop', c).onclick= () => { P.set('hoppieCode', $('#hopCode').value.trim()); toast('Hoppie code saved.', 'ok'); };
-        $('#saveCs', c).onclick = () => { P.set('my_callsign', $('#myCallsign').value.trim().toUpperCase()); toast('Callsign saved.', 'ok'); };
+        /* Callsign is intentionally read-only — no #saveCs wiring. */
+
+        /* Desktop-app feature toggles — only present when AIVA is
+           running inside the Electron wrapper. We pull initial state
+           from the main process, persist user preference locally, and
+           round-trip changes through preload.js. */
+        if (window.AIVA_DESKTOP?.isDesktop) {
+          const notifPref = $('#dskNotif', c);
+          const aotPref   = $('#dskAOT',   c);
+          const autoPref  = $('#dskAutoStart', c);
+          if (notifPref) notifPref.checked = AIVA.Store.get('desktop_notif', true);
+          (async () => {
+            try {
+              const s = await window.AIVA_DESKTOP.getState();
+              if (aotPref)  aotPref.checked  = !!s?.alwaysOnTop;
+              if (autoPref) autoPref.checked = !!s?.autoStart;
+            } catch {}
+          })();
+          aotPref?.addEventListener('change', () => window.AIVA_DESKTOP.setAlwaysOnTop(aotPref.checked));
+          autoPref?.addEventListener('change', () => window.AIVA_DESKTOP.setAutoStart(autoPref.checked));
+          notifPref?.addEventListener('change', () => {
+            AIVA.Store.set('desktop_notif', notifPref.checked);
+            toast(`OS notifications ${notifPref.checked ? 'enabled' : 'silenced'}.`, 'ok');
+          });
+          $('#dskTestNotif', c)?.addEventListener('click', () => {
+            window.AIVA_DESKTOP.notify({
+              title: 'AIVA · Test notification',
+              body:  'Windows is delivering AIVA notifications correctly.',
+            }).then(ok => toast(ok ? 'Sent — check the Action Center.' : 'Windows blocked the notification.', ok ? 'ok' : 'warn'));
+          });
+        }
         $('#saveProxy', c).onclick = () => { P.set('hoppie_proxy', $('#hopProxy').value.trim()); toast('CORS proxy saved · reload Hoppie page.', 'ok'); };
 
-        /* Profile picture upload.
-           Pic is auto-resized to 256×256 JPEG (≤30 KB) so the global
-           crew_avatars store stays tiny and renders fast on every chat
-           bubble + crew row. Saved per-pilot AND globally so any browser
-           that has seen the upload renders it everywhere. */
-        async function compressForAvatar(file, maxSide = 256, quality = 0.82) {
+        /* Profile picture upload — interactive cropper.
+           Pick a file → preview opens in a modal with drag-to-position
+           and a zoom slider, framed by a 256×256 circular mask. Save
+           renders a 256×256 JPEG at quality 0.82 (≈25–30 KB) and routes
+           through cross-device sync (POSTs to /api/avatar for hosting,
+           broadcasts the resulting URL via ntfy). */
+        async function openPfpCropper(file) {
+          /* Read file → Image */
           const dataUrl = await new Promise((res, rej) => {
-            const r = new FileReader();
-            r.onload = () => res(r.result);
-            r.onerror = rej;
-            r.readAsDataURL(file);
+            const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file);
           });
           const img = await new Promise((res, rej) => {
-            const i = new Image();
-            i.onload = () => res(i);
-            i.onerror = rej;
-            i.src = dataUrl;
+            const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataUrl;
           });
-          const side = Math.min(maxSide, Math.max(img.width, img.height));
-          const canvas = document.createElement('canvas');
-          canvas.width = canvas.height = side;
-          const ctx = canvas.getContext('2d');
-          /* center-crop to a square */
-          const sourceSide = Math.min(img.width, img.height);
-          const sx = (img.width  - sourceSide) / 2;
-          const sy = (img.height - sourceSide) / 2;
-          ctx.drawImage(img, sx, sy, sourceSide, sourceSide, 0, 0, side, side);
-          return canvas.toDataURL('image/jpeg', quality);
+
+          const VIEW = 320;     // editor canvas size
+          const OUT  = 256;     // output size
+          const minScale = VIEW / Math.min(img.width, img.height);
+          let scale  = minScale * 1.05;
+          let panX   = 0;
+          let panY   = 0;
+
+          const body = el('div', { class:'pfp-crop' });
+          body.innerHTML = `
+            <div class="pfp-stage">
+              <canvas class="pfp-canvas" width="${VIEW}" height="${VIEW}"></canvas>
+              <div class="pfp-mask" aria-hidden="true"></div>
+            </div>
+            <label class="pfp-zoom">
+              <span>Zoom</span>
+              <input type="range" id="pfpZoom" min="100" max="400" value="105" step="1">
+            </label>
+            <div class="text-mute" style="font-size:11.5px;text-align:center;margin-top:6px;">Drag the photo to reframe.</div>
+          `;
+          /* Inject one-shot styles */
+          if (!document.getElementById('pfp-crop-styles')) {
+            const s = document.createElement('style'); s.id = 'pfp-crop-styles';
+            s.textContent = `
+              .pfp-crop { display: flex; flex-direction: column; gap: 14px; align-items: center; }
+              .pfp-stage { position: relative; width: ${VIEW}px; height: ${VIEW}px; border-radius: 14px; overflow: hidden; background: #0A0709; border: 1px solid rgba(255,225,89,.25); }
+              .pfp-canvas { display: block; cursor: grab; touch-action: none; }
+              .pfp-canvas:active { cursor: grabbing; }
+              .pfp-mask {
+                position: absolute; inset: 0; pointer-events: none;
+                background:
+                  radial-gradient(circle at center,
+                    transparent 0,
+                    transparent calc(${VIEW/2}px - 1px),
+                    rgba(255,225,89,.65) calc(${VIEW/2}px - 1px),
+                    rgba(255,225,89,.65) ${VIEW/2}px,
+                    rgba(10,7,9,.78) calc(${VIEW/2}px + 1px));
+              }
+              .pfp-zoom { display: flex; align-items: center; gap: 12px; width: 100%; font-family: var(--font-display); font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-mute); }
+              .pfp-zoom input { flex: 1; accent-color: var(--ai-gold-bright, #FFE159); }
+            `;
+            document.head.appendChild(s);
+          }
+
+          const cnv = body.querySelector('.pfp-canvas');
+          const ctx = cnv.getContext('2d');
+          const draw = () => {
+            ctx.fillStyle = '#0A0709'; ctx.fillRect(0, 0, VIEW, VIEW);
+            const drawW = img.width  * scale;
+            const drawH = img.height * scale;
+            const cx = VIEW/2 + panX, cy = VIEW/2 + panY;
+            ctx.drawImage(img, cx - drawW/2, cy - drawH/2, drawW, drawH);
+          };
+          /* Clamp pan so the masked circle is always covered. */
+          const clamp = () => {
+            const halfW = (img.width  * scale) / 2;
+            const halfH = (img.height * scale) / 2;
+            const r = VIEW / 2;
+            panX = Math.max(r - halfW, Math.min(halfW - r, panX));
+            panY = Math.max(r - halfH, Math.min(halfH - r, panY));
+          };
+          draw();
+
+          /* Pan via pointer drag */
+          let dragging = false, lastX = 0, lastY = 0;
+          cnv.addEventListener('pointerdown', (e) => {
+            dragging = true; lastX = e.clientX; lastY = e.clientY;
+            cnv.setPointerCapture(e.pointerId);
+          });
+          cnv.addEventListener('pointermove', (e) => {
+            if (!dragging) return;
+            panX += e.clientX - lastX; panY += e.clientY - lastY;
+            lastX = e.clientX; lastY = e.clientY;
+            clamp(); draw();
+          });
+          cnv.addEventListener('pointerup',   (e) => { dragging = false; try { cnv.releasePointerCapture(e.pointerId); } catch {} });
+          cnv.addEventListener('pointercancel',()=>{ dragging = false; });
+
+          /* Zoom slider */
+          const zoom = body.querySelector('#pfpZoom');
+          zoom.min = String(Math.round(minScale * 100));
+          zoom.max = String(Math.round(minScale * 100 * 4));
+          zoom.value = String(Math.round(scale * 100));
+          zoom.addEventListener('input', () => {
+            scale = (+zoom.value) / 100;
+            clamp(); draw();
+          });
+
+          return new Promise(resolve => {
+            modal({
+              title: 'Crop your profile photo',
+              body,
+              width: '400px',
+              actions: [
+                { label:'Cancel', cls:'btn-ghost', onClick: close => { close(); resolve(null); } },
+                { label:'Save photo', cls:'btn-primary', onClick: close => {
+                    /* Render the visible circle to a 256×256 output canvas. */
+                    const out = document.createElement('canvas');
+                    out.width = out.height = OUT;
+                    const o = out.getContext('2d');
+                    const ratio = OUT / VIEW;
+                    o.scale(ratio, ratio);
+                    o.fillStyle = '#0A0709'; o.fillRect(0, 0, VIEW, VIEW);
+                    const drawW = img.width  * scale;
+                    const drawH = img.height * scale;
+                    const cx = VIEW/2 + panX, cy = VIEW/2 + panY;
+                    o.drawImage(img, cx - drawW/2, cy - drawH/2, drawW, drawH);
+                    close();
+                    resolve(out.toDataURL('image/jpeg', 0.82));
+                  } },
+              ],
+            });
+          });
+        }
+
+        async function commitAvatar(dataUrl) {
+          /* Local-first: per-pilot + global map immediately. */
+          P.set('profile_pic', dataUrl);
+          const avatars = AIVA.Store.get('crew_avatars', {}) || {};
+          avatars[pilot.id] = dataUrl;
+          AIVA.Store.set('crew_avatars', avatars);
+          const wrap = $('#profPicWrap', c);
+          if (wrap) wrap.innerHTML = `<img src="${dataUrl}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+          buildNav();
+          /* Cross-device: push to /api/avatar which proxies upload to a
+             public image host, then broadcast the resulting URL over the
+             encrypted chat channel as a type:'avatar_set' event. Other
+             devices receive, fetch the URL, cache the image. */
+          try {
+            const r = await fetch('/api/avatar', {
+              method: 'POST',
+              headers: { 'Content-Type':'application/json' },
+              body: JSON.stringify({ pilotId: pilot.id, dataUrl }),
+            });
+            if (r.ok) {
+              const j = await r.json();
+              if (j.url) {
+                /* Use the hosted URL for the global record so it persists
+                   across reinstalls; broadcast for everyone else. */
+                avatars[pilot.id] = j.url;
+                AIVA.Store.set('crew_avatars', avatars);
+                AIVA.CrewChat?.broadcastAvatar?.(pilot.id, j.url);
+                toast('Profile photo updated — synced to the crew.', 'ok');
+                return;
+              }
+            }
+          } catch {}
+          toast('Profile photo updated locally. Cross-device sync unavailable.', 'warn');
         }
 
         $('#profPicInput', c)?.addEventListener('change', async (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
-          if (file.size > 1024 * 1024 * 5) { toast('Photo too large — keep it under 5 MB before resize.', 'bad'); return; }
+          if (file.size > 1024 * 1024 * 8) { toast('Photo too large — keep it under 8 MB before crop.', 'bad'); return; }
           try {
-            const small = await compressForAvatar(file);
-            P.set('profile_pic', small);
-            const avatars = AIVA.Store.get('crew_avatars', {}) || {};
-            avatars[pilot.id] = small;
-            AIVA.Store.set('crew_avatars', avatars);
-            const wrap = $('#profPicWrap', c);
-            wrap.innerHTML = `<img src="${small}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
-            toast('Profile photo updated — visible across the portal.', 'ok');
-            buildNav();
+            const cropped = await openPfpCropper(file);
+            if (cropped) await commitAvatar(cropped);
+            e.target.value = '';   // allow re-picking the same file
           } catch (err) {
             toast('Couldn\'t process that image: ' + err.message, 'bad');
           }
@@ -4868,6 +5106,7 @@
           const avatars = AIVA.Store.get('crew_avatars', {}) || {};
           delete avatars[pilot.id];
           AIVA.Store.set('crew_avatars', avatars);
+          AIVA.CrewChat?.broadcastAvatar?.(pilot.id, null);
           toast('Profile photo removed', 'ok');
           route();
         });

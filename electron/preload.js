@@ -1,14 +1,27 @@
 /* =====================================================================
    AIVA preload — runs in an isolated world before the renderer JS.
-   We expose a tiny "AIVA_DESKTOP" flag so the in-page JS can detect
-   it's running inside the Electron wrapper and adjust UX accordingly
-   (e.g. hide the "Install AIVA" PWA button — already installed).
+   Exposes a tiny namespaced API on window.AIVA_DESKTOP so the in-page
+   code can detect the wrapper AND drive Electron-only features:
+
+     window.AIVA_DESKTOP.isDesktop                 // true inside the .exe
+     window.AIVA_DESKTOP.platform                  // 'win32' | 'darwin' | ...
+     window.AIVA_DESKTOP.notify({ title, body })   // OS notification
+     window.AIVA_DESKTOP.setAlwaysOnTop(true)      // pin as HUD over MSFS
+     window.AIVA_DESKTOP.setAutoStart(true)        // launch on boot
+     window.AIVA_DESKTOP.getState()                // { alwaysOnTop, autoStart }
+
+   All calls round-trip through ipcMain handlers in main.js. No node
+   APIs leak to the renderer.
    ===================================================================== */
 
-const { contextBridge } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('AIVA_DESKTOP', {
   isDesktop: true,
-  version: process.versions.electron || 'unknown',
-  platform: process.platform,
+  version:   process.versions.electron || 'unknown',
+  platform:  process.platform,
+  notify:           (payload) => ipcRenderer.invoke('aiva:notify', payload),
+  setAlwaysOnTop:   (on)      => ipcRenderer.invoke('aiva:setAlwaysOnTop', !!on),
+  setAutoStart:     (on)      => ipcRenderer.invoke('aiva:setAutoStart', !!on),
+  getState:         ()        => ipcRenderer.invoke('aiva:getDesktopState'),
 });

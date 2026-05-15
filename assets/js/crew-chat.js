@@ -66,6 +66,62 @@ AIVA.CrewChat = (() => {
   }
   let relayState = 'disconnected';   // 'connected' | 'disconnected' | 'off'
   let relaySource = null;
+
+  /* ============ AES-GCM encryption ============
+     Every message is sealed with AES-256-GCM before it leaves the
+     browser. The shared key is PBKDF2-derived from a hardcoded
+     passphrase + salt. An observer on the public ntfy topic sees
+     only ciphertext envelopes; without the passphrase they can't
+     read crew chatter or DMs.
+
+     Caveats:
+     • The passphrase is in the client bundle. Anyone who reverse-
+       engineers AIVA can read messages — but anyone in the closed
+       roster already has it baked in, and a fully public host
+       can't decrypt. This is "private-from-strangers" not "private-
+       from-insiders".
+     • Backward compat: receivers fall back to plaintext if a message
+       lacks the `enc:1` marker, so a half-deployed crew still talks.
+   */
+  const CRYPTO_PASSPHRASE = 'aiva-crew-vista-monsoon-77w-2026';
+  const CRYPTO_SALT = 'aiva-2026-chakra';
+  let _cryptoKey = null;
+  async function getKey() {
+    if (_cryptoKey) return _cryptoKey;
+    if (!window.crypto?.subtle) return null;
+    const enc = new TextEncoder();
+    try {
+      const base = await crypto.subtle.importKey(
+        'raw', enc.encode(CRYPTO_PASSPHRASE), 'PBKDF2', false, ['deriveKey']);
+      _cryptoKey = await crypto.subtle.deriveKey(
+        { name:'PBKDF2', salt: enc.encode(CRYPTO_SALT), iterations: 120_000, hash:'SHA-256' },
+        base, { name:'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+      return _cryptoKey;
+    } catch { return null; }
+  }
+  const _b64 = {
+    enc: (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))),
+    dec: (s)   => Uint8Array.from(atob(s), c => c.charCodeAt(0)),
+  };
+  async function encryptMessage(msg) {
+    const key = await getKey();
+    if (!key) return msg;   // fall back to plain if Web Crypto unavailable
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt(
+      { name:'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(msg)));
+    return { enc: 1, iv: _b64.enc(iv), ct: _b64.enc(ct) };
+  }
+  async function decryptMessage(env) {
+    if (!env || env.enc !== 1) return env;   // already plaintext (backward compat)
+    const key = await getKey();
+    if (!key) return null;
+    try {
+      const iv = _b64.dec(env.iv);
+      const ct = _b64.dec(env.ct);
+      const pt = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, ct);
+      return JSON.parse(new TextDecoder().decode(pt));
+    } catch { return null; }
+  }
   const relayStateListeners = [];
   function notifyRelayStateChange() {
     relayStateListeners.forEach(cb => { try { cb(relayState); } catch(_){} });
@@ -157,10 +213,11 @@ AIVA.CrewChat = (() => {
     if (relayState === 'off') return;
     try {
       const topic = chatTopic();
+      const envelope = await encryptMessage(msg);
       await fetch(`${NTFY_BASE}/${encodeURIComponent(topic)}`, {
         method: 'POST',
         headers: { 'Content-Type':'text/plain' },
-        body: JSON.stringify(msg),
+        body: JSON.stringify(envelope),
       });
     } catch {
       /* network glitch — local + BC paths still delivered it for this device */
@@ -183,12 +240,17 @@ AIVA.CrewChat = (() => {
            but they come right back, so we shouldn't sit silent for 8 s. */
         setTimeout(relayConnect, 2000);
       };
-      relaySource.onmessage = (ev) => {
+      relaySource.onmessage = async (ev) => {
         try {
           const env = JSON.parse(ev.data);
           if (env.event && env.event !== 'message') return;     // skip keepalives
           if (!env.message) return;
-          const msg = JSON.parse(env.message);
+          const wireObj = JSON.parse(env.message);
+          /* If the wire object carries enc:1, decrypt it before anything
+             else. Falls back to treating as plaintext for backward compat. */
+          const msg = (wireObj && wireObj.enc === 1)
+            ? await decryptMessage(wireObj)
+            : wireObj;
           if (!msg || !msg.id) return;
           if (seenIds.has(msg.id)) return;                       // own echo / dedup
           rememberSeen(msg.id);
@@ -196,6 +258,13 @@ AIVA.CrewChat = (() => {
              mutate an existing message's reactions map. */
           if (msg.type === 'reaction') {
             applyRemoteReaction(msg);
+            if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
+            return;
+          }
+          /* Avatar updates: cache the URL globally so chat / crew list
+             render the new image immediately. */
+          if (msg.type === 'avatar_set') {
+            applyAvatarSet(msg);
             if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
             return;
           }
@@ -321,10 +390,15 @@ AIVA.CrewChat = (() => {
   if (channel) channel.onmessage = (e) => {
     if (e.data?.kind === 'msg') {
       const m = e.data.msg;
-      /* Reaction events from another tab mutate state same as ntfy ones. */
+      /* Reaction + avatar events mutate state same as ntfy ones. */
       if (m && m.type === 'reaction' && !seenIds.has(m.id)) {
         rememberSeen(m.id);
         applyRemoteReaction(m);
+        return;
+      }
+      if (m && m.type === 'avatar_set' && !seenIds.has(m.id)) {
+        rememberSeen(m.id);
+        applyAvatarSet(m);
         return;
       }
       listeners.forEach(cb => { try { cb(m, readLog()); } catch(_){} });
@@ -1021,8 +1095,42 @@ AIVA.CrewChat = (() => {
     document.head.appendChild(style);
   })();
 
+  /* ============ Avatar broadcast =============
+     When a pilot uploads a new profile picture, the upload handler in
+     portal.js hands us the publicly-hosted URL (from /api/avatar →
+     Catbox). We emit an encrypted `avatar_set` event over the same
+     ntfy channel; every other browser updates its local crew_avatars
+     map and re-renders chat + crew list with the new image. URL is
+     ~80 chars so it fits well within ntfy's body limit. */
+  function broadcastAvatar(pilotId, url) {
+    const p = pilot();
+    if (!p || !pilotId) return;
+    const msg = {
+      id: (Date.now().toString(36) + Math.random().toString(36).slice(2,6)),
+      ts: Date.now(),
+      type: 'avatar_set',
+      pilotId,
+      url: url || null,        // null = removal
+    };
+    rememberSeen(msg.id);
+    if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
+    relayPublish(msg);
+  }
+  function applyAvatarSet(msg) {
+    if (!msg?.pilotId) return;
+    try {
+      const avatars = AIVA.Store?.get?.('crew_avatars', {}) || {};
+      if (msg.url) avatars[msg.pilotId] = msg.url;
+      else delete avatars[msg.pilotId];
+      AIVA.Store?.set?.('crew_avatars', avatars);
+    } catch {}
+    /* Re-fire listeners with a synthetic event so UIs re-render. */
+    listeners.forEach(cb => { try { cb({ type:'avatar_set', pilotId: msg.pilotId }, readLog()); } catch(_){} });
+  }
+
   return {
     mount, send, event, online, onMessage, clear, react,
+    broadcastAvatar,
     relayState: () => relayState,
     setTopic: (t) => {
       try { AIVA.Store.set('crew_chat_topic', t); } catch {}

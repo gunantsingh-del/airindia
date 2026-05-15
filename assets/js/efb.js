@@ -271,16 +271,20 @@
       <div class="efb2-grid">
         <!-- TOP BAR -->
         <header class="efb2-top">
-          <!-- LEFT: Z time + date + local time stacked + welcome captain -->
+          <!-- LEFT: two clean clocks (Z + IST), date underneath, welcome captain -->
           <div class="efb2-clocks">
-            <div class="z-time" id="efbZ">--:--:--</div>
-            <div class="z-meta">
-              <span class="z-label">ZULU</span>
-              <span class="z-sep">·</span>
-              <span class="z-date" id="efbDate">— —</span>
-              <span class="z-sep">·</span>
-              <span class="z-local"><span class="loc-lbl" id="efbLocLbl">LOC</span> <span id="efbLocal">--:--</span></span>
+            <div class="clock-row">
+              <div class="clock-cell">
+                <span class="clock-lbl">Z</span>
+                <span class="clock-val" id="efbZ">--:--</span>
+              </div>
+              <div class="clock-divider"></div>
+              <div class="clock-cell">
+                <span class="clock-lbl" id="efbLocLbl">IST</span>
+                <span class="clock-val" id="efbLocal">--:--</span>
+              </div>
             </div>
+            <div class="clock-date" id="efbDate">— —</div>
             <div class="efb-welcome">
               <span class="ew-greet">${greetForHour()},</span>
               <span class="ew-name">${pilot.rank} ${pilot.name.split(' ')[0]}</span>
@@ -380,13 +384,11 @@
     function pad(n) { return String(n).padStart(2,'0'); }
     function tickClocks() {
       const d = new Date();
-      /* Z */
-      zEl.textContent = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-      /* Date (UTC) */
+      /* Clean H:MM display — seconds were visual noise. */
+      zEl.textContent = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
       const dow = ['SUN','MON','TUE','WED','THU','FRI','SAT'][d.getUTCDay()];
       const mon = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][d.getUTCMonth()];
       dateEl.textContent = `${dow} ${d.getUTCDate()} ${mon} ${d.getUTCFullYear()}`;
-      /* Local */
       locEl.textContent  = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
     tickClocks();

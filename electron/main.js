@@ -1,39 +1,41 @@
 /* =====================================================================
    AIVA — Electron desktop wrapper
 
-   Why this exists:
-     • In a normal browser at airindiavirtual.online (HTTPS), Chrome
-       blocks plain ws://localhost:2048 as Mixed Content. The FSUIPC
-       bridge silently fails.
-     • Wrapping the same site in Electron lets us either:
-         (a) Disable web security for localhost ws:// connections, OR
-         (b) Load a bundled copy from file:// (skipping the rule).
-       We go with (a) so the app always shows the latest live site
-       without rebuilding the .exe for every update.
-     • Branded with the AIVA chakra icon, installs to Start Menu +
-       Desktop, opens chromeless in its own window.
+   Beyond just-loading-the-website, the desktop build delivers:
+     • System tray icon (chakra) — single-click to focus the app,
+       right-click for quick actions + a "Quit" that actually quits
+       (closing the window minimises to tray instead).
+     • Native OS notifications — chat messages, FSUIPC connect /
+       disconnect, descent through 10k, sim crash. Replaces the
+       in-page toasts when the window isn't focused.
+     • Always-on-top toggle — pin AIVA as a HUD over MSFS while you
+       fly. Toggleable from the tray menu + via Profile in the app.
+     • Auto-start with Windows — launch AIVA on boot.
+     • Custom window-open routing: Navigraph stays in-app
+       (auth flow needs same session), everything else bounces to
+       the user's real browser.
 
    Build:
        npm install
-       npm run dist:win        → AIVA-Setup-<version>.exe + AIVA-Portable-<version>.exe
+       npm run dist:win        → AIVA-Setup.exe + AIVA-Portable.exe
        (output lands in ./dist-electron/)
-
-   Or push a tag → GitHub Actions workflow auto-builds + uploads to
-   the release page.
    ===================================================================== */
 
-const { app, BrowserWindow, Menu, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, Tray, shell, ipcMain, Notification, nativeImage } = require('electron');
 const path = require('path');
 
-/* The page we wrap. Override at runtime with AIVA_URL=... electron . for
-   local development against a Python dev server etc. */
 const APP_URL = process.env.AIVA_URL || 'https://airindiavirtual.online/';
 
 /* ----- Single-instance lock so launching twice just focuses the window ----- */
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) { app.quit(); process.exit(0); }
 
-let mainWin = null;
+let mainWin   = null;
+let tray      = null;
+let quitting  = false;     // distinguish "X close" (minimise) from real quit
+
+const ICON_PATH = path.join(__dirname, '..', 'assets', 'img',
+  process.platform === 'win32' ? 'icon.ico' : 'icon.png');
 
 function createWindow() {
   mainWin = new BrowserWindow({
@@ -44,44 +46,51 @@ function createWindow() {
     show: false,
     backgroundColor: '#0A0709',
     title: 'AIVA',
-    icon: path.join(__dirname, '..', 'assets', 'img', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
+    icon: ICON_PATH,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      /* Crucial: this allows the HTTPS-loaded airindiavirtual.online page
-         to make plain ws://localhost:2048 connections without Chrome's
-         Mixed Content blocker tripping. Same trade-off as Chrome's
-         --allow-running-insecure-content flag, scoped to this app. */
+      /* HTTPS-loaded airindiavirtual.online needs to open ws://localhost
+         for the FSUIPC bridge — Chrome's Mixed-Content rule blocks this
+         by default, but this flag scoped to AIVA only lifts the gate. */
       allowRunningInsecureContent: true,
       webSecurity: true,
     },
   });
 
-  /* Splash-style fade in: only show once the page is painted */
   mainWin.once('ready-to-show', () => mainWin.show());
-
   mainWin.loadURL(APP_URL);
 
-  /* Window-open routing for the desktop app:
-       • Navigraph: opens in a NEW IN-APP BrowserWindow so the OAuth
-         flow + charts stay inside AIVA (cookies persist across the
-         shared session).
-       • Other http(s) links: bounced to the user's real browser via
-         shell.openExternal so unrelated sites don't pollute the app.
-   */
+  /* Closing the window minimises to tray on Windows/Linux. On macOS the
+     standard pattern is to keep the dock icon alive instead. Quitting
+     for real has to go through the tray menu or Cmd+Q / File→Exit. */
+  mainWin.on('close', (e) => {
+    if (!quitting && process.platform !== 'darwin') {
+      e.preventDefault();
+      mainWin.hide();
+      if (tray && !tray.balloonShown) {
+        try { tray.displayBalloon({ title: 'AIVA still running', content: 'Minimised to the system tray. Click the chakra to bring it back.', iconType: 'info' }); } catch {}
+        tray.balloonShown = true;
+      }
+      return;
+    }
+  });
+
+  /* Window-open routing: Navigraph stays in-app (OAuth needs same
+     session), everything else bounces to the user's real browser. */
   mainWin.webContents.setWindowOpenHandler(({ url }) => {
     if (/navigraph\.com/i.test(url)) {
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
-          width: 1280,
-          height: 860,
+          width: 1280, height: 860,
           title: 'AIVA · Navigraph',
           autoHideMenuBar: true,
           backgroundColor: '#0A0709',
+          icon: ICON_PATH,
           webPreferences: {
             contextIsolation: true,
             nodeIntegration: false,
@@ -97,9 +106,6 @@ function createWindow() {
     return { action: 'allow' };
   });
 
-  /* In-place navigation: keep our own host + Navigraph subdomains
-     (charts.navigraph.com redirects to login.navigraph.com during OAuth);
-     everything else bounces to the user's browser. */
   mainWin.webContents.on('will-navigate', (e, url) => {
     try {
       const u = new URL(url);
@@ -114,16 +120,91 @@ function createWindow() {
   mainWin.on('closed', () => { mainWin = null; });
 }
 
-/* Re-focus the existing window if user launches AIVA a second time */
+/* ============ System tray ============ */
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
+    { label: 'AIVA · Air India Virtual', enabled: false },
+    { type: 'separator' },
+    { label: 'Open AIVA', click: () => { mainWin?.show(); mainWin?.focus(); } },
+    { label: 'Open EFB',       click: () => mainWin?.webContents?.executeJavaScript("location.href='efb.html'") },
+    { label: 'Open My Roster', click: () => mainWin?.webContents?.executeJavaScript("location.href='portal.html#roster'") },
+    { label: 'Open Crew Chat', click: () => mainWin?.webContents?.executeJavaScript("location.href='portal.html#dashboard'") },
+    { type: 'separator' },
+    {
+      label: 'Always on top', type: 'checkbox',
+      checked: mainWin?.isAlwaysOnTop() || false,
+      click: (item) => { mainWin?.setAlwaysOnTop(item.checked, 'normal'); tray.setContextMenu(buildTrayMenu()); },
+    },
+    {
+      label: 'Launch at startup', type: 'checkbox',
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (item) => {
+        app.setLoginItemSettings({ openAtLogin: item.checked, args: ['--from-tray-autostart'] });
+        tray.setContextMenu(buildTrayMenu());
+      },
+    },
+    { type: 'separator' },
+    { label: 'Quit AIVA', click: () => { quitting = true; app.quit(); } },
+  ]);
+}
+function createTray() {
+  try {
+    const img = nativeImage.createFromPath(ICON_PATH);
+    /* Resize for tray — Windows wants 16/32, macOS wants 22px templates */
+    const resized = process.platform === 'darwin' ? img.resize({ width: 18, height: 18 }) : img.resize({ width: 16, height: 16 });
+    tray = new Tray(resized);
+    tray.setToolTip('AIVA · Air India Virtual');
+    tray.on('click', () => {
+      if (!mainWin) return;
+      if (mainWin.isVisible() && mainWin.isFocused()) mainWin.hide();
+      else { mainWin.show(); mainWin.focus(); }
+    });
+    tray.setContextMenu(buildTrayMenu());
+  } catch (e) {
+    console.warn('[AIVA] tray init failed:', e?.message);
+  }
+}
+
+/* ============ IPC handlers used by the renderer ============ */
+ipcMain.handle('aiva:notify', (_e, payload) => {
+  try {
+    if (!Notification.isSupported()) return false;
+    const n = new Notification({
+      title: payload?.title || 'AIVA',
+      body:  payload?.body  || '',
+      silent: !!payload?.silent,
+      icon:  ICON_PATH,
+    });
+    n.on('click', () => { mainWin?.show(); mainWin?.focus(); });
+    n.show();
+    return true;
+  } catch { return false; }
+});
+ipcMain.handle('aiva:setAlwaysOnTop', (_e, on) => {
+  mainWin?.setAlwaysOnTop(!!on, 'normal');
+  tray?.setContextMenu(buildTrayMenu());
+  return !!on;
+});
+ipcMain.handle('aiva:setAutoStart', (_e, on) => {
+  app.setLoginItemSettings({ openAtLogin: !!on, args: ['--from-tray-autostart'] });
+  tray?.setContextMenu(buildTrayMenu());
+  return app.getLoginItemSettings().openAtLogin;
+});
+ipcMain.handle('aiva:getDesktopState', () => ({
+  alwaysOnTop: !!mainWin?.isAlwaysOnTop(),
+  autoStart:   !!app.getLoginItemSettings().openAtLogin,
+}));
+
+/* ============ Second-instance focus ============ */
 app.on('second-instance', () => {
   if (mainWin) {
+    if (!mainWin.isVisible()) mainWin.show();
     if (mainWin.isMinimized()) mainWin.restore();
     mainWin.focus();
   }
 });
 
 app.whenReady().then(() => {
-  /* Slim menu — File / View / Help. No "Edit > Cut" muscle-memory traps. */
   const menu = Menu.buildFromTemplate([
     {
       label: 'File',
@@ -131,25 +212,35 @@ app.whenReady().then(() => {
         { role: 'reload', label: 'Reload' },
         { role: 'forceReload', label: 'Force reload' },
         { type: 'separator' },
-        { role: 'quit', label: 'Exit' },
+        { label: 'Hide to tray', accelerator: 'CmdOrCtrl+W', click: () => mainWin?.hide() },
+        { label: 'Exit AIVA',    accelerator: 'CmdOrCtrl+Q', click: () => { quitting = true; app.quit(); } },
       ],
     },
     {
       label: 'View',
       submenu: [
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { role: 'resetZoom' },
+        { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' },
         { type: 'separator' },
         { role: 'togglefullscreen' },
         { role: 'toggleDevTools', label: 'Developer tools' },
       ],
     },
     {
+      label: 'Window',
+      submenu: [
+        { label: 'Always on top', type: 'checkbox',
+          click: (item) => mainWin?.setAlwaysOnTop(item.checked, 'normal') },
+        { type: 'separator' },
+        { label: 'Launch at startup', type: 'checkbox',
+          checked: app.getLoginItemSettings().openAtLogin,
+          click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked, args: ['--from-tray-autostart'] }) },
+      ],
+    },
+    {
       label: 'Help',
       submenu: [
         { label: 'Open airindiavirtual.online in browser', click: () => shell.openExternal('https://airindiavirtual.online/') },
-        { label: 'FSUIPC bridge setup', click: () => shell.openExternal('https://www.fsuipc.com/') },
+        { label: 'FSUIPC bridge setup',                    click: () => shell.openExternal('https://www.fsuipc.com/') },
         { type: 'separator' },
         { label: 'About AIVA', click: () => {
             const { dialog } = require('electron');
@@ -157,7 +248,7 @@ app.whenReady().then(() => {
               type: 'info',
               title: 'About AIVA',
               message: `Air India Virtual — Desktop`,
-              detail: `Version ${app.getVersion()}\nChief Pilot · Gunant Singh Pahwa\n\nWraps airindiavirtual.online so the FSUIPC bridge can talk to localhost without browser Mixed-Content blocking.`,
+              detail: `Version ${app.getVersion()}\nChief Pilot · Gunant Singh Pahwa\n\nNative wrapper with system tray, OS notifications, always-on-top, FSUIPC bridge access, and in-app Navigraph charts.`,
             });
         } },
       ],
@@ -166,12 +257,21 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(menu);
 
   createWindow();
+  createTray();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else { mainWin?.show(); mainWin?.focus(); }
   });
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+/* Hold app alive even when all windows are closed (we live in the tray). */
+app.on('window-all-closed', (e) => {
+  if (!quitting && process.platform !== 'darwin') {
+    /* swallow — tray keeps us running */
+    e?.preventDefault?.();
+  } else {
+    app.quit();
+  }
 });
+app.on('before-quit', () => { quitting = true; });

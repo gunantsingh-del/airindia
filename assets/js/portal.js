@@ -273,11 +273,22 @@
     /* Small helper — fires a Hoppie POST (no response needed for one-way
        auto-messages). Goes through AIVA.Dispatch.fetchViaProxies so a
        rate-limited corsproxy.io doesn't silently swallow phase-trigger
-       progress reports. */
+       progress reports. Callsign mirrors the Hoppie page: ACTIVE FLIGHT
+       cs > saved my_callsign > pilot-id derived. The cockpit ATSU is
+       logged on with the flight callsign, so messages from/to it MUST
+       match or they're lost on the network. */
     async function hoppieAutoSend(to, type, body) {
       const code = P.pref('hoppieCode', '');
       if (!code) return;
-      const myCall = P.pref('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
+      const fpRec     = P.get('flight_in_progress');
+      const activeFl  = fpRec ? AIVA.findFlight?.(fpRec.fno) : null;
+      const activeCs  = (activeFl?.cs || '').toString().trim().toUpperCase();
+      const fallback  = 'AIC' + (pilot.id || '001').replace(/[^0-9]/g, '').slice(-3).padStart(3, '0');
+      const savedCs   = (P.pref('my_callsign', '') || '').trim();
+      const myCall    =
+        /^[A-Z]{2,3}\d{2,4}$/i.test(activeCs) ? activeCs.toUpperCase() :
+        /^[A-Z]{2,3}\d{2,4}$/i.test(savedCs) ? savedCs.toUpperCase()  :
+        fallback;
       const url = 'https://www.hoppie.nl/acars/system/connect.html?' +
         new URLSearchParams({ logon: code, from: myCall, to, type, packet: body });
       try {
@@ -4086,19 +4097,31 @@
       sub: 'ACARS · datalink · CPDLC',
       render: (c) => {
         const code   = P.pref('hoppieCode', '');
-        /* Robust callsign derivation. Hoppie returns `error {no from address}`
-           if the `from=` field is missing or just "AIC" with no digits. Make
-           sure we ALWAYS end up with a valid AICxxx string:
-             1. honor saved my_callsign if it's well-formed
-             2. otherwise derive from pilot.id digits → "AIC" + last 3 digits
-             3. final fallback "AIC100" so Hoppie never sees an empty from */
+        /* Callsign derivation — order of preference:
+             1. ACTIVE FLIGHT'S CALLSIGN (flight_in_progress → AIVA.findFlight().cs)
+                This is what the cockpit ATSU is logged on with — must match
+                or Hoppie can't route messages back. e.g. AIC441 for AI441.
+             2. TODAY'S BOOKED FLIGHT callsign (if any)
+             3. Saved my_callsign Profile pref (well-formed only)
+             4. Derive from pilot.id digits — "AIC" + last 3 digits
+             5. Hard fallback "AIC100" so Hoppie never sees empty from
+           Hoppie returns `error {no from address}` for empty/malformed
+           from, which is precisely the bug pilots kept hitting when their
+           cockpit was logged on as AIC441 but AIVA sent from AIC001. */
+        const fpRec      = P.get('flight_in_progress');
+        const activeFno  = fpRec?.fno || (P.get('roster_bookings', []) || []).find(b => b.date === (new Date()).toISOString().slice(0,10))?.fno;
+        const activeFl   = activeFno ? AIVA.findFlight?.(activeFno) : null;
+        const activeCs   = (activeFl?.cs || '').toString().trim().toUpperCase();
         const fallbackCallsign = (() => {
           const digits = (pilot.id || '').replace(/[^0-9]/g, '');
           if (digits) return 'AIC' + digits.slice(-3).padStart(3, '0');
           return 'AIC100';
         })();
         const savedCs = (P.pref('my_callsign', '') || '').trim();
-        const myCall  = /^[A-Z]{2,3}\d{2,4}$/i.test(savedCs) ? savedCs.toUpperCase() : fallbackCallsign;
+        const myCall  =
+          /^[A-Z]{2,3}\d{2,4}$/i.test(activeCs) ? activeCs.toUpperCase() :
+          /^[A-Z]{2,3}\d{2,4}$/i.test(savedCs) ? savedCs.toUpperCase()  :
+          fallbackCallsign;
         const isAdmin = pilot.role === 'admin';
         let viewMode = P.pref('hop_view_mode', isAdmin ? 'admin' : 'pilot');
 
@@ -4202,7 +4225,7 @@
               <span class="pill pill-gold" style="font-size:10px;">${I('book',12)} SETUP</span>
               <div>
                 <div class="display" style="font-size:15px;line-height:1.1;">Aircraft Hoppie setup</div>
-                <div class="text-mute mono" style="font-size:11px;margin-top:2px;">your callsign: <b>${myCall}</b> · logon code: <b>${code ? '••••••' + code.slice(-4) : '<span style="color:#FCA5A5;">not set</span>'}</b></div>
+                <div class="text-mute mono" style="font-size:11px;margin-top:2px;">your callsign: <b style="color:var(--ai-gold-bright);">${myCall}</b>${activeFl ? ` <span style="color:rgba(255,225,89,.55);">(from active flight ${activeFl.fno})</span>` : ' (pilot ID — book a flight to use the flight callsign instead)'} · logon code: <b>${code ? '••••••' + code.slice(-4) : '<span style="color:#FCA5A5;">not set</span>'}</b></div>
               </div>
               <span class="text-mute mono" style="margin-left:auto;font-size:11px;">click to expand ▾</span>
             </summary>

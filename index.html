@@ -7,10 +7,10 @@
 <meta name="apple-mobile-web-app-title" content="AIVA">
 <meta name="theme-color" content="#A8101F">
 <title>AIVA</title>
-<link rel="icon" type="image/png" href="assets/img/vaic-mini-colour.png?v=20260515m">
-<link rel="apple-touch-icon" href="assets/img/vaic-mini-colour.png?v=20260515m">
+<link rel="icon" type="image/png" href="assets/img/vaic-mini-colour.png?v=20260515n">
+<link rel="apple-touch-icon" href="assets/img/vaic-mini-colour.png?v=20260515n">
 <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Inter+Tight:ital,wght@0,500;0,600;0,700;0,800;1,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/base.css?v=20260515m">
+<link rel="stylesheet" href="assets/css/base.css?v=20260515n">
 <style>
 /* ====== AIR INDIA RED LOGIN — MINIMAL ====== */
 body {
@@ -199,6 +199,43 @@ body::after {
   .brand.condensed { transform: translateY(-10px) scale(.68); }
 }
 
+/* ===== "Get AIVA Desktop" pill — top-right, pre-login =====
+   Tiny gold pill so the 14 crew see the installer link the moment they
+   land on the site, even before clicking into the login. */
+.dl-pill {
+  position: fixed;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  background: rgba(10,7,9,.72);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid rgba(255,225,89,.36);
+  color: #FFE9A8;
+  text-decoration: none;
+  border-radius: 99px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  z-index: 55;
+  transition: all .25s var(--ease-emph);
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.dl-pill:hover {
+  background: rgba(168,16,31,.42);
+  border-color: rgba(255,225,89,.7);
+  color: #FFFFFF;
+  transform: translateY(-1px);
+}
+.dl-pill svg { stroke: currentColor; }
+@media (max-width: 480px) {
+  .dl-pill span { display: none; }
+  .dl-pill { padding: 8px 10px; }
+}
+
 /* ===== Inquiry tab (bottom-pinned) =====
    Small, unobtrusive — a single line for prospective pilots. Opens a modal
    with a 60-second contact form. */
@@ -282,9 +319,9 @@ body::after {
 
 <div class="stage">
   <div class="brand" id="brandTap" role="button" aria-label="Sign in">
-    <img class="logo" src="assets/img/vaic-logo-colour.png?v=20260515m" alt="Air India Virtual" onerror="this.onerror=null; this.src='assets/img/vaic-logo-colour.svg?v=20260515m'"/>
+    <img class="logo" src="assets/img/vaic-logo-colour.png?v=20260515n" alt="Air India Virtual" onerror="this.onerror=null; this.src='assets/img/vaic-logo-colour.svg?v=20260515n'"/>
     <div class="gold-rule" aria-hidden="true"></div>
-    <img class="maharaja" src="assets/img/maharaja.png?v=20260515m" alt="Air India Maharaja" onerror="this.onerror=null; this.src='assets/img/maharaja.svg?v=20260515m'"/>
+    <img class="maharaja" src="assets/img/maharaja.png?v=20260515n" alt="Air India Maharaja" onerror="this.onerror=null; this.src='assets/img/maharaja.svg?v=20260515n'"/>
   </div>
 
   <div class="login-stage" id="loginStage">
@@ -309,6 +346,16 @@ body::after {
   </div>
 </div>
 
+<!-- Desktop app pill — pinned top-right so all 14 pilots see it before login -->
+<a class="dl-pill" href="/install" title="Install AIVA as a Windows app">
+  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="7 10 12 15 17 10"/>
+    <line x1="12" y1="15" x2="12" y2="3"/>
+  </svg>
+  <span>Get AIVA Desktop</span>
+</a>
+
 <!-- Inquiry tab — prospective pilots can request to fly for AIC -->
 <div class="inquiry-tab">
   <span>Want to fly for Air India Virtual?</span>
@@ -330,11 +377,11 @@ body::after {
   </div>
 </div>
 
-<script src="assets/js/store.js?v=20260515m"></script>
-<script src="assets/js/data.js?v=20260515m"></script>
-<script src="assets/js/util.js?v=20260515m"></script>
-<script src="assets/js/auth.js?v=20260515m"></script>
-<script src="assets/js/maharaja.js?v=20260515m"></script>
+<script src="assets/js/store.js?v=20260515n"></script>
+<script src="assets/js/data.js?v=20260515n"></script>
+<script src="assets/js/util.js?v=20260515n"></script>
+<script src="assets/js/auth.js?v=20260515n"></script>
+<script src="assets/js/maharaja.js?v=20260515n"></script>
 <script>
   const stage = document.getElementById('loginStage');
   const brand = document.getElementById('brandTap');

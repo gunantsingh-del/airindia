@@ -35,7 +35,7 @@
       ],
       "icon": "assets/img/vaic-mini-colour.png",
       "publisherName": "Air India Virtual",
-      "artifactName": "AIVA-Setup-${version}.${ext}"
+      "artifactName": "AIVA-Setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -49,7 +49,7 @@
       "uninstallerIcon": "assets/img/vaic-mini-colour.png"
     },
     "portable": {
-      "artifactName": "AIVA-Portable-${version}.${ext}"
+      "artifactName": "AIVA-Portable.${ext}"
     },
     "mac": {
       "icon": "assets/img/vaic-mini-colour.png",

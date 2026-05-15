@@ -161,40 +161,23 @@
        that lacked auto-detect; harmless to keep as a hint to start sooner. */
     AIVA.FSUIPC?.connect?.().catch(() => { /* swallow — auto-detect handles retries */ });
 
-    /* === PWA install prompt ===
-       Browsers fire `beforeinstallprompt` when the page meets PWA install
-       criteria (manifest + HTTPS + icons). We stash the event so an
-       explicit "Install AIVA" button can call .prompt() on user click.
-       The button only shows when the prompt is available AND we're NOT
-       already running standalone. */
-    let installPromptEv = null;
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      installPromptEv = e;
-      const btn = document.getElementById('pwaInstall');
-      if (btn) btn.hidden = false;
-    });
-    /* Click handler — wired after the button is in the DOM via #pwaInstall */
-    document.addEventListener('click', async (e) => {
+    /* === "Install AIVA" button ===
+       Always takes the pilot to /install.html — that page has the
+       branded CTA + step-by-step guide + auto-kicks the .exe download
+       when navigated to with ?go=1. The button is hidden when AIVA is
+       already running inside the Electron wrapper (no point installing
+       what you're already using). */
+    document.addEventListener('click', (e) => {
       if (!(e.target.id === 'pwaInstall' || e.target.closest('#pwaInstall'))) return;
-      if (!installPromptEv) {
-        toast('To install: open this site in Chrome / Edge, then use the browser\'s "Install app" menu (⋮ → Install AIVA).', 'info', 6000);
-        return;
-      }
-      installPromptEv.prompt();
-      const choice = await installPromptEv.userChoice;
-      if (choice.outcome === 'accepted') toast('AIVA installed — look for it in your apps.', 'ok');
-      installPromptEv = null;
-      const btn = document.getElementById('pwaInstall');
-      if (btn) btn.hidden = true;
+      e.preventDefault();
+      window.location.href = '/install';
     });
-    /* Hide the install button if we're already running as an installed PWA
-       OR inside the Electron desktop wrapper (electron/preload.js exposes
-       window.AIVA_DESKTOP). */
-    if (window.AIVA_DESKTOP?.isDesktop
-        || window.matchMedia('(display-mode: standalone)').matches
-        || window.navigator.standalone) {
+    /* Hide the button if we're already inside the desktop wrapper. */
+    if (window.AIVA_DESKTOP?.isDesktop) {
       setTimeout(() => { const b = document.getElementById('pwaInstall'); if (b) b.hidden = true; }, 0);
+    } else {
+      /* Show the button — the .exe is available to anyone on the website. */
+      setTimeout(() => { const b = document.getElementById('pwaInstall'); if (b) b.hidden = false; }, 0);
     }
 
     /* === SHARED — crash detection for every pilot === */

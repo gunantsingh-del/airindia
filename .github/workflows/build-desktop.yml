@@ -1,21 +1,17 @@
 # =====================================================================
-# AIVA Desktop · auto-build the Windows .exe
+# AIVA Desktop · auto-build the Windows .exe and publish to a single
+# "latest" GitHub Release.
 #
-# Triggered:
-#   • Manually from the Actions tab (workflow_dispatch)
-#   • On every tag that starts with "v" (e.g. v1.0.0, v1.2.1)
+# What this gives us:
+#   • Every push to main rebuilds the .exe.
+#   • The "latest" release tag gets overwritten with the freshest build.
+#   • The stable URL
+#       https://github.com/gunantsingh-del/airindia/releases/latest/download/AIVA-Setup.exe
+#     always points at the most recent .exe — no version juggling.
+#   • airindiavirtual.online/download → 302 redirect → that URL, so the
+#     14 crew never see GitHub in their address bar.
 #
-# Output:
-#   • dist-electron/AIVA-Setup-<version>.exe   (NSIS installer)
-#   • dist-electron/AIVA-Portable-<version>.exe (single-file portable)
-#   Both uploaded as workflow artifacts AND, on tag pushes, attached
-#   to the matching GitHub Release.
-#
-# To cut a new release:
-#   git tag v1.0.0
-#   git push origin v1.0.0
-# Wait ~3 minutes for the action to finish, then grab the .exe from
-# https://github.com/gunantsingh-del/airindia/releases
+# Skip the build for a commit by adding [skip ci] to its message.
 # =====================================================================
 
 name: Build AIVA Desktop (.exe)
@@ -23,16 +19,25 @@ name: Build AIVA Desktop (.exe)
 on:
   workflow_dispatch:
   push:
-    tags:
-      - 'v*'
+    branches: [ main ]
+    tags: [ 'v*' ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'docs/**'
+
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     permissions:
-      contents: write   # needed to attach the .exe to a Release
+      contents: write   # needed to manage the "latest" Release
 
     steps:
       - name: Checkout
@@ -48,25 +53,55 @@ jobs:
 
       - name: Build Windows installer + portable
         env:
-          # electron-builder picks this up to skip publishing (we attach via Release step)
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist:win
 
-      - name: Upload artifacts
+      - name: List build output
+        shell: bash
+        run: ls -lh dist-electron/
+
+      - name: Upload artifacts (always)
         uses: actions/upload-artifact@v4
         with:
           name: aiva-desktop-windows
           path: |
-            dist-electron/*.exe
+            dist-electron/AIVA-Setup.exe
+            dist-electron/AIVA-Portable.exe
             dist-electron/latest.yml
           if-no-files-found: error
 
-      - name: Attach to Release (tag pushes only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Compute release notes
+        id: notes
+        shell: bash
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
+
+      - name: Delete previous "latest" release (if any)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || echo "No previous latest release to delete"
+
+      - name: Create / update "latest" release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: latest
+          name: "AIVA Desktop · auto-build"
+          body: |
+            **Automated build** from commit [`${{ steps.notes.outputs.sha_short }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+            Built ${{ steps.notes.outputs.build_date }} on `windows-latest`.
+
+            ## Download
+            - [`AIVA-Setup.exe`](https://github.com/${{ github.repository }}/releases/latest/download/AIVA-Setup.exe) — NSIS installer (recommended). Creates Start Menu + Desktop shortcuts.
+            - [`AIVA-Portable.exe`](https://github.com/${{ github.repository }}/releases/latest/download/AIVA-Portable.exe) — single-file portable. No install, drop it anywhere.
+
+            Or just go to <https://airindiavirtual.online/download> — it redirects here.
+          make_latest: true
+          prerelease: false
           files: |
-            dist-electron/*.exe
+            dist-electron/AIVA-Setup.exe
+            dist-electron/AIVA-Portable.exe
             dist-electron/latest.yml
-          generate_release_notes: true
           fail_on_unmatched_files: false

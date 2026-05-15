@@ -18,6 +18,23 @@
 
   document.body.classList.add('efb-body');
 
+  /* ============ STALE flight_in_progress CLEANUP ============
+     If the pilot closed their browser mid-flight (or left a phantom
+     "in progress" from an old session), the home screen's progress
+     ribbon ticks elapsed-time forever and the Start button shows as
+     "FILE PSR" even though no sim is attached. Anything older than
+     12 hours is definitively stale — clear it so the EFB renders
+     fresh. */
+  (() => {
+    const fp = P.get('flight_in_progress');
+    if (!fp) return;
+    const age = Date.now() - (fp.startedAt || 0);
+    if (age > 12 * 3600 * 1000) {
+      P.remove('flight_in_progress');
+      console.info(`[AIVA] Cleared stale flight_in_progress (${(age/3600000).toFixed(1)} h old).`);
+    }
+  })();
+
   /* Time-of-day greeting using the pilot's LOCAL clock (not Zulu) — feels personal */
   function greetForHour() {
     const h = new Date().getHours();
@@ -429,47 +446,46 @@
     }
 
     /* ============ Live flight progress ribbon ============
-       Updates every 5 s while a flight is in progress. Two sources, in order:
-       1) FSUIPC live position (preferred) — % of great-circle progress
-       2) Elapsed time vs scheduled block time (fallback)
-       The phase is derived from altitude (FSUIPC) or % progress (fallback). */
+       Updates every 5 s while a flight is in progress. ONLY shows real
+       progress when FSUIPC reports live telemetry — the old elapsed-time
+       fallback was misleading pilots into thinking a flight was running
+       just because flight_in_progress was set. Now: no FSUIPC = no fake
+       bar, just "AWAITING FSUIPC". */
     const fp = P.get('flight_in_progress');
     if (fp && f) {
       const fromA = AIVA.airport(f.from), toA = AIVA.airport(f.to);
       const totalDist = fromA && toA ? AIVA.U.distance(fromA.lat, fromA.lon, toA.lat, toA.lon) : 0;
-      const totalMins = (AIVA.findFlight(fp.fno)?.durMins) || 60;
       const tickProgress = () => {
         const bar = $('#epFill', home); if (!bar) return;
         const plane = $('#epPlane', home);
         const ph = $('#epPhase', home);
-        let pct = 0, phase = 'PUSHBACK';
 
-        const live = AIVA.FSUIPC?.lastTelemetry?.();
+        const live = AIVA.FSUIPC?.isConnected?.() ? AIVA.FSUIPC.lastTelemetry?.() : null;
         if (live && live.lat != null && live.lon != null && totalDist) {
           const flown = AIVA.U.distance(fromA.lat, fromA.lon, live.lat, live.lon);
-          pct = Math.max(0, Math.min(100, (flown / totalDist) * 100));
+          const pct = Math.max(0, Math.min(100, (flown / totalDist) * 100));
           const alt = live.alt || 0;
+          let phase;
           if (alt < 50) phase = pct < 1 ? 'PUSHBACK' : 'TAXI-IN';
           else if (alt < 1000) phase = pct < 50 ? 'TAKEOFF' : 'APPROACH';
           else if (alt < 10000) phase = pct < 50 ? 'CLIMB' : 'DESCENT';
           else phase = 'CRUISE';
+          bar.style.width = pct.toFixed(1) + '%';
+          if (plane) plane.style.left = pct.toFixed(1) + '%';
+          if (ph) ph.textContent = phase;
         } else {
-          const elapsedMins = (Date.now() - fp.startedAt) / 60000;
-          pct = Math.max(0, Math.min(100, (elapsedMins / totalMins) * 100));
-          if (pct < 2)  phase = 'TAXI-OUT';
-          else if (pct < 8)   phase = 'TAKEOFF';
-          else if (pct < 22)  phase = 'CLIMB';
-          else if (pct < 78)  phase = 'CRUISE';
-          else if (pct < 92)  phase = 'DESCENT';
-          else if (pct < 99)  phase = 'APPROACH';
-          else                phase = 'TAXI-IN';
+          /* No live FSUIPC data → bar stays at 0, phase shows AWAITING. */
+          bar.style.width = '0%';
+          if (plane) plane.style.left = '0%';
+          if (ph) ph.textContent = 'AWAITING FSUIPC';
         }
-        bar.style.width = pct.toFixed(1) + '%';
-        if (plane) plane.style.left = pct.toFixed(1) + '%';
-        if (ph) ph.textContent = phase;
       };
       tickProgress();
       const progTimer = setInterval(tickProgress, 5000);
+      /* Re-tick immediately when FSUIPC connects/disconnects so the bar
+         transitions instantly instead of after the next 5-second poll. */
+      AIVA.FSUIPC?.on?.('connect',    tickProgress);
+      AIVA.FSUIPC?.on?.('disconnect', tickProgress);
       /* Clean up the timer on navigation (route() wipes #efbMain) */
       const obs = new MutationObserver(() => {
         if (!document.getElementById('efbProgress')) {
@@ -480,8 +496,16 @@
     }
 
     $('#startFlight', home)?.addEventListener('click', () => {
+      /* GATE: must have FSUIPC bridge live before a flight can be
+         started. The Chief Pilot's complaint was that the progress bar
+         was ticking with no sim attached — this is the root cause fix. */
+      if (!AIVA.FSUIPC?.isConnected?.()) {
+        toast('Connect FSUIPC first — Start unlocks once the bridge handshakes (ws://localhost:2048/fsuipc/).', 'bad', 6000);
+        location.hash = '#fsuipc';
+        return;
+      }
       P.set('flight_in_progress', { fno: f.fno, startedAt: Date.now() });
-      toast(`Flight ${f.fno} started — FSUIPC awaiting connection.`, 'ok');
+      toast(`Flight ${f.fno} started.`, 'ok');
       /* Broadcast to the crew chat */
       AIVA.CrewChat?.event(`pushed back on ${f.fno} ${f.from} → ${f.to}`, { fno: f.fno });
       location.hash = '#fsuipc';

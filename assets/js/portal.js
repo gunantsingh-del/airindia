@@ -1160,18 +1160,47 @@
           ` });
           c.appendChild(search);
 
-          /* RESULTS LIST */
-          const results = el('section', { id:'resultsSection', html: `
-            <div class="section-title mt-4">
-              <div><h2 id="resultsTitle">Pick a route</h2><div class="sub" id="resultsSub">Choose From + To above, or click a hub chip</div></div>
-            </div>
-            <div id="results" class="grid grid-2" style="max-height:680px; overflow-y:auto; padding-right:6px;"></div>
-          ` });
-          c.appendChild(results);
+          /* ===== Target-date banner =====
+             If the pilot clicked a future calendar day to open this page,
+             stage the booking for THAT day instead of today. The banner
+             shows what date the basket is going to be filed under and lets
+             them flip back to today with one tap. */
+          let targetDate = (() => {
+            try {
+              const v = sessionStorage.getItem('book_target_date');
+              if (v && /^\d{4}-\d{2}-\d{2}$/.test(v) && v >= ymd()) return v;
+            } catch {}
+            return ymd();
+          })();
+          const targetBanner = el('section', { id: 'targetBanner', style:'margin-top:14px;' });
+          const renderTargetBanner = () => {
+            const isToday = targetDate === ymd();
+            const d = new Date(targetDate + 'T00:00:00');
+            const human = d.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+            targetBanner.innerHTML = `
+              <div class="card" style="padding:13px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;${isToday ? '' : 'border-color:rgba(255,225,89,.5);background:rgba(255,225,89,.05);'}">
+                <div style="flex:1;min-width:240px;">
+                  <div class="eyebrow" style="margin-bottom:2px;color:${isToday ? 'var(--text-mute)' : 'var(--ai-gold-bright)'};">${isToday ? 'Filing for today' : 'Filing for'}</div>
+                  <div class="display" style="font-size:15px;font-weight:600;">${human}</div>
+                </div>
+                ${!isToday ? `<button class="btn btn-ghost btn-sm" id="resetTargetDate">${I('refresh', 12)} File for today instead</button>` : ''}
+              </div>
+            `;
+            const reset = $('#resetTargetDate', targetBanner);
+            if (reset) reset.onclick = () => {
+              targetDate = ymd();
+              try { sessionStorage.removeItem('book_target_date'); } catch {}
+              renderTargetBanner();
+            };
+          };
+          c.appendChild(targetBanner);
+          renderTargetBanner();
 
-          /* SECTOR BASKET (sticky bottom) */
+          /* SECTOR BASKET — moved ABOVE results so pilots see what they've
+             selected without scrolling. Pre-FDTL message reflects the
+             non-blocking warning policy. */
           const basket = el('section', { id:'basketSection', html: `
-            <div class="card mt-4" style="padding:18px;">
+            <div class="card mt-3" style="padding:18px;">
               <div class="row between mb-2">
                 <div><h3 style="margin:0;">Selected sectors</h3><div class="text-mute" style="font-size:11.5px;" id="basketSub">Add at least one flight to enable the roster builder.</div></div>
                 <div class="row gap-2">
@@ -1184,6 +1213,16 @@
             </div>
           ` });
           c.appendChild(basket);
+
+          /* RESULTS LIST — below the basket so pilots scroll only to find
+             new flights, not to see what they've already added. */
+          const results = el('section', { id:'resultsSection', html: `
+            <div class="section-title mt-4">
+              <div><h2 id="resultsTitle">Pick a route</h2><div class="sub" id="resultsSub">Choose From + To above, or click a hub chip</div></div>
+            </div>
+            <div id="results" class="grid grid-2" style="max-height:680px; overflow-y:auto; padding-right:6px;"></div>
+          ` });
+          c.appendChild(results);
 
           /* ===== Wire up From/To autocomplete ===== */
           let fromCode = null, toCode = null, acFilter = null;
@@ -1329,23 +1368,38 @@
               $('#fdtlBox', c).textContent = '';
               return;
             }
-            /* Validate FDTL — simple DGCA CAR 7-J check */
+            /* ===== FDTL ADVISORY (not blocking) =====
+               Per Chief Pilot direction: FDTL caps are warnings, not gates.
+               Show the math, flag exceedances, but let the pilot confirm
+               anyway after a yes/no dialog. A single long-haul like AI173
+               easily exceeds 10h block by itself — pilots roleplaying
+               augmented-crew rotations should be free to book it. */
             const totalBlock = selectedSectors.reduce((s, f) => s + f.durMins, 0);
             const sectorCount = selectedSectors.length;
-            const fdtlCap = 600;            // 10h max FDP for ≤6 sectors (simplified)
+            const fdtlCap = 600;            // 10h max FDP for ≤6 sectors (DGCA CAR 7-J simplified)
             const sectorCap = 6;
-            const ok = totalBlock <= fdtlCap && sectorCount <= sectorCap;
-            const fdtl = `FDTL: ${(totalBlock/60).toFixed(1)} h block / ${sectorCount} sectors · cap 10.0 h / 6 sectors · ${ok ? '✓ legal' : '⚠ exceeds limit — split across days'}`;
-            $('#fdtlBox', c).textContent = fdtl;
-            $('#fdtlBox', c).style.color = ok ? 'var(--text-mute)' : '#E61926';
-            $('#confirmRoster', c).disabled = !ok;
+            const blockOk   = totalBlock  <= fdtlCap;
+            const sectorOk  = sectorCount <= sectorCap;
+            const ok = blockOk && sectorOk;
+            const parts = [];
+            parts.push(`FDTL: ${(totalBlock/60).toFixed(1)} h block / ${sectorCount} sectors · cap 10.0 h / 6 sectors`);
+            if (ok) parts.push('✓ legal');
+            else {
+              if (!blockOk)  parts.push(`⚠ ${(totalBlock/60).toFixed(1)} h exceeds 10 h FDP — augmented-crew roster recommended`);
+              if (!sectorOk) parts.push(`⚠ ${sectorCount} sectors exceeds 6-sector cap`);
+            }
+            $('#fdtlBox', c).textContent = parts.join(' · ');
+            $('#fdtlBox', c).style.color = ok ? 'var(--text-mute)' : '#FBBF24';
+            /* Confirm stays ENABLED — the dialog at click time enforces
+               acknowledgement, not the button. Empty basket still disables. */
+            $('#confirmRoster', c).disabled = sectorCount === 0;
             $('#basketSub', c).textContent = `${sectorCount} sector${sectorCount===1?'':'s'} · ${(totalBlock/60).toFixed(1)} block hours total`;
 
-            /* Connectivity check */
+            /* Connectivity check (also advisory) */
             let connectivity = '';
             for (let i = 1; i < selectedSectors.length; i++) {
               if (selectedSectors[i].from !== selectedSectors[i-1].to) {
-                connectivity = ` ⚠ sector ${i+1} doesn't depart from where ${i} arrives — pilot will need positioning.`;
+                connectivity = ` · ⚠ sector ${i+1} doesn't depart from where ${i} arrives — pilot positioning required`;
                 break;
               }
             }
@@ -1369,18 +1423,61 @@
           }
 
           $('#confirmRoster', c).onclick = () => {
-            /* Save sectors as bookings starting today (LOCAL date — see ymd()
-               in util.js for why toISOString() is wrong here). */
-            const yyyymmdd = ymd();
-            const bookings = getBookings();
-            const newOnes = selectedSectors.map(f => ({ date: yyyymmdd, fno: f.fno, ac: f.ac, op: f.op, ts: Date.now() }));
-            setBookings([...bookings, ...newOnes]);
-            toast(`✓ Roster confirmed — ${newOnes.length} sector${newOnes.length===1?'':'s'} on ${yyyymmdd}`, 'ok');
-            selectedSectors = [];
-            persistBasket();
-            renderBasket();
-            doSearch();
-            buildNav();
+            if (!selectedSectors.length) return;
+            /* Re-compute FDTL state at click time (basket may have changed). */
+            const tb = selectedSectors.reduce((s, f) => s + f.durMins, 0);
+            const sc = selectedSectors.length;
+            const fdtlExceeded = tb > 600 || sc > 6;
+            const longHaul = selectedSectors.find(f => f.durMins >= 480);
+
+            const doSave = () => {
+              const bookings = getBookings();
+              const newOnes = selectedSectors.map(f => ({ date: targetDate, fno: f.fno, ac: f.ac, op: f.op, ts: Date.now() }));
+              setBookings([...bookings, ...newOnes]);
+              const human = new Date(targetDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
+              toast(`✓ Roster confirmed — ${newOnes.length} sector${newOnes.length===1?'':'s'} on ${human}`, 'ok');
+              selectedSectors = [];
+              persistBasket();
+              try { sessionStorage.removeItem('book_target_date'); } catch {}
+              targetDate = ymd();
+              renderTargetBanner();
+              renderBasket();
+              doSearch();
+              buildNav();
+            };
+
+            /* If anything exceeds FDTL or is single-leg long-haul, surface
+               an explicit yes/no dialog so the pilot acknowledges before
+               we file it. Otherwise just save. */
+            if (fdtlExceeded || longHaul) {
+              const body = el('div');
+              const warnLines = [];
+              if (tb > 600)
+                warnLines.push(`<li><b>${(tb/60).toFixed(1)} h total block</b> exceeds the 10 h FDP cap. Realistically you'd fly this as an augmented-crew roster across two days; the system will still log it as a single duty day if you confirm.</li>`);
+              if (sc > 6)
+                warnLines.push(`<li><b>${sc} sectors</b> exceeds the 6-sector cap. Allowed under augmented or extended-FDP rules with rest, but you're acknowledging the deviation.</li>`);
+              if (longHaul && !fdtlExceeded)
+                warnLines.push(`<li><b>${longHaul.fno} ${longHaul.from}→${longHaul.to}</b> is ${(longHaul.durMins/60).toFixed(1)} h block. Long-haul sectors typically need augmented crew + a layover before the return leg.</li>`);
+              body.innerHTML = `
+                <div class="text-mute" style="font-size:12.5px;line-height:1.6;margin-bottom:14px;">
+                  Your basket is outside standard FDTL norms. AIVA treats these as <b>advisory</b>, not blocking — confirm only if you've planned the duty period accordingly.
+                </div>
+                <ul style="font-size:13px;line-height:1.7;color:var(--text-dim);padding-left:20px;margin:0;">
+                  ${warnLines.join('')}
+                </ul>
+              `;
+              modal({
+                title: 'FDTL advisory — confirm anyway?',
+                body,
+                width: '540px',
+                actions: [
+                  { label:'Cancel', cls:'btn-ghost', onClick: close => close() },
+                  { label:'Confirm anyway', cls:'btn-primary', onClick: close => { doSave(); close(); } },
+                ],
+              });
+              return;
+            }
+            doSave();
           };
 
           renderBasket();
@@ -5612,6 +5709,10 @@
           ],
         });
       } else {
+        /* Stash the clicked date so the Book Roster page books FOR that
+           day instead of always defaulting to today. Cleared on confirm
+           or by the "today" toggle on the Book Roster banner. */
+        try { sessionStorage.setItem('book_target_date', iso); } catch {}
         location.hash = '#book';
       }
     };

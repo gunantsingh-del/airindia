@@ -337,6 +337,39 @@ AIVA.FSUIPC = (() => {
         emit('connect');
       }
     }).catch(() => {});
+
+    /* === BELT-AND-SUSPENDERS POLL ===
+       IPC events can race across renderer reloads — the user hits Ctrl+
+       Shift+R or the ↻ button after MSFS is already connected, and the
+       state='connected' event from main has already fired before the new
+       listener registered. Telemetry also can be missed if main only
+       sends on change. Poll getLast() once a second as a safety net so
+       even if events are silent, we still pull the latest frame and feed
+       it through handleFrame (which now flips connected=true on any
+       frame arrival). Net effect: SimConnect status reflects reality
+       within ~1 s regardless of IPC race conditions. */
+    let pollTimer2 = null;
+    const startScPoll = () => {
+      if (pollTimer2) return;
+      pollTimer2 = setInterval(async () => {
+        try {
+          const last = await sc.getLast();
+          if (!last) return;
+          /* Only handle if it's a different frame than the one we already
+             saw (compare timestamps) — avoid double-feeding the same
+             frame through descent10k/landing detectors. */
+          if (last.ts && last.ts !== lastState.ts) {
+            handleFrame(last);
+          } else if (!connected && last.ts) {
+            /* Even an old frame from main proves the bridge is alive —
+               flip connected so the chip turns gold immediately. */
+            connected = true;
+            emit('connect');
+          }
+        } catch {}
+      }, 1000);
+    };
+    startScPoll();
   } else {
     /* Browser / no-desktop fallback — WebSocket auto-detect. */
     setTimeout(startAutoDetect, 200);

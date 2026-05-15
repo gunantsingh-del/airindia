@@ -184,9 +184,62 @@ AIVA.FSUIPC = (() => {
     autoStart = false;
     if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
   }
-  /* Kick auto-detect once everything's loaded. Wrapped in setTimeout so
-     it doesn't block AIVA bootstrapping when FSUIPC isn't running. */
-  setTimeout(startAutoDetect, 200);
+  /* ============ SimConnect direct-source bridge ============
+     If we're running inside the AIVA desktop wrapper AND its main
+     process exposes a SimConnect link to MSFS, we prefer that source
+     over the WebSocket-FSUIPC fallback. Pilots running the .exe get
+     a true one-app experience: no FSUIPC bridge utility, no port
+     2048, no Mixed-Content gotchas.
+
+     The bridge feeds telemetry through the SAME handleFrame() pipe
+     that the WebSocket source uses, so every downstream consumer
+     (descent10k / landing / crash events, EFB progress bar, topbar
+     chip) keeps working unchanged. */
+  let simSource = 'ws';      // 'ws' = WebSocket-FSUIPC; 'sim' = SimConnect direct
+  if (window.AIVA_DESKTOP?.simConnect) {
+    const sc = window.AIVA_DESKTOP.simConnect;
+    simSource = 'sim';
+    /* Don't run the WebSocket probe loop — SimConnect is authoritative. */
+    autoStart = false;
+    sc.onState((state) => {
+      const wasConnected = connected;
+      if (state === 'connected' && !wasConnected) {
+        connected = true;
+        emit('connect');
+      } else if (state !== 'connected' && wasConnected) {
+        connected = false;
+        emit('disconnect');
+        /* If we were mid-flight, fire crash same as WS path. */
+        if (inFlight && (lastState.alt || 0) > 100 && !(lastState.onGround)) {
+          emit('crash', {
+            fno: AIVA._activeFlight?.fno,
+            lastPos: lastState.lat && lastState.lon ? `${lastState.lat.toFixed(4)}, ${lastState.lon.toFixed(4)}` : '',
+            altAtLoss: lastState.alt,
+            gsAtLoss: lastState.gs,
+            ts: Date.now(),
+          });
+          inFlight = false;
+        }
+      }
+    });
+    sc.onTelemetry((t) => {
+      /* SimConnect frame → reuse the existing per-frame logic, which
+         drives state/descent10k/landing detection. Field names already
+         match (lat, lon, alt, ias, gs, vs, hdg, onGround, fuel). */
+      handleFrame(t);
+    });
+    /* Pull the current state once at boot in case main process is
+       already connected to MSFS. */
+    sc.getState().then(state => {
+      if (state === 'connected' && !connected) {
+        connected = true;
+        emit('connect');
+      }
+    }).catch(() => {});
+  } else {
+    /* Browser / no-desktop fallback — WebSocket auto-detect. */
+    setTimeout(startAutoDetect, 200);
+  }
 
   /* Public surface */
   return {
@@ -195,6 +248,7 @@ AIVA.FSUIPC = (() => {
     state: () => lastState,
     /* Alias used by the EFB progress ribbon and portal dashboard */
     lastTelemetry: () => connected ? lastState : null,
+    source: () => simSource,
     resetSector,
     startAutoDetect, stopAutoDetect,
     /* For UI debugging / manual triggers */

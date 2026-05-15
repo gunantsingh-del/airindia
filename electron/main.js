@@ -23,6 +23,7 @@
 
 const { app, BrowserWindow, Menu, Tray, shell, ipcMain, Notification, nativeImage } = require('electron');
 const path = require('path');
+const SimBridge = require('./simconnect-bridge');
 
 const APP_URL = process.env.AIVA_URL || 'https://airindiavirtual.online/';
 
@@ -33,6 +34,7 @@ if (!gotLock) { app.quit(); process.exit(0); }
 let mainWin   = null;
 let tray      = null;
 let quitting  = false;     // distinguish "X close" (minimise) from real quit
+let simBridge = null;      // SimConnect bridge — direct talk to MSFS
 
 const ICON_PATH = path.join(__dirname, '..', 'assets', 'img',
   process.platform === 'win32' ? 'icon.ico' : 'icon.png');
@@ -165,7 +167,49 @@ function createTray() {
   }
 }
 
+/* ============ SimConnect bridge ============
+   Starts after the main window is created. The bridge owns the
+   SimConnect named-pipe connection in the main process and forwards
+   telemetry + state to the renderer over IPC. No second app, no
+   FSUIPC bridge, no port-2048 dance — MSFS exposes SimConnect itself. */
+function startSimBridge() {
+  if (simBridge) return;
+  try {
+    simBridge = new SimBridge();
+    simBridge.on('state', (state) => {
+      mainWin?.webContents?.send('aiva:sim-state', state);
+      if (tray) {
+        const labels = { connected: 'MSFS connected', searching: 'Looking for MSFS…', unavailable: 'SimConnect unavailable' };
+        tray.setToolTip(`AIVA · ${labels[state] || state}`);
+      }
+      if (state === 'connected') {
+        notifySafe('AIVA · Connected to MSFS', 'Telemetry streaming. Start Flight when ready.');
+      }
+    });
+    simBridge.on('telemetry', (t) => {
+      mainWin?.webContents?.send('aiva:sim-telemetry', t);
+    });
+    simBridge.start();
+  } catch (err) {
+    console.warn('[AIVA] SimBridge init failed:', err?.message);
+    simBridge = null;
+  }
+}
+function notifySafe(title, body) {
+  try {
+    if (!Notification.isSupported()) return;
+    /* Only fire when window isn't focused to avoid double-notifying. */
+    if (mainWin?.isFocused()) return;
+    const n = new Notification({ title, body, icon: ICON_PATH });
+    n.on('click', () => { mainWin?.show(); mainWin?.focus(); });
+    n.show();
+  } catch {}
+}
+
 /* ============ IPC handlers used by the renderer ============ */
+ipcMain.handle('aiva:sim-state', () => simBridge?.getState() || 'unavailable');
+ipcMain.handle('aiva:sim-last',  () => simBridge?.getLast()  || null);
+
 ipcMain.handle('aiva:notify', (_e, payload) => {
   try {
     if (!Notification.isSupported()) return false;
@@ -258,6 +302,7 @@ app.whenReady().then(() => {
 
   createWindow();
   createTray();
+  startSimBridge();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

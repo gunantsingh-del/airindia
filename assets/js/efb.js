@@ -1657,7 +1657,12 @@
       const fp = P.get('flight_in_progress');
       const me = AIVA.Auth.currentPilot?.();
       const isAdmin = me?.role === 'admin';
-      c.appendChild(el('div', { class:'embed-bar', html:`<span class="dot" id="fsDot"></span> Sim connection <span class="right"><span class="fsuipc-status off" id="fsStatus">NOT CONNECTED</span></span>` }));
+      /* "Direct" mode = we're inside the AIVA .exe and SimConnect is
+         available, talking to MSFS straight through Microsoft's SDK.
+         No FSUIPC bridge utility, no port-2048. Pilot only needs MSFS
+         running. Anything else = legacy WebSocket-FSUIPC path. */
+      const directMode = !!window.AIVA_DESKTOP?.simConnect;
+      c.appendChild(el('div', { class:'embed-bar', html:`<span class="dot" id="fsDot"></span> Sim connection <span class="text-mute mono" style="font-size:10px;margin-left:8px;">${directMode ? 'NATIVE · SIMCONNECT' : 'WEBSOCKET'}</span> <span class="right"><span class="fsuipc-status off" id="fsStatus">NOT CONNECTED</span></span>` }));
       const card = el('div', { class:'efb-card fsuipc-card' });
       card.innerHTML = `
         <div class="row between" style="align-items:flex-start;gap:18px;flex-wrap:wrap;">
@@ -1665,7 +1670,9 @@
             <div class="eyebrow">Sim connection</div>
             <h3 class="display mt-2" style="font-size:22px;" id="fsHeadline">${fp ? (AIVA.findFlight(fp.fno)?.fno || 'Flight') + ' tracking' : 'Looking for your sim…'}</h3>
             <div class="text-mute" style="font-size:13px;line-height:1.55;margin-top:8px;" id="fsHint">
-              AIVA looks for MSFS every few seconds. Start your sim and the bridge and we'll pick it up automatically.
+              ${directMode
+                ? 'AIVA talks to MSFS directly through SimConnect. Just start the sim and we\'ll find it.'
+                : 'AIVA looks for MSFS every few seconds. Start your sim and the bridge and we\'ll pick it up automatically.'}
             </div>
           </div>
           <div class="row gap-2" style="flex-wrap:wrap;">
@@ -1673,40 +1680,62 @@
             <button class="btn btn-ghost btn-sm" id="fsHelp">${I('book',14)} Setup help</button>
             <button class="btn btn-ghost btn-sm" id="fsStart" disabled title="Connect to the sim first">▶ Start Flight</button>
             <button class="btn btn-ghost btn-sm" id="fsEnd" ${fp ? '' : 'disabled'}>${I('close',14)} End Flight</button>
-            ${isAdmin ? `<button class="btn btn-ghost btn-sm" id="fsDiag" title="Admin: technical connection diagnostic">${I('search',14)} Tech check</button>` : ''}
+            ${isAdmin && !directMode ? `<button class="btn btn-ghost btn-sm" id="fsDiag" title="Admin: technical connection diagnostic">${I('search',14)} Tech check</button>` : ''}
           </div>
         </div>
 
-        <!-- Pilot-friendly setup steps. Three plain-English steps; no
-             ports, no URLs, no Mixed-Content jargon. The "Tech check"
-             button (admin-only) holds all the protocol detail. -->
-        <div id="fsSetupSteps" class="mt-4">
-          <div class="fs-step" data-step="1">
-            <span class="fs-step-num">1</span>
-            <div>
-              <div class="fs-step-title">Start Microsoft Flight Simulator</div>
-              <div class="fs-step-sub">Load any aircraft to the gate or runway. AIVA will pick it up automatically.</div>
+        ${directMode ? `
+          <!-- Direct SimConnect mode: pilots only need to start MSFS.
+               No second app, no port, no setup. -->
+          <div id="fsSetupSteps" class="mt-4">
+            <div class="fs-step" data-step="1">
+              <span class="fs-step-num">1</span>
+              <div>
+                <div class="fs-step-title">Start Microsoft Flight Simulator</div>
+                <div class="fs-step-sub">Load any aircraft to the gate or runway. AIVA connects via SimConnect automatically — no extra utility needed.</div>
+              </div>
+              <span class="fs-step-pill" id="fsStep1Pill">LOOKING…</span>
             </div>
-            <span class="fs-step-pill" id="fsStep1Pill">CHECKING…</span>
-          </div>
-          <div class="fs-step" data-step="2">
-            <span class="fs-step-num">2</span>
-            <div>
-              <div class="fs-step-title">Start the FSUIPC bridge</div>
-              <div class="fs-step-sub">Open <b>FSUIPC WebSockets Server</b> and click <b>Start</b>. Only needed once — leave it running.</div>
-              <div class="fs-step-sub" style="margin-top:4px;"><a href="https://www.fsuipc.com/" target="_blank" rel="noopener" class="text-gold">Download FSUIPC WebSockets Server (free)</a></div>
+            <div class="fs-step" data-step="3">
+              <span class="fs-step-num">2</span>
+              <div>
+                <div class="fs-step-title">Fly</div>
+                <div class="fs-step-sub">The badge turns green within a couple of seconds of MSFS being ready. Press Start Flight to log this sector.</div>
+              </div>
+              <span class="fs-step-pill" id="fsStep3Pill">WAITING</span>
             </div>
-            <span class="fs-step-pill" id="fsStep2Pill">CHECKING…</span>
           </div>
-          <div class="fs-step" data-step="3">
-            <span class="fs-step-num">3</span>
-            <div>
-              <div class="fs-step-title">Fly</div>
-              <div class="fs-step-sub">When the badge turns green you can press Start Flight. Telemetry below goes live.</div>
+        ` : `
+          <!-- WebSocket fallback (browser users or older .exe builds). -->
+          <div id="fsSetupSteps" class="mt-4">
+            <div class="fs-step" data-step="1">
+              <span class="fs-step-num">1</span>
+              <div>
+                <div class="fs-step-title">Start Microsoft Flight Simulator</div>
+                <div class="fs-step-sub">Load any aircraft to the gate or runway. AIVA will pick it up automatically.</div>
+              </div>
+              <span class="fs-step-pill" id="fsStep1Pill">CHECKING…</span>
             </div>
-            <span class="fs-step-pill" id="fsStep3Pill">WAITING</span>
+            <div class="fs-step" data-step="2">
+              <span class="fs-step-num">2</span>
+              <div>
+                <div class="fs-step-title">Start the FSUIPC bridge</div>
+                <div class="fs-step-sub">Open <b>FSUIPC WebSockets Server</b> and click <b>Start</b>. Only needed once — leave it running.</div>
+                <div class="fs-step-sub" style="margin-top:4px;"><a href="https://www.fsuipc.com/" target="_blank" rel="noopener" class="text-gold">Download FSUIPC WebSockets Server (free)</a></div>
+                <div class="fs-step-sub" style="margin-top:6px;color:rgba(255,225,89,.7);">Tip: install the AIVA desktop app from <a href="/install" class="text-gold">airindiavirtual.online/install</a> to skip this step entirely — it talks to MSFS directly.</div>
+              </div>
+              <span class="fs-step-pill" id="fsStep2Pill">CHECKING…</span>
+            </div>
+            <div class="fs-step" data-step="3">
+              <span class="fs-step-num">3</span>
+              <div>
+                <div class="fs-step-title">Fly</div>
+                <div class="fs-step-sub">When the badge turns green you can press Start Flight. Telemetry below goes live.</div>
+              </div>
+              <span class="fs-step-pill" id="fsStep3Pill">WAITING</span>
+            </div>
           </div>
-        </div>
+        `}
 
         ${isAdmin ? `
           <div id="fsDiagPanel" hidden style="margin-top:14px;padding:14px 16px;border:1px solid rgba(255,225,89,.32);border-radius:12px;background:rgba(255,225,89,.04);">
@@ -1770,33 +1799,45 @@
         document.head.appendChild(s);
       }
 
-      /* Plain-English setup-help modal. No URLs, no ports — just the
-         three things a pilot has to do. */
+      /* Plain-English setup-help modal. Content depends on whether
+         we're on the direct SimConnect path (.exe) or the WebSocket
+         fallback (browser). */
       $('#fsHelp', c).addEventListener('click', () => {
         modal({
           title: 'How to connect AIVA to your sim',
           width: '540px',
           body: (() => {
             const body = el('div');
-            body.innerHTML = `
+            body.innerHTML = directMode ? `
+              <p style="font-size:13px;line-height:1.7;color:var(--text-dim);margin:0 0 14px;">
+                You're running the AIVA desktop app, which talks to Microsoft Flight Simulator <b>directly</b> through SimConnect — Microsoft's built-in API. No utilities, no setup.
+              </p>
+              <ol style="font-size:13.5px;line-height:1.8;padding-left:22px;color:var(--ai-cream);">
+                <li><b>Start MSFS</b> — load any aircraft, any airport, any sim version (2020 or 2024). That's it.</li>
+                <li><b>Open AIVA</b> — the sim badge turns green within a couple of seconds.</li>
+              </ol>
+              <p style="font-size:12.5px;line-height:1.6;color:var(--text-mute);margin:18px 0 0;">
+                If the badge stays red, MSFS isn't running yet, or it crashed. SimConnect re-attempts every 5 seconds in the background.
+              </p>
+            ` : `
               <p style="font-size:13px;line-height:1.7;color:var(--text-dim);margin:0 0 14px;">
                 AIVA reads your aircraft's position, altitude and speed in real time so we can log your flight. To do that, two things need to be running on your PC:
               </p>
               <ol style="font-size:13.5px;line-height:1.8;padding-left:22px;color:var(--ai-cream);">
-                <li>
-                  <b>Microsoft Flight Simulator</b> — load any aircraft.
-                </li>
-                <li>
-                  <b>FSUIPC WebSockets Server</b> — a tiny free utility that lets AIVA talk to MSFS.<br>
-                  <a href="https://www.fsuipc.com/" target="_blank" rel="noopener" class="text-gold" style="font-size:12.5px;">Download it from fsuipc.com</a> · open the app · click <b>Start</b> · leave it running.
-                </li>
+                <li><b>Microsoft Flight Simulator</b> — load any aircraft.</li>
+                <li><b>FSUIPC WebSockets Server</b> — a tiny free utility that lets the website talk to MSFS.<br>
+                  <a href="https://www.fsuipc.com/" target="_blank" rel="noopener" class="text-gold" style="font-size:12.5px;">Download it from fsuipc.com</a> · open the app · click <b>Start</b> · leave it running.</li>
               </ol>
               <p style="font-size:12.5px;line-height:1.6;color:var(--text-mute);margin:18px 0 0;">
-                The badge at the top of this card turns green within 5 seconds once both are running. You don't need to click anything — AIVA finds them on its own.
+                The badge at the top of this card turns green within 5 seconds once both are running.
               </p>
-              <p style="font-size:11.5px;line-height:1.6;color:var(--text-mute);margin:14px 0 0;font-style:italic;">
-                Coming soon: AIVA will talk to MSFS directly through Microsoft's built-in SimConnect API — no FSUIPC bridge needed. Until then, the utility above is the one moving part.
-              </p>
+              <div style="margin-top:18px;padding:12px 14px;background:rgba(255,225,89,.06);border:1px solid rgba(255,225,89,.32);border-radius:10px;">
+                <b style="color:#FFE9A8;font-size:12.5px;">Skip the bridge entirely</b><br>
+                <span style="font-size:12px;color:var(--text-dim);line-height:1.5;">
+                  Install the AIVA desktop app from
+                  <a href="/install" class="text-gold">airindiavirtual.online/install</a> — it talks to MSFS directly via SimConnect, no utility to install or run.
+                </span>
+              </div>
             `;
             return body;
           })(),

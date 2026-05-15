@@ -39,6 +39,14 @@ AIVA.CrewChat = (() => {
   const MAX_KEEP   = 500;                  // hard cap so storage stays bounded
   const ONLINE_MS  = 5 * 60 * 1000;        // 5 minutes counts as "online"
   const CH_NAME    = 'aiva-crew-chat';
+  /* Sliding-window retention: messages older than 2 h auto-disappear
+     on every read so the chat stays as a live ops feed, not a log
+     book. Quick-react chatter, no permanent record. */
+  const RETENTION_MS = 2 * 60 * 60 * 1000;
+  /* Emoji palette for one-tap reactions — fits in the action overlay
+     without scrolling. Pilots can tap the same emoji again to remove
+     their own reaction. */
+  const REACTIONS = ['👍','❤️','😂','🔥','✈️','🙌'];
 
   /* ============ ntfy.sh realtime relay ============
      Default topic is unguessable but hardcoded so all 14 pilots land on
@@ -80,15 +88,38 @@ AIVA.CrewChat = (() => {
   const listeners = [];
 
   /* ============ storage helpers ============ */
+  function purgeOld(arr) {
+    const cutoff = Date.now() - RETENTION_MS;
+    return arr.filter(m => (m.ts || 0) >= cutoff);
+  }
   function readLog() {
-    try { return JSON.parse(localStorage.getItem(KEY) || '[]'); }
-    catch { return []; }
+    try {
+      const raw = JSON.parse(localStorage.getItem(KEY) || '[]');
+      const kept = purgeOld(raw);
+      if (kept.length !== raw.length) {
+        try { localStorage.setItem(KEY, JSON.stringify(kept)); } catch {}
+      }
+      return kept;
+    } catch { return []; }
   }
   function writeLog(arr) {
-    /* Cap the log to MAX_KEEP entries — drop oldest */
-    const capped = arr.length > MAX_KEEP ? arr.slice(arr.length - MAX_KEEP) : arr;
-    try { localStorage.setItem(KEY, JSON.stringify(capped)); } catch {}
+    /* Cap by retention window AND by MAX_KEEP — whichever is tighter */
+    let kept = purgeOld(arr);
+    if (kept.length > MAX_KEEP) kept = kept.slice(kept.length - MAX_KEEP);
+    try { localStorage.setItem(KEY, JSON.stringify(kept)); } catch {}
   }
+  /* Periodic purge tick so messages disappear in real time even if the
+     drawer is open and no new messages are arriving. */
+  setInterval(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(KEY) || '[]');
+      const kept = purgeOld(raw);
+      if (kept.length !== raw.length) {
+        localStorage.setItem(KEY, JSON.stringify(kept));
+        listeners.forEach(cb => { try { cb(null, kept); } catch(_){} });
+      }
+    } catch {}
+  }, 5 * 60 * 1000);
   function readPresence() {
     try { return JSON.parse(localStorage.getItem(PRESENCE) || '{}'); }
     catch { return {}; }
@@ -148,8 +179,9 @@ AIVA.CrewChat = (() => {
       relaySource.onerror = () => {
         relayState = 'disconnected';
         notifyRelayStateChange();
-        /* auto-retry in 8s — public ntfy.sh occasionally bounces connections */
-        setTimeout(relayConnect, 8000);
+        /* Faster reconnect — 2 s. ntfy.sh bounces connections sometimes
+           but they come right back, so we shouldn't sit silent for 8 s. */
+        setTimeout(relayConnect, 2000);
       };
       relaySource.onmessage = (ev) => {
         try {
@@ -160,6 +192,13 @@ AIVA.CrewChat = (() => {
           if (!msg || !msg.id) return;
           if (seenIds.has(msg.id)) return;                       // own echo / dedup
           rememberSeen(msg.id);
+          /* Reaction events don't add a log entry of their own — they
+             mutate an existing message's reactions map. */
+          if (msg.type === 'reaction') {
+            applyRemoteReaction(msg);
+            if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
+            return;
+          }
           /* Insert into local log if it's not already there, then notify UI */
           const log = readLog();
           if (!log.find(x => x.id === msg.id)) {
@@ -193,14 +232,68 @@ AIVA.CrewChat = (() => {
     relayPublish(msg);
     return msg;
   }
-  function send(text) {
+  function send(text, opts = {}) {
     const p = pilot();
     if (!p) return null;
     const txt = (text || '').trim();
     if (!txt) return null;
     return push({
       type: 'msg', pilotId: p.id, pilotName: p.name, rank: p.rank, text: txt,
+      to:      opts.to      || null,        // null = group, else target pilotId for DM
+      replyTo: opts.replyTo || null,        // optional message id this replies to
+      reactions: {},
     });
+  }
+
+  /* ============ reactions ============
+     Each reaction is a separate message of type 'reaction' so it
+     syncs over the same ntfy channel as everything else. Receivers
+     find the target message in their local log and toggle the
+     pilotId in/out of the emoji's reactor list. */
+  function react(targetId, emoji) {
+    const p = pilot();
+    if (!p || !targetId || !emoji) return;
+    const log = readLog();
+    const target = log.find(m => m.id === targetId);
+    if (!target) return;
+    target.reactions = target.reactions || {};
+    const list = (target.reactions[emoji] || []).filter(Boolean);
+    const idx = list.indexOf(p.id);
+    let add;
+    if (idx >= 0) { list.splice(idx, 1); add = false; }
+    else { list.push(p.id); add = true; }
+    if (list.length) target.reactions[emoji] = list;
+    else delete target.reactions[emoji];
+    writeLog(log);
+    /* Cross-tab + cross-device fan-out via a reaction event */
+    const reactionMsg = {
+      id: (Date.now().toString(36) + Math.random().toString(36).slice(2,6)),
+      ts: Date.now(),
+      type: 'reaction',
+      pilotId: p.id,
+      targetId, emoji, add,
+    };
+    rememberSeen(reactionMsg.id);
+    if (channel) { try { channel.postMessage({ kind: 'msg', msg: reactionMsg }); } catch {} }
+    relayPublish(reactionMsg);
+    listeners.forEach(cb => { try { cb(target, log); } catch(_){} });
+  }
+  /* Apply an incoming reaction event (from another browser/device) to
+     the local log. Symmetric with react() above, but driven by
+     remote state instead of the local pilot's tap. */
+  function applyRemoteReaction(rmsg) {
+    const log = readLog();
+    const target = log.find(m => m.id === rmsg.targetId);
+    if (!target) return;
+    target.reactions = target.reactions || {};
+    const list = (target.reactions[rmsg.emoji] || []).filter(Boolean);
+    const idx = list.indexOf(rmsg.pilotId);
+    if (rmsg.add && idx === -1) list.push(rmsg.pilotId);
+    if (!rmsg.add && idx >= 0)  list.splice(idx, 1);
+    if (list.length) target.reactions[rmsg.emoji] = list;
+    else delete target.reactions[rmsg.emoji];
+    writeLog(log);
+    listeners.forEach(cb => { try { cb(target, log); } catch(_){} });
   }
   function event(text, meta = {}) {
     const p = pilot();
@@ -227,7 +320,14 @@ AIVA.CrewChat = (() => {
   /* React to messages from OTHER tabs */
   if (channel) channel.onmessage = (e) => {
     if (e.data?.kind === 'msg') {
-      listeners.forEach(cb => { try { cb(e.data.msg, readLog()); } catch(_){} });
+      const m = e.data.msg;
+      /* Reaction events from another tab mutate state same as ntfy ones. */
+      if (m && m.type === 'reaction' && !seenIds.has(m.id)) {
+        rememberSeen(m.id);
+        applyRemoteReaction(m);
+        return;
+      }
+      listeners.forEach(cb => { try { cb(m, readLog()); } catch(_){} });
     } else if (e.data?.kind === 'wiped') {
       listeners.forEach(cb => { try { cb(null, []); } catch(_){} });
     }
@@ -243,6 +343,83 @@ AIVA.CrewChat = (() => {
 
   /* ============ UI WIDGET ============ */
   let host = null, root = null, drawer = null, mounted = false, lastUnread = 0;
+  /* Active channel: 'crew' for the group room, else a pilotId for a
+     1:1 DM thread. Persisted across drawer toggles so coming back to
+     the chat lands on the conversation you were in. */
+  let activeChannel = 'crew';
+  /* Message ID being replied to, if any — drives the reply preview
+     bar above the input and the replyTo field on send. */
+  let replyingTo = null;
+
+  /* Visibility filter: which messages belong to the current channel? */
+  function isInChannel(m, myId) {
+    if (!m) return false;
+    if (m.type === 'reaction') return false;       // reactions aren't rendered as separate items
+    if (activeChannel === 'crew') return !m.to;    // group room → only un-targeted msgs
+    /* DM: show messages where (I sent to them) OR (they sent to me) */
+    return (m.pilotId === myId && m.to === activeChannel)
+        || (m.pilotId === activeChannel && m.to === myId);
+  }
+
+  function renderChannels() {
+    const host = root?.querySelector('#ccChannels'); if (!host) return;
+    const me = pilot(); if (!me) { host.innerHTML = ''; return; }
+    const all = AIVA.Auth?.allPilots?.() || [];
+    const log = readLog();
+    /* Build the DM list from EVERY pilot we've exchanged a DM with,
+       most-recent first. Always show the group "Crew" channel. */
+    const dmIds = new Set();
+    for (const m of log) {
+      if (!m || m.type === 'reaction' || !m.to) continue;
+      if (m.pilotId === me.id) dmIds.add(m.to);
+      else if (m.to === me.id) dmIds.add(m.pilotId);
+    }
+    /* If we're currently in a DM that has no messages yet (just clicked
+       a pilot in the roster), keep the chip visible. */
+    if (activeChannel !== 'crew') dmIds.add(activeChannel);
+    const dmList = [...dmIds]
+      .map(id => ({ id, p: all.find(x => x.id === id) }))
+      .filter(x => x.p)
+      .sort((a, b) => a.p.name.localeCompare(b.p.name));
+
+    host.innerHTML = `
+      <button class="cc-chan ${activeChannel === 'crew' ? 'on' : ''}" data-cc-dm="crew">CREW</button>
+      ${dmList.map(({ id, p }) => {
+        const pic = avatarFor(id);
+        const avHtml = pic
+          ? `<span class="cc-chan-pic"><img src="${pic}" alt=""></span>`
+          : `<span class="cc-chan-pic"><span class="cc-chan-init">${initialsFor(p.name)}</span></span>`;
+        return `<button class="cc-chan ${activeChannel === id ? 'on' : ''}" data-cc-dm="${id}" title="DM ${p.name}">${avHtml}${p.name.split(' ')[0]}</button>`;
+      }).join('')}
+    `;
+    /* Title reflects the current channel */
+    const title = root.querySelector('#ccTitle');
+    if (title) title.textContent = activeChannel === 'crew'
+      ? 'Crew Chat'
+      : `DM · ${(all.find(p => p.id === activeChannel)?.name) || activeChannel}`;
+    /* Input placeholder reflects too */
+    const inp = root.querySelector('#ccInput');
+    if (inp) inp.placeholder = activeChannel === 'crew'
+      ? 'Message the crew…'
+      : `Message ${(all.find(p => p.id === activeChannel)?.name?.split(' ')[0]) || 'crew'}…`;
+  }
+
+  function renderReplyBar() {
+    const bar = root?.querySelector('#ccReplyBar');
+    if (!bar) return;
+    if (!replyingTo) { bar.hidden = true; bar.innerHTML = ''; return; }
+    const target = readLog().find(m => m.id === replyingTo);
+    if (!target) { replyingTo = null; bar.hidden = true; bar.innerHTML = ''; return; }
+    bar.hidden = false;
+    bar.innerHTML = `
+      <div class="cc-reply-strip">
+        <div class="cc-reply-meta">↳ Replying to <b>${escapeHTML(target.pilotName || 'crew')}</b></div>
+        <div class="cc-reply-text">${escapeHTML((target.text || '').slice(0, 120))}${(target.text || '').length > 120 ? '…' : ''}</div>
+      </div>
+      <button class="cc-reply-x" id="ccReplyCancel" aria-label="Cancel reply">✕</button>
+    `;
+    bar.querySelector('#ccReplyCancel').onclick = () => { replyingTo = null; renderReplyBar(); };
+  }
   function mount(parent, opts = {}) {
     if (mounted) return root;
     parent = parent || document.body;
@@ -261,8 +438,8 @@ AIVA.CrewChat = (() => {
       </button>
       <aside class="cc-drawer" id="ccDrawer" hidden>
         <header class="cc-head">
-          <div>
-            <div class="cc-title">Crew Chat</div>
+          <div class="cc-head-title">
+            <div class="cc-title" id="ccTitle">Crew Chat</div>
             <div class="cc-sub" id="ccPresence">— online</div>
           </div>
           <div class="cc-actions">
@@ -270,8 +447,10 @@ AIVA.CrewChat = (() => {
             <button class="cc-icon" id="ccClose" aria-label="Close">✕</button>
           </div>
         </header>
+        <section class="cc-channels" id="ccChannels"></section>
         <section class="cc-roster" id="ccRosterPanel" hidden></section>
         <section class="cc-body" id="ccBody"></section>
+        <section class="cc-reply-bar" id="ccReplyBar" hidden></section>
         <form class="cc-form" id="ccForm">
           <input id="ccInput" class="cc-input" placeholder="Message the crew…" autocomplete="off" maxlength="500">
           <button class="cc-send" type="submit" aria-label="Send">→</button>
@@ -303,17 +482,64 @@ AIVA.CrewChat = (() => {
     root.querySelector('#ccForm').addEventListener('submit', (e) => {
       e.preventDefault();
       const inp = root.querySelector('#ccInput');
-      if (inp.value.trim()) { send(inp.value); inp.value = ''; }
+      const txt = inp.value.trim();
+      if (!txt) return;
+      /* If we're in a DM channel, attach the recipient. If there's an
+         active replyTo, include it. Both fields are optional in send(). */
+      send(txt, {
+        to:      activeChannel === 'crew' ? null : activeChannel,
+        replyTo: replyingTo || null,
+      });
+      inp.value = '';
+      replyingTo = null;
+      renderReplyBar();
+    });
+
+    /* Click ANYWHERE inside the chat body to trigger action overlay
+       interactions (reaction picker, reply, DM-to-author). We use
+       event delegation so message-specific click handlers don't have
+       to be re-attached on every renderAll. */
+    root.querySelector('#ccBody').addEventListener('click', (e) => {
+      const reactBtn = e.target.closest('[data-cc-react]');
+      if (reactBtn) {
+        const msgEl = reactBtn.closest('[data-cc-id]');
+        const id = msgEl?.dataset.ccId;
+        const emoji = reactBtn.dataset.ccReact;
+        if (id && emoji) react(id, emoji);
+        return;
+      }
+      const replyBtn = e.target.closest('[data-cc-reply]');
+      if (replyBtn) {
+        replyingTo = replyBtn.dataset.ccReply;
+        renderReplyBar();
+        root.querySelector('#ccInput')?.focus();
+        return;
+      }
+      const dmBtn = e.target.closest('[data-cc-dm]');
+      if (dmBtn) {
+        activeChannel = dmBtn.dataset.ccDm;
+        renderChannels();
+        renderAll();
+        scrollBottom();
+      }
     });
 
     /* Initial render + live updates */
+    renderChannels();
     renderAll();
+    renderReplyBar();
     updatePresence();
     onMessage((msg) => {
+      renderChannels();
       renderAll();
-      if (drawer.hidden && msg && msg.pilotId !== pilot()?.id) {
-        lastUnread++;
-        updateBadge();
+      /* Unread badge fires only for messages a) addressed to me or to
+         the crew, b) not from me, c) when drawer is closed. */
+      const me = pilot()?.id;
+      if (drawer.hidden && msg && msg.pilotId !== me) {
+        const visible = msg.type === 'reaction'
+          ? false                                          // reactions don't badge
+          : (!msg.to || msg.to === me);
+        if (visible) { lastUnread++; updateBadge(); }
       }
     });
     /* Re-render presence row whenever the ntfy relay state flips so
@@ -349,6 +575,7 @@ AIVA.CrewChat = (() => {
     if (!r) return;
     const all = AIVA.Auth?.allPilots?.() || [];
     const ids = new Set(online());
+    const me = pilot()?.id;
     r.innerHTML = `
       <div class="cc-roster-list">
         ${all.map(p => {
@@ -356,8 +583,10 @@ AIVA.CrewChat = (() => {
           const avatarHtml = pic
             ? `<span class="cc-roster-avatar"><img src="${pic}" alt=""></span>`
             : `<span class="cc-roster-avatar"><span class="cc-roster-initials">${initialsFor(p.name)}</span></span>`;
+          /* Click whole row → open DM with that pilot (skip self). */
+          const dmAttr = p.id === me ? '' : `data-cc-dm="${p.id}"`;
           return `
-            <div class="cc-roster-row ${ids.has(p.id) ? 'on' : ''}">
+            <div class="cc-roster-row ${ids.has(p.id) ? 'on' : ''}" ${dmAttr} ${dmAttr ? 'style="cursor:pointer;"' : ''}>
               <span class="cc-dot ${ids.has(p.id) ? 'on' : ''}"></span>
               ${avatarHtml}
               <span class="cc-roster-name">${p.name}</span>
@@ -367,12 +596,27 @@ AIVA.CrewChat = (() => {
         }).join('')}
       </div>
     `;
+    /* Wire the row clicks through to the same delegate that the body
+       uses — but the roster lives outside #ccBody so we attach here. */
+    r.querySelectorAll('[data-cc-dm]').forEach(row => {
+      row.addEventListener('click', () => {
+        activeChannel = row.dataset.ccDm;
+        replyingTo = null;
+        renderChannels();
+        renderAll();
+        renderReplyBar();
+        scrollBottom();
+        /* Auto-close the roster panel after picking a DM target */
+        r.hidden = true;
+      });
+    });
   }
   function renderAll() {
     const body = root?.querySelector('#ccBody'); if (!body) return;
-    const log = readLog().slice(-200);
     const me  = pilot()?.id;
-    body.innerHTML = log.length ? log.map(m => msgHTML(m, me)).join('') : `
+    const full = readLog();
+    const log = full.filter(m => isInChannel(m, me)).slice(-200);
+    body.innerHTML = log.length ? log.map(m => msgHTML(m, me, full)).join('') : `
       <div class="cc-empty">
         <div class="cc-empty-icon">⊝</div>
         <div class="cc-empty-text">No chatter yet. Be the first to greet the crew.</div>
@@ -380,7 +624,7 @@ AIVA.CrewChat = (() => {
     `;
     scrollBottom();
   }
-  function msgHTML(m, me) {
+  function msgHTML(m, me, fullLog) {
     const time = new Date(m.ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
     if (m.type === 'event') {
       return `
@@ -393,24 +637,59 @@ AIVA.CrewChat = (() => {
     }
     const own = m.pilotId === me;
     const pic = avatarFor(m.pilotId);
-    const avatarHtml = !own ? (pic
-      ? `<span class="cc-msg-avatar"><img src="${pic}" alt=""></span>`
-      : `<span class="cc-msg-avatar"><span class="cc-msg-initials">${initialsFor(m.pilotName)}</span></span>`)
-      : '';
+    const avatarHtml = pic
+      ? `<span class="cc-msg-avatar" data-cc-dm="${m.pilotId}" title="DM ${escapeHTML(m.pilotName)}"><img src="${pic}" alt=""></span>`
+      : `<span class="cc-msg-avatar" data-cc-dm="${m.pilotId}" title="DM ${escapeHTML(m.pilotName)}"><span class="cc-msg-initials">${initialsFor(m.pilotName)}</span></span>`;
+
+    /* Quoted preview when this message is a reply */
+    let replyQuote = '';
+    if (m.replyTo && fullLog) {
+      const t = fullLog.find(x => x.id === m.replyTo);
+      if (t) {
+        replyQuote = `
+          <div class="cc-reply-quote">
+            <span class="cc-reply-q-name">${escapeHTML(t.pilotName || 'crew')}</span>
+            <span class="cc-reply-q-text">${escapeHTML((t.text || '').slice(0, 120))}${(t.text || '').length > 120 ? '…' : ''}</span>
+          </div>`;
+      }
+    }
+
+    /* Reaction chips (aggregated). Click to toggle your own. */
+    const rmap = m.reactions || {};
+    const rChips = Object.entries(rmap)
+      .filter(([_, ids]) => Array.isArray(ids) && ids.length)
+      .map(([emoji, ids]) => {
+        const mine = ids.includes(me);
+        return `<button class="cc-react-chip ${mine ? 'mine' : ''}" data-cc-react="${emoji}" data-cc-id="${m.id}">
+          <span class="cc-react-emo">${emoji}</span><span class="cc-react-n">${ids.length}</span>
+        </button>`;
+      }).join('');
+    const reactionsRow = rChips ? `<div class="cc-reactions">${rChips}</div>` : '';
+
+    /* Action overlay — emoji palette + reply button. Hover/tap reveals. */
+    const actions = `
+      <div class="cc-actions-overlay">
+        ${REACTIONS.map(e => `<button class="cc-act-react" data-cc-react="${e}" title="React ${e}">${e}</button>`).join('')}
+        <button class="cc-act-reply" data-cc-reply="${m.id}" title="Reply">↩</button>
+      </div>
+    `;
+
+    /* DM badge if this message has a `to` field */
+    const dmBadge = m.to ? `<span class="cc-dm-badge">DM</span>` : '';
+
     return `
-      <div class="cc-msg ${own ? 'own' : ''}">
-        ${!own ? `
-          <div class="cc-msg-row">
-            ${avatarHtml}
-            <div class="cc-msg-col">
-              <div class="cc-msg-head"><b>${escapeHTML(m.pilotName)}</b> <span class="cc-msg-rank">${escapeHTML(m.rank || '')}</span> <span class="cc-msg-time">${time}</span></div>
-              <div class="cc-msg-bubble">${escapeHTML(m.text)}</div>
-            </div>
+      <div class="cc-msg ${own ? 'own' : ''}" data-cc-id="${m.id}">
+        <div class="cc-msg-row">
+          ${!own ? avatarHtml : ''}
+          <div class="cc-msg-col">
+            ${!own ? `<div class="cc-msg-head"><b data-cc-dm="${m.pilotId}">${escapeHTML(m.pilotName)}</b> <span class="cc-msg-rank">${escapeHTML(m.rank || '')}</span> ${dmBadge} <span class="cc-msg-time">${time}</span></div>` : ''}
+            ${replyQuote}
+            <div class="cc-msg-bubble">${escapeHTML(m.text)}</div>
+            ${own ? `<div class="cc-msg-time own">${dmBadge} ${time}</div>` : ''}
+            ${reactionsRow}
+            ${actions}
           </div>
-        ` : `
-          <div class="cc-msg-bubble">${escapeHTML(m.text)}</div>
-          <div class="cc-msg-time own">${time}</div>
-        `}
+        </div>
       </div>
     `;
   }
@@ -590,6 +869,119 @@ AIVA.CrewChat = (() => {
       .cc-event-text b { color: var(--ai-gold-bright, #FFE159); font-weight: 600; }
       .cc-event-time { font-family: var(--font-mono); font-size: 9.5px; opacity: .6; }
 
+      /* ===== Channel switcher (Crew + DMs) ===== */
+      .cc-channels {
+        display: flex; gap: 6px; padding: 8px 14px;
+        overflow-x: auto; flex-wrap: nowrap;
+        border-bottom: 1px solid rgba(255,255,255,.05);
+        scrollbar-width: thin;
+      }
+      .cc-chan {
+        display: inline-flex; align-items: center; gap: 6px;
+        background: rgba(255,255,255,.05);
+        border: 1px solid rgba(255,255,255,.06);
+        color: rgba(248,241,228,.7);
+        padding: 5px 11px;
+        border-radius: 99px;
+        font-family: var(--font-display); font-size: 11.5px; font-weight: 600;
+        letter-spacing: .04em;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background .15s ease, color .15s ease, border-color .15s ease;
+      }
+      .cc-chan.on {
+        background: rgba(255,225,89,.12);
+        border-color: rgba(255,225,89,.42);
+        color: #FFE9A8;
+      }
+      .cc-chan:hover { background: rgba(255,225,89,.08); color: #F8F1E4; }
+      .cc-chan-pic { width: 18px; height: 18px; border-radius: 50%; overflow: hidden; background: linear-gradient(135deg,#DA192F,#4A1B41); display: grid; place-items: center; }
+      .cc-chan-pic img { width:100%; height:100%; object-fit:cover; display:block; }
+      .cc-chan-init { color:#fff; font-size:8.5px; font-weight:700; }
+
+      /* ===== Reactions ===== */
+      .cc-reactions {
+        display: flex; gap: 4px; flex-wrap: wrap; margin-top: 5px;
+      }
+      .cc-react-chip {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 3px 8px; border-radius: 99px;
+        background: rgba(255,255,255,.06);
+        border: 1px solid rgba(255,255,255,.08);
+        font-size: 11.5px; color: rgba(248,241,228,.8);
+        cursor: pointer; transition: all .15s ease;
+      }
+      .cc-react-chip:hover { background: rgba(255,225,89,.1); }
+      .cc-react-chip.mine {
+        background: rgba(255,225,89,.18);
+        border-color: rgba(255,225,89,.45);
+        color: #FFE9A8;
+      }
+      .cc-react-emo { font-size: 12.5px; line-height: 1; }
+      .cc-react-n { font-family: var(--font-mono); font-size: 10.5px; }
+
+      /* ===== Action overlay on hover ===== */
+      .cc-actions-overlay {
+        position: absolute;
+        top: -14px; right: 4px;
+        display: flex; gap: 2px;
+        background: rgba(20,8,12,.98);
+        border: 1px solid rgba(255,255,255,.1);
+        border-radius: 99px; padding: 2px 4px;
+        opacity: 0; pointer-events: none;
+        transition: opacity .12s ease;
+        box-shadow: 0 6px 18px rgba(0,0,0,.55);
+        z-index: 5;
+      }
+      .cc-msg { position: relative; }
+      .cc-msg:hover .cc-actions-overlay { opacity: 1; pointer-events: auto; }
+      .cc-act-react, .cc-act-reply {
+        background: none; border: 0; cursor: pointer;
+        font-size: 13.5px; line-height: 1;
+        padding: 4px 6px; border-radius: 50%;
+        color: rgba(248,241,228,.85);
+      }
+      .cc-act-react:hover, .cc-act-reply:hover { background: rgba(255,225,89,.14); }
+      .cc-act-reply { font-size: 12px; color: rgba(248,241,228,.6); }
+      /* Touch — show on tap (hover doesn't exist on touch) */
+      @media (hover: none) {
+        .cc-actions-overlay { opacity: 1; pointer-events: auto; }
+      }
+
+      /* ===== Reply quote in bubble + reply bar above input ===== */
+      .cc-reply-quote {
+        border-left: 2px solid rgba(255,225,89,.5);
+        padding: 4px 8px; margin-bottom: 6px;
+        background: rgba(255,225,89,.05);
+        border-radius: 0 8px 8px 0;
+        font-size: 11.5px; line-height: 1.4;
+        max-width: 80%;
+      }
+      .cc-reply-q-name { color: var(--ai-gold-bright,#FFE159); font-weight: 600; display: block; }
+      .cc-reply-q-text { color: rgba(248,241,228,.7); }
+
+      .cc-reply-bar {
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 14px;
+        border-top: 1px solid rgba(255,225,89,.22);
+        background: rgba(255,225,89,.05);
+      }
+      .cc-reply-strip { flex: 1; min-width: 0; }
+      .cc-reply-meta { font-size: 11px; color: rgba(248,241,228,.65); }
+      .cc-reply-meta b { color: var(--ai-gold-bright,#FFE159); }
+      .cc-reply-text { font-size: 12px; color: rgba(248,241,228,.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .cc-reply-x { background: none; border: 0; color: rgba(248,241,228,.6); font-size: 14px; cursor: pointer; }
+      .cc-reply-x:hover { color: #FFE9A8; }
+
+      /* DM badge */
+      .cc-dm-badge {
+        display: inline-block;
+        background: rgba(255,225,89,.18);
+        color: #FFE9A8;
+        font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .14em;
+        padding: 1px 5px; border-radius: 4px;
+      }
+
       .cc-form {
         display: flex; gap: 8px;
         padding: 12px 14px;
@@ -630,7 +1022,7 @@ AIVA.CrewChat = (() => {
   })();
 
   return {
-    mount, send, event, online, onMessage, clear,
+    mount, send, event, online, onMessage, clear, react,
     relayState: () => relayState,
     setTopic: (t) => {
       try { AIVA.Store.set('crew_chat_topic', t); } catch {}

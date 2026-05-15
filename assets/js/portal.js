@@ -4263,13 +4263,21 @@
                 </ol>
               </div>
 
-              <!-- PMDG -->
-              <div class="card mt-3" style="padding:14px 16px;">
-                <div class="display" style="font-size:14px;">PMDG 737 / 777 · MSFS</div>
-                <ol class="hop-steps" style="margin:10px 0 0;padding-left:22px;font-size:12.5px;line-height:1.7;color:var(--text-dim);">
-                  <li>PMDG doesn't ship native Hoppie. Use <b>SayIntentions</b>, <b>vPilot+CPDLC plugin</b>, or external <b>vACARS</b> / <b>VATSIM Hoppie bridge</b>. None are bundled with AIVA — AIVA's own ACARS panel (Hoppie tab here) keeps working regardless.</li>
-                  <li>If using vACARS: set <b>From callsign</b> to <code class="mono" style="background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;">${myCall}</code>, paste the logon code, and bind via SimConnect.</li>
+              <!-- PMDG 777 / 737 (native Hoppie since v3) -->
+              <div class="card mt-3" style="padding:14px 16px;background:rgba(255,225,89,.04);border-color:rgba(255,225,89,.22);">
+                <div class="row" style="gap:10px;align-items:center;">
+                  <span class="pill pill-gold" style="font-size:10px;">NATIVE</span>
+                  <div class="display" style="font-size:14px;">PMDG 777 · MSFS (v3+)</div>
+                </div>
+                <ol class="hop-steps" style="margin:12px 0 0;padding-left:22px;font-size:12.5px;line-height:1.75;color:var(--text-dim);">
+                  <li><b style="color:var(--ai-cream);">FMC → MENU → ACARS → MISC SETUP</b> → set <b>HOPPIE LOGON CODE</b> to your code: <code class="mono" style="background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;">${code ? '••••••' + code.slice(-4) : 'set one in Profile first'}</code>. <b>EXEC</b> to save.</li>
+                  <li><b style="color:var(--ai-cream);">FMC → INIT REF → IDENT or RTE 1</b> → set <b>FLT NO</b> / <b>CO ROUTE</b> to <code class="mono" style="background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;">${myCall}</code>. This is the callsign Hoppie routes to.</li>
+                  <li><b style="color:var(--ai-cream);">FMC → MENU → ACARS → AOC MENU</b> for company messages (pre-flight pack, weather, gate, etc.). <b>FMC → MENU → ACARS → ATC MENU</b> for CPDLC LOGON to a centre (e.g. <code class="mono" style="background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;">AICVA</code> dispatch or your VATSIM centre).</li>
+                  <li>PMDG polls Hoppie every ~60s. Hit <b>Self-ping</b> below to confirm wiring — the message should land in the CDU's AOC inbox within a minute.</li>
                 </ol>
+                <div class="text-mute mono" style="font-size:11px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+                  PMDG 737 v3 follows the same MISC SETUP path. PMDG 747 has the option under FMC → MENU → ACARS as well.
+                </div>
               </div>
 
               <!-- Troubleshooting -->
@@ -4293,20 +4301,34 @@
         /* ============ ADMIN VIEW ============ */
         if (viewMode === 'admin') {
           const sb_user = P.pref('simbrief_user','');
+          /* Pre-fill target form from the active flight if there is one.
+             Saves the admin (Gunant) typing his own callsign / route /
+             aircraft when he wants to fire a dispatch pack to himself
+             during a flight. */
+          const fpRecAdm   = P.get('flight_in_progress');
+          const activeAdmF = fpRecAdm ? AIVA.findFlight?.(fpRecAdm.fno) : null;
+          const todayBk    = (P.get('roster_bookings', []) || []).find(b => b.date === (new Date()).toISOString().slice(0,10));
+          const bookFl     = !activeAdmF && todayBk ? AIVA.findFlight?.(todayBk.fno) : null;
+          const seedFl     = activeAdmF || bookFl || null;
+          const seedCs     = (seedFl?.cs || '').toString().toUpperCase();
+          const seedOrig   = (AIVA.airport?.(seedFl?.from)?.icao || seedFl?.from || '').toUpperCase();
+          const seedDest   = (AIVA.airport?.(seedFl?.to  )?.icao || seedFl?.to   || '').toUpperCase();
+          const seedAc     = seedFl?.ac || '';
+          const seedPilot  = (pilot?.name || '').split(' ')[0] || '';
           c.appendChild(el('section', { html: `
             <div class="grid grid-2">
               <div class="card">
-                <div class="eyebrow">Target flight</div>
+                <div class="eyebrow">Target flight ${seedFl ? `<span class="pill pill-gold" style="font-size:9px;margin-left:8px;">${seedFl.fno} · pre-filled</span>` : ''}</div>
                 <div class="grid grid-2 mt-3" style="gap:10px;">
-                  <div><div class="label">Pilot callsign</div><input class="input mono" id="atgt" placeholder="AIC366"></div>
-                  <div><div class="label">Pilot first name (for goodbye)</div><input class="input" id="apilot" placeholder="Anvit"></div>
+                  <div><div class="label">Pilot callsign</div><input class="input mono" id="atgt" placeholder="AIC366" value="${seedCs}"></div>
+                  <div><div class="label">Pilot first name (for goodbye)</div><input class="input" id="apilot" placeholder="Anvit" value="${seedPilot}"></div>
                 </div>
                 <div class="grid grid-2 mt-3" style="gap:10px;">
-                  <div><div class="label">Origin ICAO</div><input class="input mono" id="aorig" placeholder="VIDP"></div>
-                  <div><div class="label">Destination ICAO</div><input class="input mono" id="adest" placeholder="VABB"></div>
+                  <div><div class="label">Origin ICAO</div><input class="input mono" id="aorig" placeholder="VIDP" value="${seedOrig}"></div>
+                  <div><div class="label">Destination ICAO</div><input class="input mono" id="adest" placeholder="VABB" value="${seedDest}"></div>
                 </div>
                 <div class="grid grid-2 mt-3" style="gap:10px;">
-                  <div><div class="label">Aircraft type</div><select class="input" id="aac">${AIVA.fleetTypes().map(t=>`<option value="${t}">${t} · ${AIVA.acTypeName(t)}</option>`).join('')}</select></div>
+                  <div><div class="label">Aircraft type</div><select class="input" id="aac">${AIVA.fleetTypes().map(t=>`<option value="${t}"${t===seedAc?' selected':''}>${t} · ${AIVA.acTypeName(t)}</option>`).join('')}</select></div>
                   <div><div class="label">SimBrief username</div><input class="input mono" id="asb" value="${sb_user}" placeholder="set in Profile"></div>
                 </div>
               </div>
@@ -4371,15 +4393,20 @@
           const setFB = (s) => fb.textContent = s;
 
           async function doPreflight() {
-            const to   = $('#atgt', c).value.trim().toUpperCase();
-            const sb   = $('#asb', c).value.trim();
-            if (!to || !sb) { setFB('Need pilot callsign + SimBrief username'); return; }
-            setFB('Fetching SimBrief OFP…');
+            /* Target defaults to your own active-flight callsign if the field
+               is empty — same flow Gunant uses to fire the pack to his own
+               cockpit. SimBrief username defaults to the Profile pref so the
+               admin doesn't have to retype it. */
+            const to   = ($('#atgt', c).value.trim().toUpperCase()) || myCall;
+            const sb   = $('#asb', c).value.trim() || P.pref('simbrief_user','');
+            if (!sb) { setFB('No SimBrief username — set one in Profile or type it above'); return; }
+            if (!to) { setFB('No pilot callsign — type one above or book a flight'); return; }
+            setFB(`Fetching SimBrief OFP for ${sb}…`);
             try {
               const ofp = await AIVA.Dispatch.fetchSimbriefOFP(sb);
               const body = AIVA.Dispatch.preflightPack(ofp);
               const r = await hopSend({ from: myCall, to, type:'telex', body });
-              setFB(r.ok ? `✓ Pre-flight pack sent to ${to} (${ofp.flightNo})` : `✗ ${r.error}`);
+              setFB(r.ok ? `✓ Pre-flight pack sent ${myCall} → ${to} (${ofp.flightNo})` : `✗ Hoppie: ${r.error}`);
               /* Save the dispatch target so FSUIPC auto-fire knows who to address */
               AIVA.Store.set('dispatch_target', {
                 callsign: to,

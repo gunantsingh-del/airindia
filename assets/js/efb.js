@@ -1597,7 +1597,7 @@
        "started a flight without the sim attached" ghosts. */
     fsuipc: (c) => {
       const fp = P.get('flight_in_progress');
-      c.appendChild(el('div', { class:'embed-bar', html:`<span class="dot" id="fsDot"></span> FSUIPC7 WebSocket bridge · <span id="fsAddr">ws://localhost:2048</span> <span class="right"><span class="fsuipc-status off" id="fsStatus">DISCONNECTED</span></span>` }));
+      c.appendChild(el('div', { class:'embed-bar', html:`<span class="dot" id="fsDot"></span> FSUIPC7 WebSocket bridge · <span id="fsAddr">ws://localhost:2048/fsuipc/</span> <span class="right"><span class="fsuipc-status off" id="fsStatus">DISCONNECTED</span></span>` }));
       const card = el('div', { class:'efb-card fsuipc-card' });
       card.innerHTML = `
         <div class="row between">
@@ -1632,19 +1632,21 @@
           we use FSUIPC7's built-in WebSocket Server instead so you don't need a second app.
           <b>If you're seeing "port 2048" errors, the server isn't running yet.</b>
         </p>
-        <div class="eyebrow mt-3">Setup — pick whichever your FSUIPC version supports</div>
+        <div class="eyebrow mt-3">Setup — FSUIPC WebSockets Server (Paul Henty)</div>
         <ol style="font-size:13px;color:var(--text-dim);line-height:1.9;padding-left:22px;margin-top:8px;">
-          <li>Open <b>FSUIPC7</b> (in MSFS, Add-ons menu → FSUIPC7).</li>
-          <li>Top menu → <b>Add-ons → WebSockets Server</b>. If you don't see this entry, your FSUIPC7 is older than 7.3 — update from <a href="https://fsuipc.com/" target="_blank" rel="noopener" class="text-gold">fsuipc.com</a>.</li>
-          <li>Tick <b>Enable WebSockets Server</b>, leave port <b>2048</b>, click Save.</li>
-          <li>Restart FSUIPC7 (close the console, it auto-reopens). Status bar should read <code>WebSockets: listening on 2048</code>.</li>
-          <li>Come back here and click <b>Connect FSUIPC</b>. The Start Flight button unlocks once the WebSocket handshake completes.</li>
+          <li>Download <b>FSUIPC WebSockets Server</b> from <a href="https://www.fsuipc.com/" target="_blank" rel="noopener" class="text-gold">fsuipc.com</a> (free companion to FSUIPC7) — it's the <code>FSUIPC WebSockets Server - V1.x.x</code> app shown in the Chief Pilot's screenshot.</li>
+          <li>Open the app. Confirm <b>Listen on IP Address</b> = <code>localhost</code>, <b>Listen on Port</b> = <code>2048</code>, <b>Use SSL</b> = unchecked. Client URL should read <code>ws://localhost:2048/fsuipc/</code>.</li>
+          <li>Click the <b>Start</b> button (top right). <b>Web Services</b> badge flips to <span style="color:#6EE7B7;">Running</span>.</li>
+          <li>Launch MSFS, load aircraft. FSUIPC WebSockets Server automatically talks to FSUIPC7 once MSFS is up.</li>
+          <li>AIVA auto-detects within ~5 seconds — the topbar <span class="mono" style="color:#6EE7B7;">FSUIPC ●</span> chip lights up. Start Flight unlocks. Number of Sockets Connected in the FSUIPC WebSockets Server window goes from 0 to 1.</li>
         </ol>
-        <div class="eyebrow mt-3">If FSUIPC7's WebSocket server isn't available</div>
         <p class="text-dim" style="font-size:12.5px;line-height:1.6;margin-top:6px;">
-          Alternative companion bridges (free):
+          <b>Want a fully native .exe install of AIVA itself?</b> Use the <b>Install AIVA</b> button in the portal topbar (Chrome / Edge). AIVA gets a Windows shortcut, opens in its own window without browser chrome, and auto-detects FSUIPC the same way.
+        </p>
+        <div class="eyebrow mt-3">Alternative bridge (if the above doesn't suit)</div>
+        <p class="text-dim" style="font-size:12.5px;line-height:1.6;margin-top:6px;">
           <a href="https://github.com/koesie10/fsuipc-websocket" target="_blank" rel="noopener" class="text-gold">koesie10/fsuipc-websocket</a> on GitHub —
-          single .exe, drops the same JSON protocol on port 2048. Run it before launching MSFS.
+          open-source single .exe with the same protocol. Run before MSFS.
         </p>
       `;
       c.appendChild(card);
@@ -1680,6 +1682,35 @@
           : 'Connect FSUIPC first — Start Flight unlocks once the bridge is live.';
       };
 
+      /* Reflect the BACKGROUND AUTO-DETECT — if AIVA.FSUIPC has already
+         connected (because the pilot opened MSFS + the WebSocket Server
+         before navigating here), we surface that state without needing
+         a manual click. Telemetry mirrors AIVA.FSUIPC.state(). */
+      if (AIVA.FSUIPC) {
+        if (AIVA.FSUIPC.isConnected()) {
+          setStatus('on', 'CONNECTED');
+          setConnected(true);
+        }
+        AIVA.FSUIPC.on('connect', () => {
+          if (!ws || ws.readyState !== 1) {
+            setStatus('on', 'CONNECTED');
+            setConnected(true);
+            toast('FSUIPC auto-detected · Start Flight unlocked.', 'ok');
+          }
+        });
+        AIVA.FSUIPC.on('disconnect', () => {
+          if (!ws || ws.readyState !== 1) {
+            setStatus('off', 'DISCONNECTED');
+            setConnected(false);
+          }
+        });
+        AIVA.FSUIPC.on('state', (s) => {
+          /* Only update the grid from the singleton if THIS tile's own
+             socket isn't the source of truth. */
+          if (!ws || ws.readyState !== 1) update(s);
+        });
+      }
+
       $('#fsConnect', c).onclick = () => {
         if (ws && ws.readyState === 1) {
           toast('Already connected to FSUIPC.', 'info');
@@ -1688,7 +1719,7 @@
         setStatus('busy', 'CONNECTING…');
         let opened = false;
         try {
-          ws = new WebSocket('ws://localhost:2048');
+          ws = new WebSocket('ws://localhost:2048/fsuipc/');
         } catch (e) {
           setStatus('off', 'OFFLINE');
           setConnected(false);
@@ -1699,7 +1730,7 @@
             try { ws.close(); } catch {}
             setStatus('off', 'OFFLINE');
             setConnected(false);
-            toast('Timed out reaching ws://localhost:2048. Open FSUIPC7 → Add-ons → WebSockets Server, tick Enable, restart FSUIPC.', 'bad', 6000);
+            toast('Timed out reaching ws://localhost:2048/fsuipc/. Open FSUIPC7 → Add-ons → WebSockets Server, tick Enable, restart FSUIPC.', 'bad', 6000);
           }
         }, 4000);
         ws.onopen = () => {
@@ -1725,7 +1756,7 @@
           clearTimeout(timeout);
           setStatus('off', 'OFFLINE');
           setConnected(false);
-          if (!opened) toast('Cannot reach FSUIPC at ws://localhost:2048. Check FSUIPC7 → Add-ons → WebSockets Server is enabled on port 2048.', 'bad', 6000);
+          if (!opened) toast('Cannot reach FSUIPC at ws://localhost:2048/fsuipc/. Check FSUIPC7 → Add-ons → WebSockets Server is enabled on port 2048.', 'bad', 6000);
         };
         ws.onclose = () => {
           clearTimeout(timeout);

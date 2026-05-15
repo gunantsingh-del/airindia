@@ -1,12 +1,13 @@
 {
-  "name": "Air India Virtual EFB",
-  "short_name": "AIVA EFB",
-  "description": "Electronic Flight Bag for Air India Virtual crew — live map, telemetry, ACARS, FSUIPC bridge.",
-  "id": "/efb.html",
-  "start_url": "/efb.html",
+  "name": "Air India Virtual",
+  "short_name": "AIVA",
+  "description": "Air India Virtual crew portal — roster, briefing, EFB, FSUIPC live tracking, crew chat.",
+  "id": "/portal.html",
+  "start_url": "/portal.html",
   "scope": "/",
   "display": "standalone",
-  "orientation": "landscape",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
   "background_color": "#0A0709",
   "theme_color": "#0A0709",
   "categories": ["productivity", "navigation", "travel"],
@@ -19,9 +20,9 @@
     { "src": "assets/img/vaic-mini-colour.png", "sizes": "120x120", "type": "image/png", "purpose": "any" }
   ],
   "shortcuts": [
-    { "name": "Open Portal",     "url": "/portal.html#dashboard" },
+    { "name": "Dashboard",       "url": "/portal.html#dashboard" },
     { "name": "My Roster",       "url": "/portal.html#roster"    },
-    { "name": "Network Map",     "url": "/portal.html#network"   },
-    { "name": "Hoppie ACARS",    "url": "/portal.html#hoppie"    }
+    { "name": "EFB",             "url": "/efb.html"              },
+    { "name": "Network Map",     "url": "/portal.html#network"   }
   ]
 }

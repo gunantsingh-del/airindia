@@ -1,6 +1,6 @@
 /* =====================================================================
    AIVA — FSUIPC live monitor
-   Connects to FSUIPC7's WebSocket bridge at ws://localhost:2048 and:
+   Connects to FSUIPC7's WebSocket bridge at ws://localhost:2048/fsuipc/ and:
      • emits events on threshold crossings (10,000 ft descent, landing)
      • detects sim crashes (connection dropped mid-flight)
    The Hoppie auto-dispatch hooks into these events to send messages
@@ -37,7 +37,7 @@ AIVA.FSUIPC = (() => {
   async function connect() {
     if (ws) try { ws.close(); } catch(_){}
     return new Promise((resolve, reject) => {
-      try { ws = new WebSocket('ws://localhost:2048'); }
+      try { ws = new WebSocket('ws://localhost:2048/fsuipc/'); }
       catch (e) { return reject(e); }
       ws.onopen = () => {
         connected = true;
@@ -113,6 +113,46 @@ AIVA.FSUIPC = (() => {
     topAlt = 0; arrivalArmed = true; landingArmed = true; inFlight = false;
   }
 
+  /* ============ AUTO-DETECT loop ============
+     "Turn on FSUIPC → AIVA notices and starts tracking" — the seamless
+     experience the Chief Pilot asked for. Every 5 seconds we attempt a
+     silent connect; the moment FSUIPC's WebSocket Server comes alive,
+     the connect handler fires the 'connect' event and the UI flips
+     to "● synced". A 1500ms socket timeout keeps each probe cheap.
+
+     The autoStart flag lets a UI screen disable this when the user
+     explicitly wants to manage the connection themselves. */
+  let autoStart = true;
+  let autoTimer = null;
+  function probe() {
+    if (connected || !autoStart) return;
+    try {
+      const test = new WebSocket('ws://localhost:2048/fsuipc/');
+      const killTimer = setTimeout(() => { try { test.close(); } catch {} }, 1500);
+      test.onopen = () => {
+        clearTimeout(killTimer);
+        try { test.close(); } catch {}
+        /* Server is alive — hand off to the real connect() which keeps
+           the socket open and subscribes to offsets. */
+        connect().catch(() => {});
+      };
+      test.onerror = () => { clearTimeout(killTimer); };
+    } catch {}
+  }
+  function startAutoDetect() {
+    autoStart = true;
+    if (autoTimer) clearInterval(autoTimer);
+    autoTimer = setInterval(probe, 5000);
+    probe();   // immediate first attempt on script load
+  }
+  function stopAutoDetect() {
+    autoStart = false;
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  }
+  /* Kick auto-detect once everything's loaded. Wrapped in setTimeout so
+     it doesn't block AIVA bootstrapping when FSUIPC isn't running. */
+  setTimeout(startAutoDetect, 200);
+
   /* Public surface */
   return {
     on, connect,
@@ -121,6 +161,7 @@ AIVA.FSUIPC = (() => {
     /* Alias used by the EFB progress ribbon and portal dashboard */
     lastTelemetry: () => connected ? lastState : null,
     resetSector,
+    startAutoDetect, stopAutoDetect,
     /* For UI debugging / manual triggers */
     fireDescent10k: () => emit('descent10k', { fno: AIVA._activeFlight?.fno, sim:false }),
     fireLanding:    () => emit('landing',    { fno: AIVA._activeFlight?.fno, sim:false }),

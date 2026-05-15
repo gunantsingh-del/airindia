@@ -109,6 +109,8 @@
           <div class="sub" id="pageSub">Operations · Live</div>
         </div>
         <div class="clock-grp">
+          <button class="btn btn-ghost btn-sm pwa-install" id="pwaInstall" hidden title="Install AIVA as a desktop app">${I('download', 12)} Install AIVA</button>
+          <span class="fs-chip fs-off" id="fsChip" title="FSUIPC not connected — start MSFS + FSUIPC WebSockets Server">FSUIPC ○</span>
           <div class="clock"><span class="lbl">Z</span><span id="zuluClock">—</span></div>
           <div class="clock"><span class="lbl">IST</span><span id="istClock">—</span></div>
           <button class="iconbtn tt theme-toggle" id="themeToggle" data-tt="Toggle light/dark">${I('moon', 16)}</button>
@@ -152,12 +154,44 @@
          • On landing → auto-send goodbye + roll dispatch_target to next sector
        ==================================================================== */
 
-    /* Fire up the FSUIPC bridge for everyone. If FSUIPC7 isn't running on
-       the pilot's machine, this silently fails — the events just never
-       fire. No harm done. */
-    AIVA.FSUIPC?.connect?.().catch(() => {
-      /* swallow — bridge isn't running yet, user can connect later from EFB */
+    /* AIVA.FSUIPC starts a 5-second auto-detect probe on script load. No
+       manual connect() call needed — the moment FSUIPC's WebSocket Server
+       is running, the 'connect' event fires and the topbar chip flips
+       green. The original explicit connect() lived here for older versions
+       that lacked auto-detect; harmless to keep as a hint to start sooner. */
+    AIVA.FSUIPC?.connect?.().catch(() => { /* swallow — auto-detect handles retries */ });
+
+    /* === PWA install prompt ===
+       Browsers fire `beforeinstallprompt` when the page meets PWA install
+       criteria (manifest + HTTPS + icons). We stash the event so an
+       explicit "Install AIVA" button can call .prompt() on user click.
+       The button only shows when the prompt is available AND we're NOT
+       already running standalone. */
+    let installPromptEv = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      installPromptEv = e;
+      const btn = document.getElementById('pwaInstall');
+      if (btn) btn.hidden = false;
     });
+    /* Click handler — wired after the button is in the DOM via #pwaInstall */
+    document.addEventListener('click', async (e) => {
+      if (!(e.target.id === 'pwaInstall' || e.target.closest('#pwaInstall'))) return;
+      if (!installPromptEv) {
+        toast('To install: open this site in Chrome / Edge, then use the browser\'s "Install app" menu (⋮ → Install AIVA).', 'info', 6000);
+        return;
+      }
+      installPromptEv.prompt();
+      const choice = await installPromptEv.userChoice;
+      if (choice.outcome === 'accepted') toast('AIVA installed — look for it in your apps.', 'ok');
+      installPromptEv = null;
+      const btn = document.getElementById('pwaInstall');
+      if (btn) btn.hidden = true;
+    });
+    /* Hide the install button if we're already running as an installed PWA */
+    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+      setTimeout(() => { const b = document.getElementById('pwaInstall'); if (b) b.hidden = true; }, 0);
+    }
 
     /* === SHARED — crash detection for every pilot === */
     AIVA.FSUIPC?.on('crash', (info) => {
@@ -333,6 +367,26 @@
       $('#istClock').textContent = String(ist.getHours()).padStart(2,'0') + ':' + String(ist.getMinutes()).padStart(2,'0') + ':' + String(ist.getSeconds()).padStart(2,'0');
     };
     tick(); setInterval(tick, 1000);
+
+    /* FSUIPC status chip — driven by the AIVA.FSUIPC singleton which runs
+       a 5-second auto-detect probe in the background. The pilot doesn't
+       have to click anything: turn on MSFS + FSUIPC WebSockets Server, the
+       chip flips green within ~5 seconds. */
+    const chip = $('#fsChip');
+    const setFsChip = (state) => {
+      if (!chip) return;
+      chip.classList.remove('fs-on','fs-off');
+      chip.classList.add(state === 'on' ? 'fs-on' : 'fs-off');
+      chip.textContent = state === 'on' ? 'FSUIPC ●' : 'FSUIPC ○';
+      chip.title = state === 'on'
+        ? 'FSUIPC connected · tracking live'
+        : 'FSUIPC not connected — start MSFS + FSUIPC WebSockets Server (auto-detects every 5s)';
+    };
+    if (AIVA.FSUIPC) {
+      setFsChip(AIVA.FSUIPC.isConnected() ? 'on' : 'off');
+      AIVA.FSUIPC.on('connect',    () => setFsChip('on'));
+      AIVA.FSUIPC.on('disconnect', () => setFsChip('off'));
+    }
   }
   function route() {
     const id = (location.hash.replace('#','').split('/')[0] || 'dashboard');

@@ -102,17 +102,17 @@
   position: sticky; top: 0; z-index: 8;
 }
 .topbar .breadcrumb { flex: 1; display: flex; align-items: center; gap: 10px; }
-.topbar .breadcrumb .page-title { font-family: var(--font-display); font-weight:600; font-size: 17px; color: var(--ai-cream); letter-spacing: -.01em; }
+.topbar .breadcrumb .page-title { font-family: var(--font-display); font-weight:600; font-size: 15px; color: var(--ai-cream); letter-spacing: -.01em; }
 .topbar .breadcrumb .sub {
-  font-family: var(--font-mono); font-size: 10.5px;
-  letter-spacing: .18em; text-transform: uppercase;
+  font-family: var(--font-mono); font-size: 9.5px;
+  letter-spacing: .16em; text-transform: uppercase;
   color: var(--text-mute);
-  padding-left: 14px;
+  padding-left: 12px;
   border-left: 1px solid var(--border);
 }
-.topbar .clock-grp { display:flex; align-items:center; gap: 12px; }
-.topbar .clock { font-family: var(--font-mono); font-size: 12px; color: var(--text); }
-.topbar .clock .lbl { color: var(--ai-gold-bright); font-size:9px; letter-spacing:.22em; text-transform:uppercase; margin-right: 6px;}
+.topbar .clock-grp { display:flex; align-items:center; gap: 8px; }
+.topbar .clock { font-family: var(--font-mono); font-size: 10.5px; color: var(--text); }
+.topbar .clock .lbl { color: var(--ai-gold-bright); font-size:8px; letter-spacing:.20em; text-transform:uppercase; margin-right: 5px;}
 /* Switch — used by Desktop App settings (always-on-top, autostart, etc.) */
 .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex: 0 0 44px; }
 .switch input { opacity: 0; width: 0; height: 0; }

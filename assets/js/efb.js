@@ -672,7 +672,36 @@
         </ul>
       `}));
 
-      /* === Fetch SimBrief and fill in the live numbers === */
+      /* === Fetch SimBrief and fill in the live numbers ===
+         Guarded by:
+           - 15-second hard timeout so the briefing doesn't sit on
+             "Loading…" forever when corsproxy is slow + all fallbacks
+             also stall.
+           - Callsign / route match against the BOOKED flight. SimBrief
+             returns whatever OFP the pilot last dispatched on
+             simbrief.com — if that was for a different route, we'd be
+             showing wrong numbers. We compare flight number AND origin/
+             destination ICAO; mismatch → show "no matching OFP" instead
+             of stale data. */
+      const withTimeout = (p, ms) => Promise.race([
+        p,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('SimBrief timed out — server slow or proxy blocked')), ms)),
+      ]);
+      function ofpMatchesBooking(ofp) {
+        const expectFno = (f.fno || '').toString().replace(/[^A-Z0-9]/gi, '').toUpperCase();
+        const expectOrig = (fromA?.icao || '').toUpperCase();
+        const expectDest = (toA?.icao || '').toUpperCase();
+        const gotFno  = (ofp.flightNo || '').toString().replace(/[^A-Z0-9]/gi, '').toUpperCase();
+        const gotOrig = (ofp.origin   || '').toUpperCase();
+        const gotDest = (ofp.destination || '').toUpperCase();
+        /* "Match" = at least one of (flight number suffix, origin, destination)
+           lines up. Some pilots file with different prefixes (AI544 vs AIC544)
+           so we do a loose suffix compare on flight number, exact on ICAO. */
+        const fnoMatch  = gotFno && expectFno && (gotFno.endsWith(expectFno) || expectFno.endsWith(gotFno));
+        const origMatch = gotOrig && expectOrig && gotOrig === expectOrig;
+        const destMatch = gotDest && expectDest && gotDest === expectDest;
+        return { match: fnoMatch || (origMatch && destMatch), fnoMatch, origMatch, destMatch, gotFno, gotOrig, gotDest };
+      }
       async function loadOFP() {
         if (!sbUser) {
           $('#bBanner', c).innerHTML = `No SimBrief username set. <a href="portal.html#profile" class="text-gold">Set one in Profile</a> to load real OFP data.`;
@@ -680,7 +709,16 @@
           return;
         }
         try {
-          const ofp = await AIVA.Dispatch.fetchSimbriefOFP(sbUser);
+          const ofp = await withTimeout(AIVA.Dispatch.fetchSimbriefOFP(sbUser), 15000);
+          /* Reject SimBrief OFPs that don't match the booked sector.
+             Pilot dispatched a different route on simbrief.com — show
+             that explicitly instead of overwriting our booking numbers. */
+          const m = ofpMatchesBooking(ofp);
+          if (!m.match) {
+            $('#bBanner', c).innerHTML = `<span style="color:#FBBF24;">⚠</span> Latest SimBrief OFP is for <b>${m.gotFno || '?'} · ${m.gotOrig || '?'}→${m.gotDest || '?'}</b>, not your booked <b>${f.fno} · ${f.from}→${f.to}</b>. Dispatch a matching OFP on <a href="https://dispatch.simbrief.com/" target="_blank" class="text-gold">simbrief.com</a> then click Refresh.`;
+            loadMETARs();
+            return;
+          }
           /* Patch in the values */
           $('#bAlt',   c).textContent = ofp.altDest   || '—';
           $('#bDate',  c).textContent = ymd().replace(/-/g,' ');
@@ -991,6 +1029,51 @@
         return `https://www.simbrief.com/ofp/flightplans/${pdf}`;
       }
 
+      /* Page-by-page debrief shown when no OFP is loaded yet — explains
+         what each section of the SimBrief OFP contains so pilots don't
+         see a blank "fetching…" panel forever. */
+      const OFP_GUIDE = `
+The SimBrief OFP — what's on each page:
+
+  1. COVER  · Header card with flight number, callsign, departure / arrival /
+              alternate ICAOs, scheduled / estimated times, and OFP layout
+              (LIDO, KLM, AAL, etc.). The "FUEL POLICY" line tells you whether
+              the plan uses minimum trip + reserves only, or extra contingency.
+
+  2. SUMMARY · Weights (ZFW, TOW, LDW), block / trip / reserve fuel breakdown,
+              wind component, cruise FL, Mach + cost index, ISA deviation.
+              Cross-check ZFW against your pax + cargo load before pushback.
+
+  3. FUEL     · Burns by phase (taxi out, climb, cruise, descent, approach,
+              taxi in) plus contingency, extra and final reserve. The
+              "PIC EXTRA" line is whatever you added at dispatch.
+
+  4. ROUTE   · The filed ICAO route string (e.g. DEL DCT PAVOL N571 BLR…)
+              with SID + STAR options and any tracks for oceanic. Paste this
+              into the FMS or load via the simulator FMS file.
+
+  5. NAVLOG  · Waypoint-by-waypoint table — magnetic course, distance, wind,
+              true airspeed, ground speed, fuel remaining, ETA. The line at
+              top-of-descent (TOD) shows the planned start-descent point.
+
+  6. PERFORMANCE · Climb, cruise and descent profiles for the loaded weight.
+              MAX FL, optimum FL, step climb suggestions.
+
+  7. WEATHER · METAR / TAF for departure, arrival, alternate. SIGMET /
+              AIRMET cross-references along route. A wind/temp profile
+              by FL is rendered on most layouts.
+
+  8. NOTAMS  · Airport NOTAMs for DEP / ARR / ALT and FIR-level NOTAMs that
+              intersect the route. Skim for runway closures, RAIM, GPS,
+              restricted airspace activations.
+
+  9. ATC FPL · The Item 18 / FPL string filed for ATC, callsign + RVSM /
+              PBN codes, alternate routing. Useful when you log on to
+              VATSIM / IVAO so your filed plan matches.
+
+  Hit Refresh after dispatching on simbrief.com to load the live OFP here.
+  Use the PDF / Text toggle in the header to switch view modes.`;
+
       async function loadOFP() {
         $('#ofpLoading', c).style.display = 'flex';
         $('#ofpPdf',     c).style.display = 'none';
@@ -998,14 +1081,44 @@
         $('#ofpDot',     c)?.classList.remove('on');
 
         if (!sbUser) {
-          $('#ofpBanner', c).innerHTML = `No SimBrief username set. <a href="portal.html#profile" class="text-gold">Set one in Profile</a> to load real OFP.`;
+          $('#ofpBanner', c).innerHTML = `No SimBrief username set. <a href="portal.html#profile" class="text-gold">Set one in Profile</a> to load real OFP — meanwhile here's what each page contains:`;
           $('#ofpLoading', c).style.display = 'none';
           $('#ofpText',    c).style.display = 'block';
-          $('#ofpText',    c).textContent = 'No SimBrief OFP available.\n\nGo to Portal → Profile, enter your SimBrief username, then dispatch a flight plan on www.simbrief.com.\nReturn here and hit Refresh.';
+          $('#ofpText',    c).textContent = OFP_GUIDE;
           return;
         }
         try {
-          ofpData = await AIVA.Dispatch.fetchSimbriefOFP(sbUser);
+          /* 15-second hard timeout so a slow proxy doesn't leave the
+             pilot watching a spinner indefinitely. */
+          const withTimeout = (p, ms) => Promise.race([
+            p,
+            new Promise((_, rej) => setTimeout(() => rej(new Error('SimBrief timed out (' + (ms/1000) + 's)')), ms)),
+          ]);
+          ofpData = await withTimeout(AIVA.Dispatch.fetchSimbriefOFP(sbUser), 15000);
+
+          /* Callsign / route match against the booked sector. SimBrief
+             returns whatever OFP this user last dispatched — if it's a
+             different route, we don't want to silently show wrong numbers
+             on the briefing. Loose flight-number suffix match + exact
+             ICAO compare. */
+          const expectFno  = (f.fno  || '').toString().replace(/[^A-Z0-9]/gi, '').toUpperCase();
+          const expectOrig = (AIVA.airport(f.from)?.icao || f.from || '').toUpperCase();
+          const expectDest = (AIVA.airport(f.to  )?.icao || f.to   || '').toUpperCase();
+          const gotFno     = (ofpData.flightNo    || '').toString().replace(/[^A-Z0-9]/gi, '').toUpperCase();
+          const gotOrig    = (ofpData.origin      || '').toUpperCase();
+          const gotDest    = (ofpData.destination || '').toUpperCase();
+          const fnoMatch   = gotFno && expectFno && (gotFno.endsWith(expectFno) || expectFno.endsWith(gotFno));
+          const routeMatch = gotOrig === expectOrig && gotDest === expectDest;
+          if (!fnoMatch && !routeMatch) {
+            $('#ofpLoading', c).style.display = 'none';
+            $('#ofpText',    c).style.display = 'block';
+            $('#ofpText',    c).textContent =
+              `Your latest SimBrief OFP is for ${gotFno || '?'} · ${gotOrig || '?'} → ${gotDest || '?'}, not your booked ${f.fno} · ${expectOrig} → ${expectDest}.\n\n` +
+              `Open SimBrief Dispatch (button above) and file a plan for ${f.fno} from ${expectOrig} to ${expectDest}, then hit Refresh here.\n\n` +
+              OFP_GUIDE;
+            $('#ofpBanner', c).innerHTML = `<span style="color:#FBBF24;">⚠</span> SimBrief OFP is for <b>${gotFno || '?'} · ${gotOrig || '?'} → ${gotDest || '?'}</b> — doesn't match your booked <b>${f.fno} · ${expectOrig} → ${expectDest}</b>. Dispatch a matching plan on SimBrief, then Refresh.`;
+            return;
+          }
 
           /* Quick-summary patch */
           $('#ofpAc',  c).textContent = ofpData.acType || f.ac;
@@ -1037,7 +1150,10 @@
         } catch (e) {
           $('#ofpLoading', c).style.display = 'none';
           $('#ofpText',    c).style.display = 'block';
-          $('#ofpText',    c).textContent = `SimBrief fetch failed: ${e.message}\n\nMake sure:\n  • You're logged into simbrief.com\n  • You've dispatched at least one OFP for this username\n  • CORS proxy is reachable (try Refresh)\n\nOr open SimBrief directly with the button above.`;
+          $('#ofpText',    c).textContent =
+            `SimBrief fetch failed: ${e.message}\n\n` +
+            `Make sure:\n  • You're logged into simbrief.com\n  • You've dispatched at least one OFP for this username (${sbUser})\n  • CORS proxy is reachable (we try four — corsproxy, allorigins, codetabs, thingproxy)\n\nOr open SimBrief directly with the button above.\n\n` +
+            OFP_GUIDE;
           $('#ofpBanner', c).innerHTML = `<span style="color:#FCA5A5;">⚠</span> SimBrief unreachable — ${e.message}`;
         }
       }
@@ -2200,77 +2316,42 @@
       };
     },
 
-    /* ==================== HOPPIE ACARS ==================== */
+    /* ==================== HOPPIE ACARS ====================
+       The full Hoppie page (admin auto-dispatch + pilot inbox/outbox/
+       send) is implemented in portal.js. To avoid duplicating 600+
+       lines here, the EFB hosts it inside a same-origin iframe — all
+       state (localStorage, logs, hoppie_proxy) is shared, so the
+       admin/auto-poll/logging work transparently. The iframe URL is
+       portal.html#hoppie, the EFB just frames it cockpit-style with
+       its own header bar. */
     hoppie: (c) => {
       const code = P.pref('hoppieCode', '');
-      const flightCallsign = activeFlight()?.cs || '';
-
-      c.appendChild(el('div', { class:'embed-bar', html: `<span class="dot"></span> Hoppie ACARS · ${code ? `Logon code set · CS ${flightCallsign}` : 'No logon code'} <span class="right"><span class="pill pill-${code ? 'ok' : 'warn'}" style="font-size:9px;">${code ? 'READY' : 'SETUP NEEDED'}</span></span>` }));
-
-      c.appendChild(el('div', { class:'efb-card', html: `
-        <div class="eyebrow">Setup — one-time</div>
-        <ol style="font-size:13px;color:var(--text-dim);line-height:1.9;padding-left:22px;">
-          <li>Go to <a href="https://www.hoppie.nl/acars/system/register.html" target="_blank" class="text-gold">hoppie.nl/acars → register</a> and get your free logon code.</li>
-          <li>Paste it into <b>Profile → Hoppie Logon Code</b> in the Portal.</li>
-          <li>In your aircraft, enter the same code as the logon, and your ATC callsign as the flight number.</li>
-        </ol>
-        <div class="gold-rule"></div>
-        <div class="eyebrow">Per-aircraft logon path</div>
-        <div class="grid grid-3 mt-3">
-          <div class="card">
-            <h4 class="display" style="font-size:15px;">Fenix A320</h4>
-            <p class="text-dim mt-2" style="font-size:12px;">OPC → ATSU → AOC MENU → AOC INIT → enter your logon code. Set callsign = ATC callsign (e.g. <b>AIC2HV</b>).</p>
-          </div>
-          <div class="card">
-            <h4 class="display" style="font-size:15px;">PMDG 777</h4>
-            <p class="text-dim mt-2" style="font-size:12px;">FMC → MENU → ACARS → SETUP. Enter Hoppie code under SVC, set ATC LOGON to <b>AIC101</b> etc.</p>
-          </div>
-          <div class="card">
-            <h4 class="display" style="font-size:15px;">FSLabs A321neo</h4>
-            <p class="text-dim mt-2" style="font-size:12px;">MCDU 1 → ATSU → AOC INIT → enter Hoppie code as company code. Use FlightDeck plugin for RealACARS bridge.</p>
-          </div>
-        </div>
-      ` }));
-
-      c.appendChild(el('div', { class:'efb-card mt-3', html: `
-        <div class="eyebrow">Live AOC / ATC message stream</div>
-        ${code ? `
-          <div id="hopMsgs" class="mt-3" style="max-height:280px;overflow-y:auto;font-family:var(--font-mono);font-size:12px;color:var(--text-dim);">
-            <div class="text-mute">No messages yet. Polling ${flightCallsign || 'callsign'}…</div>
-          </div>
-          <div class="row gap-2 mt-3">
-            <input class="input" id="hopTo" placeholder="To callsign (e.g. AICOPS or ATC)" style="max-width:220px;">
-            <input class="input" id="hopMsg" placeholder="Free text message" style="flex:1;">
-            <button class="btn btn-primary btn-sm" id="hopSend">${I('send',14)} Send</button>
-          </div>
-        ` : `
-          <p class="text-mute mt-3" style="font-size:13px;">Set your Hoppie logon code in <a href="portal.html#profile" class="text-gold">Profile</a> to enable live message polling.</p>
-        `}
-      ` }));
-
-      if (code) {
-        const poll = async () => {
-          if (!flightCallsign) return;
-          try {
-            const url = `https://www.hoppie.nl/acars/system/connect.html?logon=${encodeURIComponent(code)}&from=${encodeURIComponent(flightCallsign)}&to=SERVER&type=poll&packet=`;
-            const r = await fetch(url, { mode:'no-cors' });
-            /* no-cors mode: response opaque. Real impl needs a proxy. */
-            $('#hopMsgs', c).innerHTML += `<div class="text-mute">${fmtZulu()} · POLL sent (CORS-opaque; production needs server proxy)</div>`;
-          } catch {}
-        };
-        const id = setInterval(poll, 30000); poll();
-        c.dataset._poll = id;
-        $('#hopSend', c).onclick = async () => {
-          const to = $('#hopTo', c).value.trim() || 'SERVER';
-          const msg = $('#hopMsg', c).value.trim();
-          if (!msg) return;
-          try {
-            await fetch(`https://www.hoppie.nl/acars/system/connect.html?logon=${encodeURIComponent(code)}&from=${encodeURIComponent(flightCallsign)}&to=${to}&type=telex&packet=${encodeURIComponent(msg)}`, { mode:'no-cors' });
-            $('#hopMsgs', c).innerHTML += `<div><span class="text-mute">${fmtZulu()}</span> <span class="text-gold">${flightCallsign}→${to}</span>: ${msg}</div>`;
-            $('#hopMsg', c).value = '';
-          } catch (e) {}
-        };
+      c.appendChild(el('div', { class:'embed-bar', html: `
+        <span class="dot"></span> Hoppie ACARS · ${code ? 'Logon set' : '<span style="color:#FCA5A5;">No logon code</span>'}
+        <span class="right">
+          <a class="btn btn-ghost btn-sm" href="portal.html#hoppie" target="_blank" rel="noopener">${I('external',14)} Open standalone</a>
+          <a class="btn btn-ghost btn-sm" href="portal.html#profile">${I('user',14)} Profile · set logon</a>
+        </span>
+      `}));
+      if (!code) {
+        c.appendChild(el('div', { class:'efb-card', style:{ padding:'40px 28px' }, html: `
+          <div class="eyebrow">Setup needed</div>
+          <h3 class="display mt-2" style="font-size:22px;">No Hoppie logon code</h3>
+          <p class="text-dim mt-2" style="font-size:13.5px;line-height:1.6;">
+            Get a free logon code from <a href="https://www.hoppie.nl/acars/system/register.html" target="_blank" class="text-gold">hoppie.nl/acars → register</a>, then paste it into <a href="portal.html#profile" class="text-gold">Profile → Hoppie Logon Code</a>. Come back here and ACARS lights up.
+          </p>
+        ` }));
+        return;
       }
+      /* Iframe-host the full Hoppie page (admin + pilot views, send,
+         inbox, outbox, diagnostics, aircraft setup guide). */
+      const wrap = el('div', { class:'efb-card', style:{ padding:0, overflow:'hidden', minHeight:'720px', display:'flex' } });
+      const frame = document.createElement('iframe');
+      frame.src = 'portal.html#hoppie';
+      frame.style.cssText = 'flex:1;border:0;width:100%;min-height:720px;background:transparent;';
+      frame.title = 'Hoppie ACARS';
+      wrap.appendChild(frame);
+      c.appendChild(wrap);
     },
 
     /* ==================== JOURNEY LOG ==================== */

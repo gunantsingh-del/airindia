@@ -27,24 +27,30 @@
 
   /* ----------------------- NAV ----------------------- */
   const NAV = [
+    /* Sidebar order follows the actual pilot workflow:
+         1. Plan the day  — dashboard → roster → book
+         2. Build the OFP — ofp/navlog → met
+         3. Fly + log     — simbridge → flights
+         4. Reference     — fleet / docs / NOTAM / MEL / DGCA
+         5. Crew + admin  — FDTL, ranks, crew, newsroom, myAI, profile
+       Hoppie moved out of the portal entirely — lives on the EFB
+       (admin auto-dispatch + pilot inbox both load there). */
     { group: 'Flying', items: [
       { id:'dashboard',  label:'Dashboard',     icon:'dashboard' },
       { id:'roster',     label:'My Roster',     icon:'calendar' },
       { id:'book',       label:'Book Roster',   icon:'plus', chip:'NEW' },
-      { id:'flights',    label:'My Flights',    icon:'plane', chipDyn:'logCount' },
+      { id:'ofp',        label:'OFP / Navlog',  icon:'route' },
+      { id:'met',        label:'Met Briefing',  icon:'cloud' },
       { id:'simbridge',  label:'Sim Bridge',    icon:'wifi' },
-      { id:'import',     label:'Import',        icon:'upload' },
-      { id:'stats',      label:'Statistics',    icon:'gauge' },
+      { id:'flights',    label:'My Flights',    icon:'plane', chipDyn:'logCount' },
     ]},
     { group: 'Operations', items: [
-      /* Crew Briefing / Performance / W&B live on the EFB only — they need
-         the active-flight + FSUIPC context that the cockpit surface provides. */
-      { id:'met',         label:'Met Briefing',  icon:'cloud' },
       { id:'notam',       label:'NOTAM / AIP',   icon:'alert' },
-      { id:'ofp',         label:'OFP / Navlog',  icon:'route' },
       { id:'network',     label:'Network Globe', icon:'globe' },
       { id:'situations',  label:'Situations',    icon:'activity' },
       { id:'announce',    label:'Announcements', icon:'megaphone' },
+      { id:'import',      label:'Import flights',icon:'upload' },
+      { id:'stats',       label:'Statistics',    icon:'gauge' },
     ]},
     { group: 'Fleet & Library', items: [
       { id:'fleet',       label:'Fleet Register', icon:'hangar' },
@@ -57,9 +63,6 @@
       { id:'fdtl',      label:'FDTL Tracker',  icon:'clock' },
       { id:'ranks',     label:'Ranks',         icon:'star' },
       { id:'crew',      label:'Crew List',     icon:'users' },
-      /* Liveries page hidden — the renderer still lives under PAGES so hash
-         deep-links keep working, but it's off the sidebar per Chief Pilot. */
-      { id:'hoppie',    label:'Hoppie ACARS',  icon:'send' },
       { id:'newsroom',  label:'Newsroom',      icon:'newspaper' },
       { id:'myai',      label:'myAI',          icon:'newspaper' },
       { id:'profile',   label:'Profile',       icon:'user' },
@@ -67,7 +70,8 @@
     ]},
     /* Crew Welfare items are intentionally NOT in the sidebar nav — they
        live inside the myAI tile grid (per Chief Pilot direction). The route
-       table still knows about them so direct links / hash navigation work. */
+       table still knows about them so direct links / hash navigation work.
+       Hoppie ACARS now lives on the EFB only (admin + pilot views). */
   ];
 
   /* ----------------------- SHELL ----------------------- */
@@ -3618,6 +3622,15 @@
           { type:'fleet', tag:'B787',          title:'B787 — Boeing official type page',                                                 url:'https://www.boeing.com/commercial/787',                                                                            desc:'B787-8 / 787-9 / 787-10 Dreamliner. Common framework with 777 NNC organization.' },
           { type:'fleet', tag:'B737 NG/MAX',   title:'B737 — Boeing official type page',                                                 url:'https://www.boeing.com/commercial/737',                                                                            desc:'B737-800 + 737 MAX 8. Used by Air India Express fleet.' },
 
+          /* AIVA / Air India Group checklists — official trim-cards
+             maintained by the Air India Group Virtual docs hub. These
+             are the operational checklists actually used in the sim,
+             distinct from the type-rating QRH NNC tables below. */
+          { type:'checklist', tag:'AIE A32X', title:'Air India Express A320 family checklist (AIVA / AIGV)', url:'https://docs.airindiagroupvirtual.net/assets/checklist/AXB/AXB-A32X-Checklist.pdf', desc:'Express A320 family — normal procedures trim-card. Use for AI Express AXB-callsign flights on the A320 / 321.' },
+          { type:'checklist', tag:'AIC B77X', title:'Air India B777 family checklist (AIVA / AIGV)',         url:'https://docs.airindiagroupvirtual.net/assets/checklist/AIC/AIC-B77X-Checklist.pdf', desc:'B777-200LR / 300ER mainline checklist — normal flows from cold-and-dark through shutdown.' },
+          { type:'checklist', tag:'AIC B78X', title:'Air India B787 family checklist (AIVA / AIGV)',         url:'https://docs.airindiagroupvirtual.net/assets/checklist/AIC/AIC-B78X-Checklist.pdf', desc:'B787-8 / 787-9 mainline checklist — Dreamliner normal procedures trim-card.' },
+          { type:'checklist', tag:'AIE B73X', title:'Air India Express B737 family checklist (AIVA / AIGV)', url:'https://docs.airindiagroupvirtual.net/assets/checklist/AXB/AXB-B73X-Checklist.pdf', desc:'B737-800 NG / MAX 8 Express checklist — normal procedures trim-card.' },
+
           /* QRH — direct PDFs hosted on archive.org */
           { type:'qrh',   tag:'QRH A320',      title:'Airbus A320 Family QRH (archive.org PDF)',                                         url:'https://archive.org/details/airbus-a-320-qrh-en/A320%20QRH%20EN/',                                                desc:'A320 family Quick Reference Handbook — ECAM-driven NNC, memory items, in-flight performance. Mirrored on Internet Archive.' },
           { type:'qrh',   tag:'QRH A350',      title:'Airbus A350-900 QRH (archive.org PDF)',                                            url:'https://archive.org/details/airbus-a-350-qrh',                                                                     desc:'A350-900 QRH from the Internet Archive collection — ECAM-driven NNC and ATA-coded supplementary procedures.' },
@@ -3648,8 +3661,10 @@
           { type:'reg',   tag:'ICAO Doc 9284', title:'ICAO Technical Instructions · Dangerous Goods',                                    url:'https://www.icao.int/safety/DangerousGoods/Pages/technical-instructions.aspx',                                     desc:'Dangerous Goods regulatory framework — referenced by DGCA CAR 8-Series-C.' },
         ];
 
-        /* Group by section */
+        /* Group by section. The checklist row goes FIRST — it's what
+           pilots reach for every flight; QRH/FCOM are reference-only. */
         const groups = [
+          ['AIVA · Air India Group checklists', 'checklist', 'Operational trim-cards used in the sim — normal procedures per type'],
           ['Fleet libraries',     'fleet', 'Full FCOM/QRH/FCTM bundles per aircraft type'],
           ['Quick Reference Handbook (QRH)', 'qrh', 'Memory items + non-normal checklists — what you reach for first'],
           ['Flight Crew Operations Manual (FCOM)', 'fcom', 'Systems, procedures, limits and performance'],
@@ -3671,7 +3686,7 @@
               <div class="doc-tag">${d.tag}</div>
               <div class="doc-title">${d.title}</div>
               <div class="doc-desc">${d.desc}</div>
-              <div class="doc-meta"><span>${d.url.endsWith('.pdf') ? 'PDF' : 'Page'}</span><span>${d.url.includes('archive.org') ? 'Internet Archive' : d.url.includes('dgca.gov') ? 'DGCA India' : d.url.includes('faa.gov') ? 'FAA US' : d.url.includes('icao.int') ? 'ICAO' : d.url.includes('aai.aero') ? 'AAI India' : d.url.includes('airbus.com') ? 'Airbus' : d.url.includes('boeing.com') ? 'Boeing' : 'Public'}</span></div>
+              <div class="doc-meta"><span>${d.url.endsWith('.pdf') ? 'PDF' : 'Page'}</span><span>${d.url.includes('airindiagroupvirtual') ? 'AIGV docs' : d.url.includes('archive.org') ? 'Internet Archive' : d.url.includes('dgca.gov') ? 'DGCA India' : d.url.includes('faa.gov') ? 'FAA US' : d.url.includes('icao.int') ? 'ICAO' : d.url.includes('aai.aero') ? 'AAI India' : d.url.includes('airbus.com') ? 'Airbus' : d.url.includes('boeing.com') ? 'Boeing' : 'Public'}</span></div>
             `;
             grid.appendChild(a);
           });
@@ -4696,13 +4711,34 @@
           };
           $('#hopSelfPing2', c).onclick = async () => {
             if (!code) { toast('No logon code set in Profile', 'bad'); return; }
+            /* Three-step self-ping:
+                 1. Send a TELEX from myCall → myCall.
+                 2. Poll Hoppie for messages addressed to myCall.
+                 3. Report which steps succeeded so the pilot knows
+                    whether it's a SEND problem, a POLL problem, or
+                    a "Hoppie doesn't queue self-messages" quirk.
+               This is much more diagnostic than a single fire-and-
+               hope-it-comes-back attempt. */
+            toast('Self-ping running — sending, polling, reporting…', 'ok', 3000);
             const stamp = new Date().toISOString().slice(11,19);
-            const r = await hopSend({ from: myCall, to: myCall, type:'telex', body:`AIVA SELF-PING @ ${stamp}Z · if this appears in your cockpit DCDU, Hoppie is wired correctly` });
-            if (r.ok) {
-              toast('Self-ping sent · polling in 2s · check your cockpit DCDU too', 'ok', 6000);
-              refreshOutbox();
-              setTimeout(() => { hopPoll(false); refreshInbox(); refreshOutbox(); }, 2000);
-            } else toast('Self-ping failed: ' + r.error, 'bad', 6000);
+            const probe = `AIVA SELF-PING @ ${stamp}Z`;
+            const sendR = await hopSend({ from: myCall, to: myCall, type:'telex', body: `${probe} · if this appears in your cockpit DCDU, Hoppie is wired correctly` });
+            refreshOutbox();
+            if (!sendR.ok) {
+              toast(`✗ SEND failed: ${sendR.error}. Hoppie can't accept messages — check logon code + proxy.`, 'bad', 9000);
+              return;
+            }
+            /* Wait 2 s for Hoppie to enqueue, then poll. */
+            await new Promise(r => setTimeout(r, 2000));
+            const before = AIVA.Store.get('hoppie_log', []).filter(m => m.dir==='rx').length;
+            await hopPoll(true);
+            const after  = AIVA.Store.get('hoppie_log', []).filter(m => m.dir==='rx').length;
+            refreshInbox();
+            if (after > before) {
+              toast('✓ Self-ping round-tripped — AIVA → Hoppie → AIVA confirmed. Now watch your cockpit DCDU for the same message (~60s for ATSU poll).', 'ok', 9000);
+            } else {
+              toast(`✓ SEND ok, but POLL returned no message in 2s. Hoppie may not queue self-loops (some networks block from===to), OR the cockpit will see it on its next poll. Send a normal TELEX to another crew member to confirm full round-trip.`, 'warn', 12000);
+            }
           };
           refreshInbox();
           refreshOutbox();

@@ -2213,10 +2213,17 @@
           return null;
         }
         async function fetchWX(codes) {
-          const url = `https://aviationweather.gov/api/data/metar?ids=${codes.join(',')}&format=json&taf=true&hours=3`;
-          const r = await tryFetch(url);
-          if (!r || !r.ok) return [];
-          try { return await r.json(); } catch { return []; }
+          /* Route through our /api/wx serverless proxy: server-to-server
+             so CORS doesn't apply, and it fans out across AWC → VATSIM →
+             NOAA TGFTP so even if one source is down we still get METAR.
+             The pre-existing flaky-proxy path (corsproxy.io) ate too
+             many METAR fetches; this is the rewrite. */
+          try {
+            const r = await fetch(`/api/wx?ids=${codes.join(',')}`);
+            if (!r.ok) return [];
+            const j = await r.json();
+            return Array.isArray(j) ? j : [];
+          } catch { return []; }
         }
         async function fetchATIS_FAA(codes) {
           const out = {};
@@ -2257,7 +2264,7 @@
 
     /* ============ NOTAM ============ */
     notam: {
-      sub: 'Search any airport · ICAO live · FAA + AAI sources',
+      sub: 'Authoritative NOTAM links · AAI eAIP · FAA · EUROCONTROL EAD',
       render: (c) => {
         const default3 = ['VIDP','VABB','EGLL'];
         c.appendChild(el('section', { html: `
@@ -2281,77 +2288,47 @@
         ` }));
 
         const out = $('#ntOut', c);
-        const sevOf = (txt) => /CLSD|CLOSED|EMERG|HAZARD|CRASH|FIRE/i.test(txt) ? 'red'
-                            : /UNSERVICEABLE|U\/S|INOP|RESTRIC|LIMIT|WIP/i.test(txt) ? 'gold'
-                            : 'info';
 
-        /* Same proxy strategy as the METAR fetcher — direct first, then
-           corsproxy.io, then allorigins.win. AWC has been spotty about CORS
-           headers since the 2024 endpoint redesign, so the proxy chain is
-           load-bearing. */
-        const proxies = [
-          (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-          (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-        ];
-        async function tryFetch(url) {
-          try { const r = await fetch(url, { mode:'cors' }); if (r.ok) return r; } catch {}
-          for (const p of proxies) {
-            try { const r = await fetch(p(url)); if (r.ok) return r; } catch {}
-          }
-          return null;
-        }
-
-        async function fetchNotams(icaos) {
-          out.innerHTML = `<div class="row gap-2" style="padding:18px;"><div class="chakra-spin"></div><span class="text-mute">Pulling NOTAMs for ${icaos.length} airport${icaos.length>1?'s':''}…</span></div>`;
-          const results = await Promise.all(icaos.map(async (icao) => {
-            const url = `https://aviationweather.gov/api/data/notam?ids=${icao}&format=json`;
-            const r = await tryFetch(url);
-            if (!r) return { icao, items: [], err: 'No response from NOTAM service (network or proxy unavailable).' };
-            try {
-              const text = await r.text();
-              let items = [];
-              try {
-                const j = JSON.parse(text);
-                items = Array.isArray(j) ? j.map(n => ({
-                  ap: icao,
-                  text: n.icaoMessage || n.rawText || n.message || n.text || (typeof n === 'string' ? n : JSON.stringify(n).slice(0,200)),
-                  ts:   n.effectiveStart || n.startValid || '',
-                })) : [];
-              } catch {
-                /* Plain text response — split on blank lines into NOTAMs */
-                items = text.split(/\n\s*\n/).filter(s => s.trim().length > 10).map(t => ({ ap: icao, text: t.trim(), ts: '' }));
-              }
-              return { icao, items, err: null };
-            } catch (e) {
-              return { icao, items: [], err: e.message };
-            }
-          }));
-
+        /* NOTAM live fetch is genuinely hard now:
+            • AWC decommissioned their public NOTAM endpoint in late 2025
+              (returns 404 "Not found").
+            • FAA NotamSearch API requires a key + agreement.
+            • AAI eAIP serves HTML only — no machine-readable feed.
+           Rather than chase another broken proxy chain, we surface the
+           official sources as one-click links per airport. Pilots get
+           accurate NOTAMs from the authoritative office; we stop lying
+           about having "live" data we can't deliver. */
+        function fetchNotams(icaos) {
           out.innerHTML = '';
-          results.forEach(r => {
+          icaos.forEach((icao) => {
+            const a = AIVA.airportByIcao(icao);
+            const region = (a?.country === 'India') ? 'india' : (a?.country === 'USA') ? 'usa' : 'intl';
             const card = el('div', { class:'card mb-3' });
-            const a = AIVA.airportByIcao(r.icao);
             card.innerHTML = `
               <div class="row between mb-2">
                 <div>
-                  <h3 style="margin:0;font-size:18px;">${r.icao}${a ? ` · ${a.city}` : ''}</h3>
+                  <h3 style="margin:0;font-size:18px;">${icao}${a ? ` · ${a.city}` : ''}</h3>
                   <div class="text-mute" style="font-size:12px;">${a?.name || ''}</div>
                 </div>
-                <span class="pill ${r.err ? 'pill-red' : r.items.length ? 'pill-gold' : 'pill-ok'}" style="font-size:9px;">
-                  ${r.err ? 'API ERROR' : r.items.length ? `${r.items.length} NOTAM${r.items.length===1?'':'S'}` : 'NIL'}
-                </span>
+                <span class="pill pill-info" style="font-size:9px;">OFFICIAL SOURCES</span>
               </div>
-              ${r.err ? `<div class="text-mute mono" style="font-size:11px;">${r.err}. Try again or check the FAA endpoint.</div>` : ''}
-              ${r.items.slice(0, 12).map(n => `
-                <div class="card mb-2" style="background:rgba(255,255,255,.02);padding:12px 14px;">
-                  <div class="row gap-2 mb-1">
-                    <span class="pill pill-${sevOf(n.text)}" style="font-size:9px;">${sevOf(n.text) === 'red' ? 'CRITICAL' : sevOf(n.text) === 'gold' ? 'ADVISORY' : 'INFO'}</span>
-                    ${n.ts ? `<span class="text-mute mono" style="font-size:10.5px;">${String(n.ts).slice(0,16).replace('T',' ')}Z</span>` : ''}
-                  </div>
-                  <div class="mono" style="font-size:12px;line-height:1.55;white-space:pre-wrap;color:var(--text);max-height:140px;overflow:auto;">${(n.text || n.title || '').slice(0, 800)}</div>
-                </div>
-              `).join('')}
-              ${r.items.length > 12 ? `<div class="text-mute" style="font-size:11px;">… ${r.items.length - 12} more not shown</div>` : ''}
+              <p class="text-mute" style="font-size:12.5px;line-height:1.6;margin:0 0 12px;">
+                NOTAMs change hour-to-hour. Pulling them in-app reliably means brokering an API key with the FAA / EUROCONTROL, which AIVA doesn't have. Use the source-of-truth link for ${icao} below.
+              </p>
+              <div class="row gap-2" style="flex-wrap:wrap;">
+                ${region === 'india' ? `
+                  <a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="https://aim-india.aai.aero/eaip/eAIP/${icao}.html">${I('external',12)} AAI eAIP · ${icao}</a>
+                  <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://notaminfo.com/airportmap/${icao}">${I('external',12)} NotamInfo</a>
+                ` : region === 'usa' ? `
+                  <a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="https://notams.aim.faa.gov/notamSearch/nsapp.html#/notams/${icao}">${I('external',12)} FAA NOTAM Search · ${icao}</a>
+                  <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://pilotweb.nas.faa.gov/PilotWeb/notamRetrievalByICAOAction.do?method=displayByICAOs&reportType=Raw&formatType=ICAO&retrieveLocId=${icao}">${I('external',12)} PilotWeb · ${icao}</a>
+                ` : `
+                  <a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="https://www.notams.faa.gov/dinsQueryWeb/queryRetrievalMapAction.do?reportType=Raw&actionType=notamRetrievalByICAOs&retrieveLocId=${icao}">${I('external',12)} FAA NOTAM · ${icao}</a>
+                  <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://www.ead-it.com/ead-basic/?id=ead-basic/notam_search/${icao}">${I('external',12)} EUROCONTROL EAD</a>
+                  <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="https://notaminfo.com/airportmap/${icao}">${I('external',12)} NotamInfo</a>
+                `}
+              </div>
+              <div class="text-mute mono mt-3" style="font-size:10.5px;letter-spacing:.18em;">${a?.country || 'INTERNATIONAL'} · ${icao}</div>
             `;
             out.appendChild(card);
           });

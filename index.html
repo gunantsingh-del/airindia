@@ -7,10 +7,10 @@
 <meta name="apple-mobile-web-app-title" content="AIVA">
 <meta name="theme-color" content="#A8101F">
 <title>AIVA</title>
-<link rel="icon" type="image/png" href="assets/img/vaic-mini-colour.png?v=20260515c">
-<link rel="apple-touch-icon" href="assets/img/vaic-mini-colour.png?v=20260515c">
+<link rel="icon" type="image/png" href="assets/img/vaic-mini-colour.png?v=20260515d">
+<link rel="apple-touch-icon" href="assets/img/vaic-mini-colour.png?v=20260515d">
 <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/base.css?v=20260515c">
+<link rel="stylesheet" href="assets/css/base.css?v=20260515d">
 <style>
 /* ====== AIR INDIA RED LOGIN — MINIMAL ====== */
 body {
@@ -266,9 +266,9 @@ body::after {
 
 <div class="stage">
   <div class="brand" id="brandTap" role="button" aria-label="Sign in">
-    <img class="logo" src="assets/img/vaic-logo-colour.png?v=20260515c" alt="Air India Virtual" onerror="this.onerror=null; this.src='assets/img/vaic-logo-colour.svg?v=20260515c'"/>
+    <img class="logo" src="assets/img/vaic-logo-colour.png?v=20260515d" alt="Air India Virtual" onerror="this.onerror=null; this.src='assets/img/vaic-logo-colour.svg?v=20260515d'"/>
     <div class="gold-rule" aria-hidden="true"></div>
-    <img class="maharaja" src="assets/img/maharaja.png?v=20260515c" alt="Air India Maharaja" onerror="this.onerror=null; this.src='assets/img/maharaja.svg?v=20260515c'"/>
+    <img class="maharaja" src="assets/img/maharaja.png?v=20260515d" alt="Air India Maharaja" onerror="this.onerror=null; this.src='assets/img/maharaja.svg?v=20260515d'"/>
   </div>
 
   <div class="login-stage" id="loginStage">
@@ -288,8 +288,7 @@ body::after {
         <input class="input" type="text" id="password" name="aiva_pass_3917" required autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" placeholder="••••••••" style="-webkit-text-security:disc; text-security:disc; font-family:text-security-disc, var(--font-sans);"/>
       </div>
       <div class="demo">
-        Crew only · 14 named pilots have access.<br>
-        <a id="fillDemo" style="opacity:.85;">Fill admin credentials</a>
+        Crew only · 14 named pilots have access.
       </div>
       <button type="submit" class="submit">Begin Pre-flight →</button>
     </form>
@@ -317,11 +316,11 @@ body::after {
   </div>
 </div>
 
-<script src="assets/js/store.js?v=20260515c"></script>
-<script src="assets/js/data.js?v=20260515c"></script>
-<script src="assets/js/util.js?v=20260515c"></script>
-<script src="assets/js/auth.js?v=20260515c"></script>
-<script src="assets/js/maharaja.js?v=20260515c"></script>
+<script src="assets/js/store.js?v=20260515d"></script>
+<script src="assets/js/data.js?v=20260515d"></script>
+<script src="assets/js/util.js?v=20260515d"></script>
+<script src="assets/js/auth.js?v=20260515d"></script>
+<script src="assets/js/maharaja.js?v=20260515d"></script>
 <script>
   const stage = document.getElementById('loginStage');
   const brand = document.getElementById('brandTap');
@@ -334,13 +333,6 @@ body::after {
       opened = true;
       setTimeout(() => document.getElementById('email').focus(), 250);
     }
-  });
-
-  document.getElementById('fillDemo').addEventListener('click', (e) => {
-    e.preventDefault(); e.stopPropagation();
-    document.getElementById('email').value = 'gunant.pahwa@aiv.in';
-    document.getElementById('password').value = 'Falcon-77W#42';
-    document.getElementById('email').focus();
   });
 
   if (AIVA.Auth.isLoggedIn()) location.replace('portal.html');

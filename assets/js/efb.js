@@ -13,7 +13,7 @@
   if (!pilot) return;
   const P = AIVA.Store.pilot(pilot.id);
 
-  const { $, $$, el, fmtZulu, fmtMins, toast, modal, distance } = AIVA.U;
+  const { $, $$, el, fmtZulu, fmtMins, toast, modal, distance, ymd } = AIVA.U;
   const I = AIVA.Icon;
 
   document.body.classList.add('efb-body');
@@ -74,12 +74,93 @@
   function activeFlight() {
     const fno = P.get('active_flight');
     if (!fno) {
-      const today = new Date().toISOString().slice(0,10);
+      const today = ymd();
       const bk = (P.get('roster_bookings', []) || []).find(b => b.date === today);
       if (bk) return AIVA.findFlight(bk.fno);
       return null;
     }
     return AIVA.findFlight(fno);
+  }
+
+  /* ----------------------- FLIGHT-PLAN FILING MODAL -----------------------
+     Opened from the OFP and Navlog pages — same fields as SimBrief Dispatch,
+     callsign locked to AIC / AXB. On save it lands in the pilot's own
+     flight_plans list AND the admin review queue (flight_plans_queue) so
+     the Chief Pilot can sign off on serious sectors. */
+  function openFileFlightPlanModal(f) {
+    const fromA = f ? AIVA.airport(f.from) : null;
+    const toA   = f ? AIVA.airport(f.to)   : null;
+    const defaultCs = (f?.cs) || ('AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
+    const body = el('div');
+    body.innerHTML = `
+      <div class="text-mute" style="font-size:12.5px;margin-bottom:14px;">Same form as SimBrief Dispatch. Callsign must be AIC or AXB. Saved to your account + the admin review queue.</div>
+      <div class="grid grid-3" style="gap:10px;">
+        <div><div class="label">Callsign</div>
+          <input class="input mono" id="efbCs" value="${defaultCs}" placeholder="AIC2951">
+          <div class="mono" id="efbCsHint" style="font-size:10px;margin-top:4px;color:var(--text-mute);">AIC or AXB followed by digits</div>
+        </div>
+        <div><div class="label">Origin (ICAO)</div><input class="input mono" id="efbFrom" value="${fromA?.icao || ''}" placeholder="VIDP" maxlength="4"></div>
+        <div><div class="label">Destination (ICAO)</div><input class="input mono" id="efbTo" value="${toA?.icao || ''}" placeholder="VABB" maxlength="4"></div>
+        <div><div class="label">Alternate (ICAO)</div><input class="input mono" id="efbAltn" placeholder="VAAH" maxlength="4"></div>
+        <div><div class="label">Aircraft</div>
+          <select class="input" id="efbAc">${AIVA.fleetTypes().map(t => `<option value="${t}"${f && t===f.ac?' selected':''}>${t}</option>`).join('')}</select>
+        </div>
+        <div><div class="label">Registration</div><input class="input mono" id="efbReg" placeholder="VT-EXJ"></div>
+        <div><div class="label">Cruise FL</div><input class="input mono" id="efbFl" value="360"></div>
+        <div><div class="label">Cost index</div><input class="input mono" id="efbCi" value="35"></div>
+        <div><div class="label">PAX</div><input class="input mono" id="efbPax" value="158"></div>
+        <div style="grid-column: span 3;"><div class="label">Route</div><input class="input mono" id="efbRte" placeholder="DCT NIVUL G450 RAJDA DCT"></div>
+        <div style="grid-column: span 3;"><div class="label">Remarks</div><input class="input mono" id="efbRmk" placeholder="RVSM CPDLC EQUIP / PBN/A1B1C1D1O1"></div>
+      </div>
+    `;
+    const validateCs = () => {
+      const i = body.querySelector('#efbCs'); const h = body.querySelector('#efbCsHint');
+      i.value = i.value.trim().toUpperCase();
+      const ok = /^(AIC|AXB)\d{1,4}$/.test(i.value);
+      h.textContent = ok ? '✓ Valid AIVA callsign' : 'Must be AIC or AXB followed by digits';
+      h.style.color = ok ? 'var(--good)' : 'var(--text-mute)';
+      return ok;
+    };
+    body.querySelector('#efbCs').addEventListener('input', validateCs);
+    setTimeout(validateCs, 0);
+
+    const m = modal({
+      title: 'File flight plan',
+      body,
+      width: '720px',
+      actions: [
+        { label:'Cancel', cls:'btn-ghost', onClick: (close) => close() },
+        { label:'File plan', cls:'btn-primary', onClick: (close) => {
+            if (!validateCs()) return toast('Fix the callsign — AIC/AXB only.', 'bad');
+            const o = body.querySelector('#efbFrom').value.trim().toUpperCase();
+            const d = body.querySelector('#efbTo').value.trim().toUpperCase();
+            if (o.length !== 4 || d.length !== 4) return toast('Origin and destination must be 4-letter ICAO.', 'bad');
+            const plan = {
+              id: 'FP' + (Date.now() % 100000000),
+              ts: Date.now(),
+              cs:   body.querySelector('#efbCs').value,
+              from: o, to: d,
+              altn: body.querySelector('#efbAltn').value.trim().toUpperCase(),
+              ac:   body.querySelector('#efbAc').value,
+              reg:  body.querySelector('#efbReg').value.trim(),
+              fl:   body.querySelector('#efbFl').value,
+              ci:   body.querySelector('#efbCi').value,
+              pax:  body.querySelector('#efbPax').value,
+              route:   body.querySelector('#efbRte').value.trim(),
+              remarks: body.querySelector('#efbRmk').value.trim(),
+              status:  'filed',
+              pilotId: pilot.id,
+              pilotName: pilot.name,
+              source: 'efb',
+            };
+            const own = P.get('flight_plans', []); own.push(plan); P.set('flight_plans', own);
+            const queue = AIVA.Store.get('flight_plans_queue', []); queue.push(plan); AIVA.Store.set('flight_plans_queue', queue);
+            toast(`✓ Filed ${plan.id} · ${plan.cs} ${o}→${d}`, 'ok');
+            close();
+        } },
+      ],
+    });
+    return m;
   }
 
   /* ----------------------- SHELL ----------------------- */
@@ -430,7 +511,7 @@
       const f = activeFlight();
       if (!f) return c.appendChild(emptyState('No active flight', 'Start a flight from the home screen.'));
       const fromA = AIVA.airport(f.from), toA = AIVA.airport(f.to);
-      const sbUser = AIVA.Store.get('simbrief_user','');
+      const sbUser = P.pref('simbrief_user','');
 
       /* Header */
       c.appendChild(el('div', { class:'embed-bar', html: `
@@ -454,7 +535,7 @@
           <div><span class="text-mute">ARRIVAL</span><br><b>${toA?.icao} / ${f.to}</b><br><span class="text-mute">${toA?.city}</span></div>
           <div><span class="text-mute">ALTERNATE</span><br><b id="bAlt">—</b></div>
           <div><span class="text-mute">AIRCRAFT</span><br><b>${f.ac}</b> · ${AIVA.acTypeName(f.ac)}</div>
-          <div><span class="text-mute">DEPARTURE DATE</span><br><b id="bDate">${new Date().toISOString().slice(0,10)}</b></div>
+          <div><span class="text-mute">DEPARTURE DATE</span><br><b id="bDate">${ymd()}</b></div>
           <div><span class="text-mute">STD</span><br><b id="bSTD">${f.dep} LT</b></div>
           <div><span class="text-mute">STA</span><br><b id="bSTA">${f.arr} LT</b></div>
           <div><span class="text-mute">AIR TIME</span><br><b id="bAirT">${f.dur}</b></div>
@@ -569,7 +650,7 @@
           const ofp = await AIVA.Dispatch.fetchSimbriefOFP(sbUser);
           /* Patch in the values */
           $('#bAlt',   c).textContent = ofp.altDest   || '—';
-          $('#bDate',  c).textContent = new Date().toISOString().slice(0,10).replace(/-/g,' ');
+          $('#bDate',  c).textContent = ymd().replace(/-/g,' ');
           $('#bSTD',   c).textContent = ofp.etd ? new Date(+ofp.etd*1000).toISOString().slice(11,16) + ' UTC' : '—';
           $('#bSTA',   c).textContent = ofp.eta ? new Date(+ofp.eta*1000).toISOString().slice(11,16) + ' UTC' : '—';
           $('#bAirT',  c).textContent = ofp.time ? fmtHM(+ofp.time) : f.dur;
@@ -755,12 +836,13 @@
     ofp: (c) => {
       const f = activeFlight();
       if (!f) return c.appendChild(emptyState('No active flight', 'OFP loads for your current flight.'));
-      const sbUser = AIVA.Store.get('simbrief_user', '');
+      const sbUser = P.pref('simbrief_user', '');
 
       /* Header bar with controls */
       c.appendChild(el('div', { class:'embed-bar', html: `
         <span class="dot" id="ofpDot"></span> SimBrief OFP · ${f.fno} ${f.from} → ${f.to}
         <span class="right">
+          <button class="btn btn-primary btn-sm" id="ofpFileNew">${I('send',14)} File new plan</button>
           <button class="btn btn-ghost btn-sm" id="ofpRefresh">${I('refresh',14)} Refresh</button>
           <button class="btn btn-ghost btn-sm" id="ofpView" data-mode="pdf">${I('book',14)} <span id="ofpViewLbl">Text view</span></button>
           <button class="btn btn-ghost btn-sm" id="ofpOpen">${I('external',14)} SimBrief</button>
@@ -901,6 +983,7 @@
       $('#ofpRefresh', c).onclick = loadOFP;
       $('#ofpView',    c).onclick = () => setMode(mode === 'pdf' ? 'text' : 'pdf');
       $('#ofpOpen',    c).onclick = () => window.open(sbUser ? `https://www.simbrief.com/system/dispatch.php?user=${encodeURIComponent(sbUser)}` : 'https://www.simbrief.com', '_blank');
+      $('#ofpFileNew', c).onclick = () => openFileFlightPlanModal(f);
 
       loadOFP();
     },
@@ -930,7 +1013,7 @@
     /* ==================== W&B ==================== */
     wb: (c) => {
       const f = activeFlight();
-      const sbUser = AIVA.Store.get('simbrief_user', '');
+      const sbUser = P.pref('simbrief_user', '');
 
       /* Operating Empty Weight (DOW) per type — Air India real figures, KG.
          DOW = Dry Operating Weight, i.e. the aircraft empty + crew + catering +
@@ -1099,7 +1182,7 @@
       const paxCount = Math.round(totalSeats * loadFactor);
 
       /* Deterministic seeded RNG so the manifest doesn't reshuffle each visit */
-      const seedKey = `manifest:${f.fno}:${new Date().toISOString().slice(0,10)}`;
+      const seedKey = `manifest:${f.fno}:${ymd()}`;
       let seed = 0; for (const ch of seedKey) seed = (seed * 131 + ch.charCodeAt(0)) >>> 0;
       const rand = () => { seed = (seed * 1103515245 + 12345) >>> 0; return (seed >>> 16) / 65535; };
       const pick = (arr) => arr[Math.floor(rand() * arr.length)];
@@ -1192,7 +1275,7 @@
         const blob = new Blob([csv], { type:'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = `manifest-${f.fno}-${new Date().toISOString().slice(0,10)}.csv`;
+        a.href = url; a.download = `manifest-${f.fno}-${ymd()}.csv`;
         a.click(); URL.revokeObjectURL(url);
       };
     },
@@ -1426,7 +1509,7 @@
         const psrId = AIVA.U.uid();
         cur.push({
           _id: AIVA.U.uid(),
-          date: new Date(fp.startedAt).toISOString().slice(0,10),
+          date: ymd(new Date(fp.startedAt)),
           fno: fp.fno, ac: f.ac, from: f.from, to: f.to,
           durMins: totalMins,
           network: 'OFFLINE',
@@ -1591,7 +1674,7 @@
         const f2 = AIVA.findFlight(fpi.fno);
         cur.push({
           _id: AIVA.U.uid(),
-          date: new Date(fpi.startedAt).toISOString().slice(0,10),
+          date: ymd(new Date(fpi.startedAt)),
           fno: fpi.fno, ac: f2?.ac, from: f2?.from, to: f2?.to,
           durMins: Math.round((Date.now() - fpi.startedAt) / 60000),
           network: 'OFFLINE',
@@ -1605,7 +1688,7 @@
 
     /* ==================== HOPPIE ACARS ==================== */
     hoppie: (c) => {
-      const code = AIVA.Store.get('hoppieCode', '');
+      const code = P.pref('hoppieCode', '');
       const flightCallsign = activeFlight()?.cs || '';
 
       c.appendChild(el('div', { class:'embed-bar', html: `<span class="dot"></span> Hoppie ACARS · ${code ? `Logon code set · CS ${flightCallsign}` : 'No logon code'} <span class="right"><span class="pill pill-${code ? 'ok' : 'warn'}" style="font-size:9px;">${code ? 'READY' : 'SETUP NEEDED'}</span></span>` }));
@@ -2024,7 +2107,7 @@
   function startLivePosBroadcast() {
     if (livePosTimer) clearInterval(livePosTimer);
     const me = AIVA.Auth.currentPilot();
-    const myCall = AIVA.Store.get('my_callsign', 'AIC' + (me?.id || '001').replace(/[^0-9]/g,'').slice(-3));
+    const myCall = P.pref('my_callsign', 'AIC' + (me?.id || '001').replace(/[^0-9]/g,'').slice(-3));
     const myBase = me?.base ? AIVA.airport(me.base) : null;
     livePosTimer = setInterval(() => {
       const s  = AIVA.FSUIPC?.state?.() || {};

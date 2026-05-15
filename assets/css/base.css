@@ -766,6 +766,8 @@ html[data-theme="light"] .onb-close { background: rgba(20,16,18,.04); color: rgb
   align-items: center;
   font-size: 13px;
 }
+/* 5-col variant after Type-rating column removal */
+.crew-table-5col .crew-row { grid-template-columns: 90px 2fr 1fr 80px 110px; }
 .crew-row:last-child { border-bottom: 0; }
 .crew-row > div:nth-child(2) { display: grid; grid-template-columns: 36px 1fr; gap: 10px; align-items: center; }
 .crew-row > div:nth-child(2) .crew-avatar {

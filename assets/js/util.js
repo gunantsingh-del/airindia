@@ -220,8 +220,18 @@ AIVA.U = (() => {
   /* Random ID */
   const uid = () => Math.random().toString(36).slice(2, 10);
 
-  /* Year/month/day helpers */
-  const todayISO = () => new Date().toISOString().slice(0,10);
+  /* Year/month/day helpers — LOCAL TIMEZONE.
+     toISOString() always gives UTC; for IST (UTC+5:30) users every booking
+     made after 05:30 local lands a day BEHIND the filter expectations, so
+     "Roster confirmed" sectors silently get purged by the "past dates"
+     cleanup in getBookings(). ymd() returns the user's local YYYY-MM-DD,
+     which is what every "today" check in the app actually wants. */
+  const ymd = (d = new Date()) => {
+    const dt = d instanceof Date ? d : new Date(d);
+    return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  };
+  /* Kept for back-compat; both now point at the local-aware impl. */
+  const todayISO = () => ymd();
   const isoToDate = (s) => new Date(s + 'T00:00:00');
 
   return {
@@ -230,6 +240,6 @@ AIVA.U = (() => {
     fmtNum, fmtMins, fmtDur, fmtDate, fmtTime, fmtZulu,
     greeting, toast, modal,
     parseCSV, detectFormat, mapColumn, parseDuration,
-    avg, debounce, uid, todayISO, isoToDate,
+    avg, debounce, uid, todayISO, isoToDate, ymd,
   };
 })();

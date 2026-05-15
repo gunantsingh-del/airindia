@@ -13,7 +13,7 @@
   (() => {
     const af = P.get('active_flight', null);
     if (!af) return;
-    const today = new Date().toISOString().slice(0,10);
+    const today = ymd();
     const bookingsToday = (P.get('roster_bookings', []) || []).filter(b => b.date === today);
     if (!bookingsToday.find(b => b.fno === af)) {
       P.remove('active_flight');
@@ -22,7 +22,7 @@
   })();
 
   const { $, $$, el, fmtNum, fmtMins, fmtDate, fmtZulu, greeting, toast, modal,
-          distance, parseCSV, detectFormat, mapColumn, parseDuration, avg } = AIVA.U;
+          distance, parseCSV, detectFormat, mapColumn, parseDuration, avg, ymd } = AIVA.U;
   const I = AIVA.Icon;
 
   /* ----------------------- NAV ----------------------- */
@@ -56,7 +56,8 @@
       { id:'fdtl',      label:'FDTL Tracker',  icon:'clock' },
       { id:'ranks',     label:'Ranks',         icon:'star' },
       { id:'crew',      label:'Crew List',     icon:'users' },
-      { id:'liveries',  label:'Liveries',      icon:'palette' },
+      /* Liveries page hidden — the renderer still lives under PAGES so hash
+         deep-links keep working, but it's off the sidebar per Chief Pilot. */
       { id:'hoppie',    label:'Hoppie ACARS',  icon:'send' },
       { id:'newsroom',  label:'Newsroom',      icon:'newspaper' },
       { id:'myai',      label:'myAI',          icon:'newspaper' },
@@ -169,10 +170,10 @@
     /* Small helper — fires a Hoppie POST (no response needed for one-way
        auto-messages). Uses the configured proxy. */
     async function hoppieAutoSend(to, type, body) {
-      const code = AIVA.Store.get('hoppieCode', '');
+      const code = P.pref('hoppieCode', '');
       if (!code) return;
-      const myCall = AIVA.Store.get('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
-      const proxy  = (AIVA.Store.get('hoppie_proxy','') || 'https://corsproxy.io/?');
+      const myCall = P.pref('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
+      const proxy  = (P.pref('hoppie_proxy','') || 'https://corsproxy.io/?');
       const url = proxy + encodeURIComponent('https://www.hoppie.nl/acars/system/connect.html?' +
         new URLSearchParams({ logon: code, from: myCall, to, type, packet: body }));
       try {
@@ -188,9 +189,9 @@
        Whenever the pilot crosses 10k ft on descent OR touches down, send
        a quick OPS/PROGRESS to admin (AIC001) so dispatch sees their state. */
     AIVA.FSUIPC?.on('descent10k', async (info) => {
-      const myCall = AIVA.Store.get('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
+      const myCall = P.pref('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
       /* Find this pilot's active sector from today's bookings */
-      const today = new Date().toISOString().slice(0,10);
+      const today = ymd();
       const bks = AIVA.Store.pilot(pilot.id).get('roster_bookings', []).filter(b => b.date === today);
       const active = bks[0] ? AIVA.findFlight(bks[0].fno) : null;
       const dest = active ? (AIVA.airport(active.to)?.icao || active.to) : (info.dest || 'XXXX');
@@ -201,8 +202,8 @@
     });
 
     AIVA.FSUIPC?.on('landing', async (info) => {
-      const myCall = AIVA.Store.get('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
-      const today = new Date().toISOString().slice(0,10);
+      const myCall = P.pref('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
+      const today = ymd();
       const bks = AIVA.Store.pilot(pilot.id).get('roster_bookings', []).filter(b => b.date === today);
       const active = bks[0] ? AIVA.findFlight(bks[0].fno) : null;
       const destCity = active ? (AIVA.airport(active.to)?.city || active.to) : '';
@@ -219,7 +220,7 @@
         if (nextF) {
           toast(`Next leg in roster: ${nextF.fno} ${nextF.from}→${nextF.to}`, 'ok');
           /* Pull SimBrief for next leg if username configured (auto-prep) */
-          const sb = AIVA.Store.get('simbrief_user', '');
+          const sb = P.pref('simbrief_user', '');
           if (sb) {
             AIVA.Dispatch.fetchSimbriefOFP(sb).then(ofp => {
               AIVA.Store.pilot(pilot.id).set('next_leg_ofp', ofp);
@@ -256,7 +257,7 @@
         const allPilots = AIVA.Auth.allPilots();
         for (const p of allPilots) {
           const bks = AIVA.Store.pilot(p.id).get('roster_bookings', [])
-            .filter(b => b.date >= new Date().toISOString().slice(0,10))
+            .filter(b => b.date >= ymd())
             .sort((a,b) => a.date.localeCompare(b.date));
           const idx = bks.findIndex(b => b.fno.endsWith((target.callsign.match(/(\d+)$/)||[,''])[1]));
           if (idx !== -1 && bks[idx+1]) {
@@ -491,7 +492,7 @@
        deterministic bid generator (pre-2026-05-14) littered the roster with
        past dates that were never actually flown. We purge them here once. */
     const raw = P.get('roster_bookings', []);
-    const today = new Date().toISOString().slice(0,10);
+    const today = ymd();
     const cleaned = raw.filter(b => (b.date || '') >= today);
     if (cleaned.length !== raw.length) {
       P.set('roster_bookings', cleaned);
@@ -536,7 +537,7 @@
         Manual logbook entries must be backed by a CSV export from <b>Volanta</b> or <b>ElevateX</b> covering this exact sector. Admin reviews and approves before it lands in your logbook.
       </div>
       <div class="grid grid-2" style="gap:10px;">
-        <div><div class="label">Date (YYYY-MM-DD)</div><input class="input mono" id="cmDate" value="${new Date().toISOString().slice(0,10)}"/></div>
+        <div><div class="label">Date (YYYY-MM-DD)</div><input class="input mono" id="cmDate" value="${ymd()}"/></div>
         <div><div class="label">Flight number</div><input class="input mono" id="cmFno" placeholder="AI187"/></div>
         <div><div class="label">From (IATA)</div><input class="input mono" id="cmFrom" placeholder="DEL"/></div>
         <div><div class="label">To (IATA)</div><input class="input mono" id="cmTo" placeholder="BOM"/></div>
@@ -676,7 +677,7 @@
       sub: 'Operations · Live',
       render: (c) => {
         const bookings = getBookings();
-        const today = new Date().toISOString().slice(0,10);
+        const today = ymd();
         const todayBookings = findBookingsOnDate(today);
         /* "Next" = the EARLIEST upcoming day with at least one booking */
         const futureDates = [...new Set(bookings.filter(b => b.date > today).map(b => b.date))].sort();
@@ -1302,13 +1303,13 @@
           }
 
           $('#confirmRoster', c).onclick = () => {
-            /* Save sectors as bookings starting today */
-            const today = new Date(); today.setHours(0,0,0,0);
-            const ymd = today.toISOString().slice(0,10);
+            /* Save sectors as bookings starting today (LOCAL date — see ymd()
+               in util.js for why toISOString() is wrong here). */
+            const yyyymmdd = ymd();
             const bookings = getBookings();
-            const newOnes = selectedSectors.map(f => ({ date: ymd, fno: f.fno, ac: f.ac, op: f.op, ts: Date.now() }));
+            const newOnes = selectedSectors.map(f => ({ date: yyyymmdd, fno: f.fno, ac: f.ac, op: f.op, ts: Date.now() }));
             setBookings([...bookings, ...newOnes]);
-            toast(`✓ Roster confirmed — ${newOnes.length} sector${newOnes.length===1?'':'s'} on ${ymd}`, 'ok');
+            toast(`✓ Roster confirmed — ${newOnes.length} sector${newOnes.length===1?'':'s'} on ${yyyymmdd}`, 'ok');
             selectedSectors = [];
             persistBasket();
             renderBasket();
@@ -1517,11 +1518,11 @@
             preview.innerHTML = `
               <div class="card" style="padding:18px;">
                 <div class="row between mb-2">
-                  <div><h3 style="margin:0;">Generated rotation</h3><div class="text-mute" style="font-size:11.5px;">Starting ${startDate.toISOString().slice(0,10)} · ${totalLegs} sectors · ${(totalBlock/60).toFixed(1)} block hours</div></div>
+                  <div><h3 style="margin:0;">Generated rotation</h3><div class="text-mute" style="font-size:11.5px;">Starting ${ymd(startDate)} · ${totalLegs} sectors · ${(totalBlock/60).toFixed(1)} block hours</div></div>
                   <button class="btn btn-primary btn-sm" id="acceptGen">${I('check', 14)} Accept & add to calendar</button>
                 </div>
                 ${rotation.map((day, i) => {
-                  const date = new Date(startDate.getTime() + i * 86400000).toISOString().slice(0,10);
+                  const date = ymd(new Date(startDate.getTime() + i * 86400000));
                   if (day.rest) {
                     return `
                       <div class="mt-2" style="padding:12px 14px;background:rgba(96,165,250,.08);border-radius:10px;border:1px dashed rgba(96,165,250,.32);">
@@ -1559,7 +1560,7 @@
               const bookings = getBookings();
               const newOnes = [];
               rotation.forEach((day, i) => {
-                const date = new Date(startDate.getTime() + i * 86400000).toISOString().slice(0,10);
+                const date = ymd(new Date(startDate.getTime() + i * 86400000));
                 day.legs.forEach(f => newOnes.push({ date, fno: f.fno, ac: f.ac, op: f.op, ts: Date.now() }));
               });
               setBookings([...bookings, ...newOnes]);
@@ -1644,11 +1645,11 @@
           const today = new Date();
           for (let d = 1; d <= daysInMonth; d++) {
             const date = new Date(today.getFullYear(), today.getMonth(), d);
-            const ymd = date.toISOString().slice(0,10);
+            const dYmd = ymd(date);
             const cell = el('button', { class:'ac-chip', html:`${d}<br><span style="font-size:9px;opacity:.6;">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()]}</span>`, style:'padding:8px 4px;text-align:center;font-size:11px;' });
             cell.onclick = () => {
-              if (offDays.has(ymd)) { offDays.delete(ymd); cell.classList.remove('on'); }
-              else { offDays.add(ymd); cell.classList.add('on'); }
+              if (offDays.has(dYmd)) { offDays.delete(dYmd); cell.classList.remove('on'); }
+              else { offDays.add(dYmd); cell.classList.add('on'); }
             };
             grid.appendChild(cell);
           }
@@ -1706,7 +1707,7 @@
 
           function buildBidLine(shape, baseCode, allowedTypes, opVal, returnToBase, dayCapMins, targetHours, daysFlying, offDays, daysInMonth) {
             const today = new Date();
-            const todayYmd = today.toISOString().slice(0,10);
+            const todayYmd = ymd(today);
             const targetMins = targetHours * 60;
             const out = { shape, days: [], totalMins: 0 };
             const seed = { heavy: 7, balanced: 17, layover: 23 }[shape] || 1;
@@ -1753,10 +1754,10 @@
             let pickedDays = 0, dayIdx = today.getDate();
             while (pickedDays < daysFlying && dayIdx <= daysInMonth && out.totalMins < targetMins) {
               const date = new Date(today.getFullYear(), today.getMonth(), dayIdx);
-              const ymd = date.toISOString().slice(0,10);
+              const dYmd = ymd(date);
               dayIdx++;
-              if (ymd < todayYmd) continue;
-              if (offDays.has(ymd)) continue;
+              if (dYmd < todayYmd) continue;
+              if (offDays.has(dYmd)) continue;
 
               let legs = [];
               let here = baseCode;
@@ -1808,7 +1809,7 @@
               }
               if (!legs.length) continue;
               const block = legs.reduce((s,f) => s + f.durMins, 0);
-              out.days.push({ date: ymd, legs, block, longHaul: dayIsLongHaul });
+              out.days.push({ date: dYmd, legs, block, longHaul: dayIsLongHaul });
               out.totalMins += block;
               pickedDays++;
 
@@ -1822,7 +1823,7 @@
                   let retIdx = dayIdx + (wasLongHaul ? 1 : 0);
                   while (retIdx <= daysInMonth) {
                     const rDate = new Date(today.getFullYear(), today.getMonth(), retIdx);
-                    const rYmd  = rDate.toISOString().slice(0,10);
+                    const rYmd  = ymd(rDate);
                     if (rYmd >= todayYmd && !offDays.has(rYmd)) {
                       /* Chain the return flight's continuation too (AI128 ORD→VIE → VIE→DEL) */
                       const retLegs = [ret];
@@ -2149,15 +2150,26 @@
             out.appendChild(metarFullBlock(icao, wx, atis, vat));
           });
         }
-        /* Try direct, then route through a CORS proxy if the browser blocks. */
-        const corsProxy = (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`;
+        /* Try direct, then route through CORS proxies if the browser blocks.
+           Two proxies stacked for resilience — corsproxy.io is rate-limited and
+           sometimes 502s, so we fall through to api.allorigins.win which is
+           slower but more reliable. */
+        const proxies = [
+          (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+          (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+        ];
         async function tryFetch(url) {
           try {
-            const r = await fetch(url);
+            const r = await fetch(url, { mode:'cors' });
             if (r.ok) return r;
           } catch {}
-          /* Fallback via corsproxy */
-          try { return await fetch(corsProxy(url)); } catch { return null; }
+          for (const p of proxies) {
+            try {
+              const r = await fetch(p(url));
+              if (r.ok) return r;
+            } catch {}
+          }
+          return null;
         }
         async function fetchWX(codes) {
           const url = `https://aviationweather.gov/api/data/metar?ids=${codes.join(',')}&format=json&taf=true&hours=3`;
@@ -2190,7 +2202,7 @@
         $('#metarInput', c).addEventListener('keydown', e => { if (e.key === 'Enter') $('#fetchMet', c).click(); });
         $('#hubPreset', c).onclick = () => { $('#metarInput', c).value = AIVA.HUBS.map(h => AIVA.airport(h)?.icao || h).join(' '); $('#fetchMet', c).click(); };
         $('#metRt', c).onclick = () => {
-          const today = new Date().toISOString().slice(0,10);
+          const today = ymd();
           const bk = (P.get('roster_bookings',[]) || []).find(b => b.date === today);
           if (!bk) return toast('No flight on today\'s roster', 'warn');
           const f = AIVA.findFlight(bk.fno);
@@ -2232,17 +2244,30 @@
                             : /UNSERVICEABLE|U\/S|INOP|RESTRIC|LIMIT|WIP/i.test(txt) ? 'gold'
                             : 'info';
 
+        /* Same proxy strategy as the METAR fetcher — direct first, then
+           corsproxy.io, then allorigins.win. AWC has been spotty about CORS
+           headers since the 2024 endpoint redesign, so the proxy chain is
+           load-bearing. */
+        const proxies = [
+          (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+          (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+        ];
+        async function tryFetch(url) {
+          try { const r = await fetch(url, { mode:'cors' }); if (r.ok) return r; } catch {}
+          for (const p of proxies) {
+            try { const r = await fetch(p(url)); if (r.ok) return r; } catch {}
+          }
+          return null;
+        }
+
         async function fetchNotams(icaos) {
           out.innerHTML = `<div class="row gap-2" style="padding:18px;"><div class="chakra-spin"></div><span class="text-mute">Pulling NOTAMs for ${icaos.length} airport${icaos.length>1?'s':''}…</span></div>`;
-          /* Primary: aviationweather.gov NOTAM endpoint (CORS-enabled, no auth, works for ICAO worldwide).
-             Fallback: NOAA AWC alternate endpoint. We try each, then surface a useful message. */
           const results = await Promise.all(icaos.map(async (icao) => {
+            const url = `https://aviationweather.gov/api/data/notam?ids=${icao}&format=json`;
+            const r = await tryFetch(url);
+            if (!r) return { icao, items: [], err: 'No response from NOTAM service (network or proxy unavailable).' };
             try {
-              /* AWC NOTAM API — returns plain text array; ICAO-keyed */
-              const r = await fetch(`https://aviationweather.gov/api/data/notam?ids=${icao}&format=json`);
-              if (!r.ok) throw new Error('HTTP ' + r.status);
               const text = await r.text();
-              /* AWC returns either JSON array or raw text depending on availability */
               let items = [];
               try {
                 const j = JSON.parse(text);
@@ -2304,7 +2329,7 @@
         $('#ntInp', c).addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
         $('#ntAll', c).onclick = () => { $('#ntInp', c).value = AIVA.HUBS.map(h => AIVA.airport(h)?.icao || h).join(' '); go(); };
         $('#ntRt',  c).onclick = () => {
-          const today = new Date().toISOString().slice(0,10);
+          const today = ymd();
           const bk = (P.get('roster_bookings',[]) || []).find(b => b.date === today);
           if (!bk) return toast('No flight on today\'s roster', 'warn');
           const f = AIVA.findFlight(bk.fno);
@@ -2320,23 +2345,259 @@
     ofp: {
       sub: 'Operational Flight Plan · SimBrief',
       render: (c) => {
+        /* ============================================================
+           OFP / Navlog — full SimBrief-style flight planning UI.
+
+           Three sections:
+           1) Plan builder — origin/destination/altn, aircraft, route,
+              cruise level, PAX, ZFW, fuel options. Callsign field is
+              LOCKED to AIC / AXB so cadets can't file under a fake
+              flight ID. "Generate on SimBrief" deep-links to
+              dispatch.simbrief.com with the form pre-filled (SimBrief
+              doesn't permit iframe embedding because of X-Frame-Options).
+           2) Filed plans — pilot's own plan history saved to localStorage,
+              plus a copy lands in the admin review queue so the Chief
+              Pilot signs off on serious sectors.
+           3) Pull from SimBrief — fetches the latest OFP the pilot
+              generated on their SimBrief account and renders it inline.
+        ============================================================ */
+        const todayBk = (getBookings() || []).find(b => b.date === ymd());
+        const todayF  = todayBk ? AIVA.findFlight(todayBk.fno) : null;
+        const pilotTypes = (pilot.aircraft && pilot.aircraft.length) ? pilot.aircraft : AIVA.fleetTypes();
+        const allTypes = AIVA.fleetTypes();
+        const defaultCs = (todayF?.cs) || ('AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
+
+        const fromI = todayF ? AIVA.airport(todayF.from)?.icao || '' : '';
+        const toI   = todayF ? AIVA.airport(todayF.to)?.icao   || '' : '';
+        const defAc = todayF?.ac || pilotTypes[0] || 'A20N';
+
         c.appendChild(el('section', { html: `
           <div class="section-title">
-            <div><h2>OFP / Navlog</h2><div class="sub">SimBrief fetcher · route analysis</div></div>
+            <div><h2>OFP / Navlog</h2><div class="sub">SimBrief dispatch · file flight plan · AIC + AXB callsigns only</div></div>
             <div class="actions">
-              <button class="btn btn-primary btn-sm" id="fetchSb">${I('download', 14)} Fetch latest OFP</button>
-              <a href="https://dispatch.simbrief.com/" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">${I('external', 14)} Open Dispatch</a>
+              <a href="https://dispatch.simbrief.com/" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">${I('external', 14)} Open SimBrief Dispatch</a>
             </div>
           </div>
-          <div class="note-callout">Set your SimBrief username in your <a href="#profile" class="text-gold">profile</a> to one-click-fetch your latest OFP.</div>
-          <div id="ofpOut" class="mt-4 text-mute" style="font-size:13px;">No OFP fetched yet. Click <b>Fetch latest OFP</b>.</div>
+
+          ${todayF ? `
+            <div class="note-callout">Today's roster: <b>${todayF.fno}</b> · ${todayF.from} → ${todayF.to} · ${todayF.dep}–${todayF.arr} (${todayF.dur}) · ${todayF.ac}. Form pre-filled.</div>
+          ` : `
+            <div class="note-callout">No flight on today's roster. Type ICAO codes below to plan an ad-hoc sector.</div>
+          `}
+
+          <!-- ===== Section 1: Plan builder ===== -->
+          <div class="card mt-4" style="padding:22px;">
+            <div class="row between mb-3">
+              <div><h3 style="margin:0;font-size:17px;">Build flight plan</h3><div class="text-mute" style="font-size:11.5px;">SimBrief Dispatch fields · same layout you'd see at simbrief.com</div></div>
+              <span class="pill pill-gold" style="font-size:9.5px;">AIC / AXB ONLY</span>
+            </div>
+
+            <div class="grid grid-3" style="gap:12px;">
+              <div><div class="label">Callsign</div>
+                <input class="input mono" id="ofpCs" value="${defaultCs}" placeholder="AIC2951">
+                <div class="text-mute mono" style="font-size:10px;margin-top:4px;" id="csHint">Must start with AIC or AXB</div>
+              </div>
+              <div><div class="label">Origin (ICAO)</div><input class="input mono" id="ofpFrom" value="${fromI}" placeholder="VIDP" maxlength="4"></div>
+              <div><div class="label">Destination (ICAO)</div><input class="input mono" id="ofpTo" value="${toI}" placeholder="VABB" maxlength="4"></div>
+              <div><div class="label">Alternate (ICAO)</div><input class="input mono" id="ofpAltn" placeholder="VAAH" maxlength="4"></div>
+              <div><div class="label">Aircraft type</div>
+                <select class="input" id="ofpAc">
+                  ${allTypes.map(t => `<option value="${t}"${t===defAc?' selected':''}>${t} · ${AIVA.acTypeName(t)}</option>`).join('')}
+                </select>
+              </div>
+              <div><div class="label">Registration</div><input class="input mono" id="ofpReg" placeholder="VT-EXJ"></div>
+
+              <div><div class="label">Cruise FL</div><input class="input mono" id="ofpFl" value="360" placeholder="360"></div>
+              <div><div class="label">Cost index</div><input class="input mono" id="ofpCi" value="35" placeholder="35"></div>
+              <div><div class="label">PAX count</div><input class="input mono" id="ofpPax" value="158" placeholder="158"></div>
+
+              <div style="grid-column: span 3;">
+                <div class="label">Route (airways + waypoints — leave blank to let SimBrief auto-route)</div>
+                <input class="input mono" id="ofpRte" placeholder="DCT NIVUL G450 RAJDA DCT">
+              </div>
+              <div style="grid-column: span 3;">
+                <div class="label">Remarks</div>
+                <input class="input mono" id="ofpRmk" placeholder="RVSM CPDLC EQUIP / PBN/A1B1C1D1O1 etc.">
+              </div>
+            </div>
+
+            <div class="row gap-2 mt-4" style="flex-wrap:wrap;">
+              <button class="btn btn-primary" id="ofpGen">${I('external', 14)} Generate on SimBrief</button>
+              <button class="btn btn-ghost" id="ofpFile">${I('send', 14)} File flight plan</button>
+              <button class="btn btn-ghost" id="ofpReset">${I('refresh', 14)} Reset</button>
+            </div>
+          </div>
+
+          <!-- ===== Section 2: Filed plans (per-pilot) ===== -->
+          <div class="section-title mt-6"><div><h3 style="margin:0;font-size:16px;">My filed plans</h3><div class="sub">Saved to your account + admin review queue</div></div></div>
+          <div id="ofpFiled"></div>
+
+          <!-- ===== Section 3: Pull latest SimBrief OFP ===== -->
+          <div class="section-title mt-6"><div><h3 style="margin:0;font-size:16px;">Pull latest OFP from SimBrief</h3><div class="sub">After you generate on SimBrief, click below to import it here</div></div></div>
+          <div class="card mb-3" style="padding:16px 20px;">
+            <div class="row gap-2" style="align-items:center;flex-wrap:wrap;">
+              <button class="btn btn-primary btn-sm" id="fetchSb">${I('download', 14)} Fetch latest OFP</button>
+              <span class="text-mute mono" style="font-size:11px;">SimBrief username: <b>${P.pref('simbrief_user','') || '<i>not set — open Profile to save</i>'}</b></span>
+            </div>
+          </div>
+          <div id="ofpOut" class="text-mute" style="font-size:13px;">No OFP fetched yet.</div>
         ` }));
+
+        /* ===== Callsign validation: AIC#### or AXB#### only ===== */
+        const csInput = $('#ofpCs', c);
+        const csHint  = $('#csHint', c);
+        const validateCs = () => {
+          const v = csInput.value.trim().toUpperCase();
+          csInput.value = v;
+          const ok = /^(AIC|AXB)\d{1,4}$/.test(v);
+          csHint.textContent = ok ? '✓ Valid AIVA callsign' : 'Must be AIC followed by digits (or AXB for Air India Express)';
+          csHint.style.color = ok ? 'var(--good)' : 'var(--text-mute)';
+          return ok;
+        };
+        csInput.addEventListener('input', validateCs);
+        validateCs();
+
+        /* ===== Generate on SimBrief (deep-link with pre-filled params) ===== */
+        $('#ofpGen', c).onclick = () => {
+          if (!validateCs()) return toast('Fix the callsign before generating — AIC/AXB only.', 'bad');
+          const cs = csInput.value;
+          const o = $('#ofpFrom', c).value.trim().toUpperCase();
+          const d = $('#ofpTo', c).value.trim().toUpperCase();
+          if (o.length !== 4 || d.length !== 4) return toast('Origin and destination must be 4-letter ICAO codes.', 'bad');
+          const altn = $('#ofpAltn', c).value.trim().toUpperCase();
+          const ac = $('#ofpAc', c).value;
+          const reg = $('#ofpReg', c).value.trim();
+          const fl = ($('#ofpFl', c).value || '360').replace(/^FL/i,'');
+          const ci = $('#ofpCi', c).value || '35';
+          const pax = $('#ofpPax', c).value || '0';
+          const route = encodeURIComponent($('#ofpRte', c).value.trim());
+          const remarks = encodeURIComponent($('#ofpRmk', c).value.trim());
+          /* SimBrief Dispatch URL params:
+             orig, dest, altn, type, reg, callsgn, fl, cpt, route, pax, ci, manualrmk */
+          const params = new URLSearchParams({
+            orig: o, dest: d, altn,
+            type: ac, reg, callsgn: cs,
+            fl, ci, pax,
+            route: $('#ofpRte', c).value.trim(),
+            manualrmk: $('#ofpRmk', c).value.trim(),
+          });
+          window.open(`https://dispatch.simbrief.com/options/custom?${params.toString()}`, '_blank', 'noopener');
+          toast(`SimBrief opened in new tab for ${cs}.`, 'ok');
+        };
+
+        /* ===== File flight plan — saves to per-pilot history + admin queue ===== */
+        $('#ofpFile', c).onclick = () => {
+          if (!validateCs()) return toast('Fix the callsign before filing — AIC/AXB only.', 'bad');
+          const cs = csInput.value;
+          const o  = $('#ofpFrom', c).value.trim().toUpperCase();
+          const d  = $('#ofpTo', c).value.trim().toUpperCase();
+          if (o.length !== 4 || d.length !== 4) return toast('Origin and destination must be 4-letter ICAO codes.', 'bad');
+          const plan = {
+            id: 'FP' + (Date.now() % 100000000),
+            ts: Date.now(),
+            cs, from: o, to: d,
+            altn: $('#ofpAltn', c).value.trim().toUpperCase(),
+            ac:   $('#ofpAc', c).value,
+            reg:  $('#ofpReg', c).value.trim(),
+            fl:   $('#ofpFl', c).value,
+            ci:   $('#ofpCi', c).value,
+            pax:  $('#ofpPax', c).value,
+            route:    $('#ofpRte', c).value.trim(),
+            remarks:  $('#ofpRmk', c).value.trim(),
+            status: 'filed',
+            pilotId: pilot.id,
+            pilotName: pilot.name,
+          };
+          /* per-pilot history */
+          const own = P.get('flight_plans', []);
+          own.push(plan);
+          P.set('flight_plans', own);
+          /* admin queue */
+          const queue = AIVA.Store.get('flight_plans_queue', []);
+          queue.push(plan);
+          AIVA.Store.set('flight_plans_queue', queue);
+          toast(`✓ Filed flight plan ${plan.id} · ${cs} ${o}→${d}`, 'ok');
+          renderFiled();
+        };
+
+        /* ===== Reset form to defaults ===== */
+        $('#ofpReset', c).onclick = () => {
+          csInput.value = defaultCs;
+          $('#ofpFrom', c).value = fromI;
+          $('#ofpTo', c).value = toI;
+          $('#ofpAltn', c).value = '';
+          $('#ofpAc', c).value = defAc;
+          $('#ofpReg', c).value = '';
+          $('#ofpFl', c).value = '360';
+          $('#ofpCi', c).value = '35';
+          $('#ofpPax', c).value = '158';
+          $('#ofpRte', c).value = '';
+          $('#ofpRmk', c).value = '';
+          validateCs();
+        };
+
+        /* ===== Render filed plans list ===== */
+        function renderFiled() {
+          const host = $('#ofpFiled', c);
+          const list = (P.get('flight_plans', []) || []).slice().reverse();
+          if (!list.length) {
+            host.innerHTML = `<div class="text-mute" style="font-size:12.5px;padding:8px 4px;">No plans filed yet.</div>`;
+            return;
+          }
+          host.innerHTML = list.slice(0, 12).map(x => `
+            <div class="card mt-2" style="padding:14px 16px;" data-fp="${x.id}">
+              <div class="row between">
+                <div>
+                  <div class="display" style="font-size:14px;font-weight:600;"><span class="mono" style="color:var(--ai-gold);">${x.cs}</span> · ${x.from} → ${x.to}${x.altn ? ' · ALTN ' + x.altn : ''}</div>
+                  <div class="text-mute mono" style="font-size:11px;margin-top:3px;">${x.ac}${x.reg ? ' · ' + x.reg : ''} · FL${x.fl} · CI ${x.ci} · ${x.pax} PAX · filed ${new Date(x.ts).toLocaleString()}</div>
+                </div>
+                <span class="pill pill-gold" style="font-size:9px;">${(x.status||'filed').toUpperCase()}</span>
+              </div>
+              ${x.route ? `<div class="mono mt-2" style="font-size:11.5px;white-space:pre-wrap;color:var(--text-dim);"><b>RTE</b> ${x.route}</div>` : ''}
+              ${x.remarks ? `<div class="mono mt-1" style="font-size:11.5px;color:var(--text-dim);"><b>RMK</b> ${x.remarks}</div>` : ''}
+              <div class="row gap-2 mt-3">
+                <button class="btn btn-ghost btn-sm" data-act="copy">Copy to form</button>
+                <button class="btn btn-ghost btn-sm" data-act="delete">Delete</button>
+              </div>
+            </div>
+          `).join('');
+          host.querySelectorAll('[data-fp]').forEach(card => {
+            const id = card.dataset.fp;
+            card.querySelector('[data-act="copy"]')?.addEventListener('click', () => {
+              const x = list.find(y => y.id === id);
+              if (!x) return;
+              csInput.value = x.cs;
+              $('#ofpFrom', c).value = x.from;
+              $('#ofpTo', c).value = x.to;
+              $('#ofpAltn', c).value = x.altn || '';
+              $('#ofpAc', c).value = x.ac;
+              $('#ofpReg', c).value = x.reg || '';
+              $('#ofpFl', c).value = x.fl || '360';
+              $('#ofpCi', c).value = x.ci || '35';
+              $('#ofpPax', c).value = x.pax || '0';
+              $('#ofpRte', c).value = x.route || '';
+              $('#ofpRmk', c).value = x.remarks || '';
+              validateCs();
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+              toast(`Loaded plan ${id} into the form.`, 'ok');
+            });
+            card.querySelector('[data-act="delete"]')?.addEventListener('click', () => {
+              if (!confirm('Delete this filed plan?')) return;
+              const rest = (P.get('flight_plans', []) || []).filter(y => y.id !== id);
+              P.set('flight_plans', rest);
+              renderFiled();
+            });
+          });
+        }
+        renderFiled();
+
+        /* ===== Fetch the latest OFP the pilot generated on SimBrief ===== */
         $('#fetchSb', c).onclick = async () => {
-          let u = AIVA.Store.get('simbrief_user');
+          let u = P.pref('simbrief_user');
           if (!u) {
             u = prompt('Enter your SimBrief username:');
             if (!u) return;
-            AIVA.Store.set('simbrief_user', u);
+            P.set('simbrief_user', u);
           }
           toast('Fetching from SimBrief…', 'info');
           try {
@@ -2344,27 +2605,30 @@
             const j = await r.json();
             const o = j.origin?.icao_code, d = j.destination?.icao_code, ac = j.aircraft?.icaocode;
             $('#ofpOut', c).innerHTML = `
-              <div class="card">
+              <div class="card" style="padding:20px;">
                 <div class="row between">
                   <h3 class="display" style="font-size:22px;">${o} → ${d}</h3>
                   <span class="pill pill-gold">${ac}</span>
                 </div>
                 <div class="grid grid-3 mt-3 mono" style="font-size:12px;line-height:1.7;color:var(--text-dim);">
-                  <div><b style="color:var(--text)">FOB</b><br>${(j.fuel?.plan_ramp / 1000).toFixed(1)} t</div>
-                  <div><b style="color:var(--text)">TOW</b><br>${(j.weights?.est_tow / 1000).toFixed(1)} t</div>
+                  <div><b style="color:var(--text)">FOB</b><br>${j.fuel?.plan_ramp ? (j.fuel.plan_ramp / 1000).toFixed(1) + ' t' : '—'}</div>
+                  <div><b style="color:var(--text)">TOW</b><br>${j.weights?.est_tow ? (j.weights.est_tow / 1000).toFixed(1) + ' t' : '—'}</div>
                   <div><b style="color:var(--text)">Block</b><br>${j.times?.est_time_enroute || '—'}</div>
                   <div><b style="color:var(--text)">PAX</b><br>${j.weights?.pax_count || '—'}</div>
-                  <div><b style="color:var(--text)">CI</b><br>${j.general?.costindex}</div>
+                  <div><b style="color:var(--text)">CI</b><br>${j.general?.costindex || '—'}</div>
                   <div><b style="color:var(--text)">ALTN</b><br>${j.alternate?.icao_code || '—'}</div>
                 </div>
                 <div class="gold-rule"></div>
                 <div class="eyebrow mb-2">Route</div>
                 <pre class="metar-block">${j.general?.route || '—'}</pre>
+                <div class="row gap-2 mt-3">
+                  ${j.fms_downloads?.directory ? `<a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="${j.fms_downloads.directory}${j.fms_downloads.pdf?.link || ''}">${I('download',14)} OFP PDF</a>` : ''}
+                </div>
               </div>
             `;
             toast(`OFP loaded: ${o} → ${d}`, 'ok');
           } catch {
-            toast('SimBrief fetch failed — check username or CORS.', 'bad');
+            toast('SimBrief fetch failed — check username + try again.', 'bad');
           }
         };
       }
@@ -3070,14 +3334,14 @@
     hoppie: {
       sub: 'ACARS · datalink · CPDLC',
       render: (c) => {
-        const code   = AIVA.Store.get('hoppieCode', '');
-        const myCall = AIVA.Store.get('my_callsign', 'AIC' + (pilot.id || '').replace(/[^0-9]/g,'').slice(-3) || 'AIC100');
+        const code   = P.pref('hoppieCode', '');
+        const myCall = P.pref('my_callsign', 'AIC' + (pilot.id || '').replace(/[^0-9]/g,'').slice(-3) || 'AIC100');
         const isAdmin = pilot.role === 'admin';
-        let viewMode = AIVA.Store.get('hop_view_mode', isAdmin ? 'admin' : 'pilot');
+        let viewMode = P.pref('hop_view_mode', isAdmin ? 'admin' : 'pilot');
 
         const HOPPIE_URL = 'https://www.hoppie.nl/acars/system/connect.html';
         function proxyURL() {
-          const custom = (AIVA.Store.get('hoppie_proxy', '') || '').trim();
+          const custom = (P.pref('hoppie_proxy', '') || '').trim();
           return custom || 'https://corsproxy.io/?';
         }
         async function hoppieRaw(params) {
@@ -3147,14 +3411,14 @@
         if (isAdmin) {
           c.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
             viewMode = b.dataset.mode;
-            AIVA.Store.set('hop_view_mode', viewMode);
+            P.set('hop_view_mode', viewMode);
             route();
           });
         }
 
         /* ============ ADMIN VIEW ============ */
         if (viewMode === 'admin') {
-          const sb_user = AIVA.Store.get('simbrief_user','');
+          const sb_user = P.pref('simbrief_user','');
           c.appendChild(el('section', { html: `
             <div class="grid grid-2">
               <div class="card">
@@ -3300,7 +3564,7 @@
                that hasn't been flown yet matching the current callsign suffix. */
             const callsign = $('#atgt', c).value.trim().toUpperCase();
             const num = (callsign.match(/(\d+)$/) || [,''])[1];
-            const today = new Date().toISOString().slice(0,10);
+            const today = ymd();
             /* Find which AIVA pilot has this callsign — we cross-check the
                admin's bookings AND the addressed pilot's bookings if we know. */
             const allPilots = AIVA.Auth.allPilots();
@@ -3529,11 +3793,47 @@
         const pending  = all.filter(x => x.status === 'pending');
         const accepted = all.filter(x => x.status === 'accepted');
         const rejected = all.filter(x => x.status === 'rejected');
+        /* Crew inquiries: prospective pilots who tapped "Request crew access"
+           on the login page. Source = inquiry_tab in the payload. */
+        const inquiries = AIVA.Store.get('crew_inquiries', []) || [];
+        const inqPending = inquiries.filter(x => (x.status || 'pending') === 'pending');
+        /* Filed flight plans: pilots build SimBrief-style plans on the
+           OFP page; they land here so the Chief Pilot can sanity-check
+           long-haul / international routes before they're flown. */
+        const filedPlans = AIVA.Store.get('flight_plans_queue', []) || [];
+        const fpOpen = filedPlans.filter(x => (x.status || 'filed') !== 'archived');
 
         c.appendChild(el('section', { html: `
           <div class="section-title">
-            <div><h2>Review Queue</h2><div class="sub">${pending.length} pending · ${accepted.length} accepted · ${rejected.length} rejected</div></div>
+            <div><h2>Review Queue</h2><div class="sub">${pending.length} claim${pending.length===1?'':'s'} · ${inqPending.length} inquir${inqPending.length===1?'y':'ies'} pending</div></div>
           </div>
+
+          ${inquiries.length ? `
+            <div class="card mb-4" style="padding:18px;">
+              <div class="row between mb-3">
+                <div>
+                  <h3 style="margin:0;font-size:16px;">Crew inquiries</h3>
+                  <div class="text-mute" style="font-size:11.5px;">From the public Request-Access tab. Email-relay also fires to your inbox.</div>
+                </div>
+                <span class="pill pill-gold" style="font-size:10px;">${inqPending.length} PENDING</span>
+              </div>
+              <div id="inqList"></div>
+            </div>
+          ` : ''}
+
+          ${filedPlans.length ? `
+            <div class="card mb-4" style="padding:18px;">
+              <div class="row between mb-3">
+                <div>
+                  <h3 style="margin:0;font-size:16px;">Filed flight plans</h3>
+                  <div class="text-mute" style="font-size:11.5px;">SimBrief-style plans pilots filed on the OFP page (callsign-restricted to AIC / AXB).</div>
+                </div>
+                <span class="pill pill-gold" style="font-size:10px;">${fpOpen.length} OPEN</span>
+              </div>
+              <div id="fpList"></div>
+            </div>
+          ` : ''}
+
           <div class="row gap-2 mb-3" id="rqTabs">
             <button class="ac-chip on" data-tab="pending">Pending · ${pending.length}</button>
             <button class="ac-chip" data-tab="accepted">Accepted · ${accepted.length}</button>
@@ -3541,6 +3841,119 @@
           </div>
           <div id="rqList"></div>
         ` }));
+
+        /* ===== Crew-inquiry renderer ===== */
+        function renderInquiries() {
+          const host = $('#inqList', c);
+          if (!host) return;
+          const all = (AIVA.Store.get('crew_inquiries', []) || []).slice().reverse();
+          if (!all.length) {
+            host.innerHTML = `<div class="text-mute" style="font-size:12.5px;padding:8px 4px;">No inquiries yet.</div>`;
+            return;
+          }
+          host.innerHTML = all.map(x => {
+            const status = x.status || 'pending';
+            return `
+              <div class="card mt-2" data-inq="${x.id}" style="padding:14px 16px;${status==='pending'?'border-color:rgba(255,225,89,.32);':''}">
+                <div class="row between">
+                  <div>
+                    <div class="display" style="font-size:15px;font-weight:600;">${x.name || '—'}</div>
+                    <div class="text-mute mono" style="font-size:11.5px;margin-top:2px;">${x.email || '—'} · ${new Date(x.ts).toLocaleString()}</div>
+                  </div>
+                  <span class="pill ${status==='pending'?'pill-gold':status==='contacted'?'pill-ok':''}" style="font-size:9px;">${status.toUpperCase()}</span>
+                </div>
+                <div class="mt-2" style="font-size:12.5px;line-height:1.6;"><b>Experience:</b> ${x.exp || '—'}</div>
+                <div class="mt-1" style="font-size:12.5px;line-height:1.6;"><b>Why AIVA:</b> ${(x.msg || '').replace(/</g,'&lt;')}</div>
+                <div class="row gap-2 mt-3">
+                  ${status === 'pending' ? `
+                    <a class="btn btn-primary btn-sm" href="mailto:${x.email}?subject=Re: AIVA crew inquiry&body=Hi ${(x.name||'').split(' ')[0]}%2C%0A%0A">${I('plane', 12)} Reply</a>
+                    <button class="btn btn-ghost btn-sm" data-act="contact">Mark contacted</button>
+                    <button class="btn btn-ghost btn-sm" data-act="dismiss">Dismiss</button>
+                  ` : `
+                    <button class="btn btn-ghost btn-sm" data-act="reopen">Reopen</button>
+                    <button class="btn btn-ghost btn-sm" data-act="delete">Delete</button>
+                  `}
+                </div>
+              </div>
+            `;
+          }).join('');
+          host.querySelectorAll('[data-inq]').forEach(card => {
+            const id = card.dataset.inq;
+            const upd = (status) => {
+              const list = AIVA.Store.get('crew_inquiries', []) || [];
+              const idx = list.findIndex(x => x.id === id);
+              if (idx < 0) return;
+              list[idx].status = status;
+              list[idx].decidedAt = Date.now();
+              AIVA.Store.set('crew_inquiries', list);
+              renderInquiries();
+              buildNav();
+            };
+            const del = () => {
+              const list = (AIVA.Store.get('crew_inquiries', []) || []).filter(x => x.id !== id);
+              AIVA.Store.set('crew_inquiries', list);
+              renderInquiries();
+              buildNav();
+            };
+            card.querySelector('[data-act="contact"]')?.addEventListener('click', () => upd('contacted'));
+            card.querySelector('[data-act="dismiss"]')?.addEventListener('click', () => upd('dismissed'));
+            card.querySelector('[data-act="reopen"]')?.addEventListener('click', () => upd('pending'));
+            card.querySelector('[data-act="delete"]')?.addEventListener('click', () => { if (confirm('Delete this inquiry permanently?')) del(); });
+          });
+        }
+        renderInquiries();
+
+        /* ===== Filed-flight-plan renderer ===== */
+        function renderFiledPlans() {
+          const host = $('#fpList', c);
+          if (!host) return;
+          const all = (AIVA.Store.get('flight_plans_queue', []) || []).slice().reverse();
+          if (!all.length) {
+            host.innerHTML = `<div class="text-mute" style="font-size:12.5px;padding:8px 4px;">No plans filed.</div>`;
+            return;
+          }
+          host.innerHTML = all.map(x => {
+            const status = x.status || 'filed';
+            return `
+              <div class="card mt-2" data-fp="${x.id}" style="padding:14px 16px;${status==='filed'?'border-color:rgba(255,225,89,.32);':''}">
+                <div class="row between">
+                  <div>
+                    <div class="display" style="font-size:14px;font-weight:600;"><span class="mono" style="color:var(--ai-gold);">${x.cs}</span> · ${x.from} → ${x.to}${x.altn ? ' · ALTN ' + x.altn : ''}</div>
+                    <div class="text-mute mono" style="font-size:11px;margin-top:3px;">${x.pilotName} (${x.pilotId}) · ${x.ac}${x.reg ? ' · ' + x.reg : ''} · FL${x.fl} · CI ${x.ci} · ${x.pax} PAX · filed ${new Date(x.ts).toLocaleString()}</div>
+                  </div>
+                  <span class="pill ${status==='filed'?'pill-gold':status==='approved'?'pill-ok':''}" style="font-size:9px;">${status.toUpperCase()}</span>
+                </div>
+                ${x.route ? `<div class="mono mt-2" style="font-size:11.5px;white-space:pre-wrap;color:var(--text-dim);"><b>RTE</b> ${x.route}</div>` : ''}
+                ${x.remarks ? `<div class="mono mt-1" style="font-size:11.5px;color:var(--text-dim);"><b>RMK</b> ${x.remarks}</div>` : ''}
+                <div class="row gap-2 mt-3">
+                  ${status === 'filed' ? `
+                    <button class="btn btn-primary btn-sm" data-act="approve">${I('check', 12)} Approve</button>
+                    <button class="btn btn-ghost btn-sm" data-act="archive">Archive</button>
+                  ` : `
+                    <button class="btn btn-ghost btn-sm" data-act="reopen">Reopen</button>
+                  `}
+                </div>
+              </div>
+            `;
+          }).join('');
+          host.querySelectorAll('[data-fp]').forEach(card => {
+            const id = card.dataset.fp;
+            const upd = (status) => {
+              const list = AIVA.Store.get('flight_plans_queue', []) || [];
+              const idx = list.findIndex(x => x.id === id);
+              if (idx < 0) return;
+              list[idx].status = status;
+              list[idx].decidedAt = Date.now();
+              list[idx].decidedBy = pilot.id;
+              AIVA.Store.set('flight_plans_queue', list);
+              renderFiledPlans();
+            };
+            card.querySelector('[data-act="approve"]')?.addEventListener('click', () => upd('approved'));
+            card.querySelector('[data-act="archive"]')?.addEventListener('click', () => upd('archived'));
+            card.querySelector('[data-act="reopen"]')?.addEventListener('click', () => upd('filed'));
+          });
+        }
+        renderFiledPlans();
 
         const renderList = (filter) => {
           const list = all.filter(x => x.status === filter);
@@ -3643,7 +4056,7 @@
             const f = AIVA.findFlight(claim.payload.fno);
             const m = (claim.payload.block || '0:00').split(':');
             log.push({
-              date:    new Date(claim.ts).toISOString().slice(0,10),
+              date:    ymd(new Date(claim.ts)),
               fno:     claim.payload.fno,
               from:    f?.from || '?',
               to:      f?.to   || '?',
@@ -3808,10 +4221,12 @@
         const clubMembers = pilots.filter(p => p.club !== false);
         const linePilots  = pilots.filter(p => p.club === false);
 
+        /* Type-rating column removed per Chief Pilot — felt like exposing
+           training currency to the rest of the crew. Hire date stays. */
         const renderTable = (list) => `
-          <div class="crew-table">
+          <div class="crew-table crew-table-5col">
             <div class="crew-row crew-head">
-              <div>ID</div><div>Pilot</div><div>Rank</div><div>Base</div><div>Type rating</div><div>Hire date</div>
+              <div>ID</div><div>Pilot</div><div>Rank</div><div>Base</div><div>Hire date</div>
             </div>
             ${list.map(p => `
               <div class="crew-row${p.role === 'admin' ? ' is-admin' : ''}">
@@ -3823,7 +4238,6 @@
                 </div>
                 <div>${p.rank}</div>
                 <div class="mono">${p.base}</div>
-                <div class="mono" style="font-size:11px;">${p.aircraft.join(' · ')}</div>
                 <div class="mono" style="font-size:11px;">${p.hireDate}</div>
               </div>
             `).join('')}
@@ -4052,24 +4466,24 @@
           <div class="grid grid-2">
             <div class="card">
               <div class="eyebrow">SimBrief username</div>
-              <input class="input mt-3" id="sbUsername" value="${AIVA.Store.get('simbrief_user','')}" placeholder="e.g. gunant_pahwa">
+              <input class="input mt-3" id="sbUsername" value="${P.pref('simbrief_user','')}" placeholder="e.g. gunant_pahwa">
               <button class="btn btn-ghost btn-sm mt-3" id="saveSb">Save</button>
             </div>
             <div class="card">
               <div class="eyebrow">Hoppie logon code</div>
-              <input class="input mt-3" id="hopCode" value="${AIVA.Store.get('hoppieCode','')}" placeholder="Your Hoppie logon">
+              <input class="input mt-3" id="hopCode" value="${P.pref('hoppieCode','')}" placeholder="Your Hoppie logon">
               <button class="btn btn-ghost btn-sm mt-3" id="saveHop">Save</button>
               <p class="text-mute mt-2" style="font-size:11px;">Free code at <a href="https://www.hoppie.nl/acars/" target="_blank" class="text-gold">hoppie.nl/acars</a> · open <a href="#hoppie" class="text-gold">Hoppie ACARS</a></p>
             </div>
             <div class="card">
               <div class="eyebrow">Your callsign</div>
-              <input class="input mt-3" id="myCallsign" value="${AIVA.Store.get('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3))}" placeholder="AIC100">
+              <input class="input mt-3" id="myCallsign" value="${P.pref('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3))}" placeholder="AIC100">
               <button class="btn btn-ghost btn-sm mt-3" id="saveCs">Save</button>
               <p class="text-mute mt-2" style="font-size:11px;">Used as the FROM field for any Hoppie message you send.</p>
             </div>
             <div class="card">
               <div class="eyebrow">Hoppie CORS proxy (advanced)</div>
-              <input class="input mt-3" id="hopProxy" value="${AIVA.Store.get('hoppie_proxy','')}" placeholder="https://corsproxy.io/?">
+              <input class="input mt-3" id="hopProxy" value="${P.pref('hoppie_proxy','')}" placeholder="https://corsproxy.io/?">
               <button class="btn btn-ghost btn-sm mt-3" id="saveProxy">Save</button>
               <p class="text-mute mt-2" style="font-size:11px;">Default: <code>https://corsproxy.io/?</code> · Set your own Cloudflare Worker / Vercel function URL if the default rate-limits.</p>
             </div>
@@ -4086,10 +4500,10 @@
             </div>
           </div>
         ` }));
-        $('#saveSb', c).onclick = () => { AIVA.Store.set('simbrief_user', $('#sbUsername').value.trim()); toast('SimBrief username saved.', 'ok'); };
-        $('#saveHop', c).onclick= () => { AIVA.Store.set('hoppieCode', $('#hopCode').value.trim()); toast('Hoppie code saved.', 'ok'); };
-        $('#saveCs', c).onclick = () => { AIVA.Store.set('my_callsign', $('#myCallsign').value.trim().toUpperCase()); toast('Callsign saved.', 'ok'); };
-        $('#saveProxy', c).onclick = () => { AIVA.Store.set('hoppie_proxy', $('#hopProxy').value.trim()); toast('CORS proxy saved · reload Hoppie page.', 'ok'); };
+        $('#saveSb', c).onclick = () => { P.set('simbrief_user', $('#sbUsername').value.trim()); toast('SimBrief username saved.', 'ok'); };
+        $('#saveHop', c).onclick= () => { P.set('hoppieCode', $('#hopCode').value.trim()); toast('Hoppie code saved.', 'ok'); };
+        $('#saveCs', c).onclick = () => { P.set('my_callsign', $('#myCallsign').value.trim().toUpperCase()); toast('Callsign saved.', 'ok'); };
+        $('#saveProxy', c).onclick = () => { P.set('hoppie_proxy', $('#hopProxy').value.trim()); toast('CORS proxy saved · reload Hoppie page.', 'ok'); };
 
         /* Profile picture upload */
         $('#profPicInput', c)?.addEventListener('change', (e) => {
@@ -4137,7 +4551,7 @@
     briefing: {
       sub: 'Crew briefing · EFF',
       render: (c) => {
-        const today = new Date().toISOString().slice(0,10);
+        const today = ymd();
         const todayBk = getBookings().find(b => b.date === today);
         const f = todayBk ? AIVA.findFlight(todayBk.fno) : null;
         if (!f) {
@@ -4419,7 +4833,7 @@
                       <td class="mono">${r.ym}</td>
                       <td>${r.cat}</td>
                       <td class="text-dim">${r.reason || '—'}</td>
-                      <td class="mono">${new Date(r.ts).toISOString().slice(0,10)}</td>
+                      <td class="mono">${ymd(new Date(r.ts))}</td>
                       <td><span class="pill pill-ok" style="font-size:9px;">APPROVED</span></td>
                     </tr>
                   `).join('')}
@@ -4656,7 +5070,7 @@
               <tbody>
                 ${list.slice().reverse().map(x => `
                   <tr>
-                    <td class="mono">${new Date(x.ts).toISOString().slice(0,10)}</td>
+                    <td class="mono">${ymd(new Date(x.ts))}</td>
                     <td>${x.cat}</td>
                     <td>${x.subj}</td>
                     <td><span class="pill ${x.status === 'closed' ? 'pill-ok' : 'pill-gold'}" style="font-size:9px;">${(x.status || 'open').toUpperCase()}</span></td>
@@ -4942,7 +5356,7 @@
 
   /* ----------------------- ROSTER DAY ----------------------- */
   function rosterDayEl(date, big) {
-    const iso = date.toISOString().slice(0,10);
+    const iso = ymd(date);
     const today = new Date(); today.setHours(0,0,0,0);
     const isToday = date.toDateString() === today.toDateString();
     const isTmrw  = (date.getTime() - today.getTime()) === 86400000;
@@ -5204,7 +5618,7 @@
 
     /* "next flight" */
     if (/next flight|my next|active flight|today/.test(ql)) {
-      const today = new Date().toISOString().slice(0,10);
+      const today = ymd();
       const bookings = P.get('roster_bookings', []);
       const todayBk = bookings.find(b => b.date === today);
       const next = bookings.filter(b => b.date > today).sort((a,b) => a.date.localeCompare(b.date))[0];

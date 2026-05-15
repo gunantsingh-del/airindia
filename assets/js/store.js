@@ -26,6 +26,19 @@ AIVA.Store = (() => {
     get: (k, fb = null) => get(`${pilotId}.${k}`, fb),
     set: (k, v) => set(`${pilotId}.${k}`, v),
     remove: (k) => remove(`${pilotId}.${k}`),
+    /* Read a preference with one-time migration from the legacy global key.
+       Older versions stored SimBrief username, Hoppie logon, callsign and
+       similar as global keys — that meant two pilots on the same browser
+       would overwrite each other's settings. pref() reads per-pilot first;
+       if absent, copies the legacy global value over and returns it. After
+       the first save, the per-pilot key is canonical. */
+    pref: (k, fb = null) => {
+      const cur = get(`${pilotId}.${k}`, null);
+      if (cur != null) return cur;
+      const legacy = get(k, null);
+      if (legacy != null) { set(`${pilotId}.${k}`, legacy); return legacy; }
+      return fb;
+    },
   });
 
   const wipeAll = () => Object.keys(localStorage).filter(k => k.startsWith(NS)).forEach(k => localStorage.removeItem(k));

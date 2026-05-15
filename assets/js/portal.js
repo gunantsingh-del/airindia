@@ -36,12 +36,11 @@
       { id:'stats',      label:'Statistics',    icon:'gauge' },
     ]},
     { group: 'Operations', items: [
-      { id:'briefing',    label:'Crew Briefing', icon:'clipboard' },
+      /* Crew Briefing / Performance / W&B live on the EFB only — they need
+         the active-flight + FSUIPC context that the cockpit surface provides. */
       { id:'met',         label:'Met Briefing',  icon:'cloud' },
       { id:'notam',       label:'NOTAM / AIP',   icon:'alert' },
       { id:'ofp',         label:'OFP / Navlog',  icon:'route' },
-      { id:'performance', label:'Performance',   icon:'target' },
-      { id:'wb',          label:'W & B',         icon:'scale' },
       { id:'network',     label:'Network Globe', icon:'globe' },
       { id:'situations',  label:'Situations',    icon:'activity' },
       { id:'announce',    label:'Announcements', icon:'megaphone' },
@@ -870,11 +869,9 @@
           <div class="section-title"><div><h2>Quick Access</h2><div class="sub">Most used during pre-flight</div></div></div>
           <div class="grid grid-4">
             ${quickCard('Book Roster','Plan your next trip','book','plus')}
-            ${quickCard('Briefing','EFF · NOTAM ack','briefing','clipboard')}
             ${quickCard('Met Briefing','METAR · TAF · SIGWX','met','cloud')}
             ${quickCard('Network Globe','All routes · planned','network','globe')}
             ${quickCard('OFP / Navlog','SimBrief OFP','ofp','route')}
-            ${quickCard('Performance','T/O · LDG','performance','target')}
             ${quickCard('EFB','In-flight tools','efb','plane', true)}
             ${quickCard('Newsroom','AI press releases','newsroom','newspaper')}
           </div>

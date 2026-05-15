@@ -3930,6 +3930,85 @@
           });
         }
 
+        /* ============ AIRCRAFT SETUP GUIDE ============
+           Pilots constantly ask "I sent a Hoppie message but my A350
+           isn't showing it" — the answer is almost always that the
+           aircraft side hasn't been configured: logon code missing in
+           the ATSU, MCDU FLT NO doesn't match the AIVA callsign, or the
+           ATSU was never put online. This collapsible card walks them
+           through the right spots in each major payware so dispatch
+           messages actually land in the cockpit. */
+        c.appendChild(el('section', { html: `
+          <details class="card hop-setup" style="margin-top:18px;">
+            <summary style="cursor:pointer;list-style:none;padding:14px 16px;display:flex;align-items:center;gap:12px;">
+              <span class="pill pill-gold" style="font-size:10px;">${I('book',12)} SETUP</span>
+              <div>
+                <div class="display" style="font-size:15px;line-height:1.1;">Aircraft Hoppie setup</div>
+                <div class="text-mute mono" style="font-size:11px;margin-top:2px;">your callsign: <b>${myCall}</b> · logon code: <b>${code ? '••••••' + code.slice(-4) : '<span style="color:#FCA5A5;">not set</span>'}</b></div>
+              </div>
+              <span class="text-mute mono" style="margin-left:auto;font-size:11px;">click to expand ▾</span>
+            </summary>
+
+            <div style="padding:4px 18px 20px;border-top:1px solid var(--border);">
+              <p class="text-mute" style="font-size:12.5px;line-height:1.6;margin-top:14px;">
+                Hoppie messages addressed to your aircraft only arrive if the cockpit ATSU is <b>logged on with the same code</b> and the <b>FLT NO / callsign matches AIVA's</b> (<b style="color:var(--ai-cream);">${myCall}</b>). Pick your aircraft below for the exact spots to enter both.
+              </p>
+
+              <!-- iniBuilds A350 -->
+              <div class="card mt-4" style="padding:14px 16px;background:rgba(255,225,89,.04);border-color:rgba(255,225,89,.22);">
+                <div class="row" style="gap:10px;align-items:center;">
+                  <span class="pill pill-gold" style="font-size:10px;">PRIORITY</span>
+                  <div class="display" style="font-size:14px;">iniBuilds A350 · MSFS</div>
+                </div>
+                <ol class="hop-steps" style="margin:12px 0 0;padding-left:22px;font-size:12.5px;line-height:1.75;color:var(--text-dim);">
+                  <li><b style="color:var(--ai-cream);">MCDU → INIT page A</b> → set <b>FLT NBR</b> to <code class="mono" style="background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;">${myCall}</code>. This is the callsign Hoppie routes to. If it's blank, nothing arrives.</li>
+                  <li><b style="color:var(--ai-cream);">EFB → iniManager</b> (the iniBuilds tablet, not the Navigraph one) → <b>Sim Options</b> → <b>ATSU / Datalink</b>. Toggle <b>Hoppie Network</b> ON. Paste your logon code: <code class="mono" style="background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;">${code ? '••••••' + code.slice(-4) : 'set one in Profile first'}</code>. Save.</li>
+                  <li><b style="color:var(--ai-cream);">MCDU → ATSU → AOC MENU → INIT</b> → confirm the logon code is shown and the status reads <b>READY</b> (not OFFLINE). If still OFFLINE, restart the aircraft session and re-enter from the EFB.</li>
+                  <li><b style="color:var(--ai-cream);">MCDU → ATSU → ATC MENU → NOTIFICATION</b> → enter the centre callsign (e.g. <code class="mono" style="background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;">AICVA</code> for AIVA dispatch, or your VATSIM ATC station) → <b>SEND</b>. Wait for the LOGON ACCEPTED uplink on the DCDU.</li>
+                  <li>Test by hitting <b>Self-ping</b> on the Diagnostics card below — you should see your own message land on the DCDU within ~60s.</li>
+                </ol>
+                <div class="text-mute mono" style="font-size:11px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+                  Polling cadence: the A350 ATSU polls Hoppie every ~60s. Wait at least one polling cycle before troubleshooting.
+                </div>
+              </div>
+
+              <!-- FlyByWire A320 -->
+              <div class="card mt-3" style="padding:14px 16px;">
+                <div class="display" style="font-size:14px;">FlyByWire A32NX · MSFS</div>
+                <ol class="hop-steps" style="margin:10px 0 0;padding-left:22px;font-size:12.5px;line-height:1.7;color:var(--text-dim);">
+                  <li>MCDU → <b>ATSU → AOC MENU → AOC INIT</b> → enter your callsign as <b>FROM</b>: <code class="mono" style="background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;">${myCall}</code>.</li>
+                  <li>flyPad (EFB) → <b>Settings → ATSU/AOC</b> → set <b>Hoppie User ID</b> to your logon code → <b>SAVE</b> → restart aircraft (the flyPad caches the code at boot).</li>
+                  <li>MCDU → <b>ATC MENU → CONNECTION → NOTIFICATION</b> → centre callsign → <b>SEND</b>.</li>
+                </ol>
+              </div>
+
+              <!-- PMDG -->
+              <div class="card mt-3" style="padding:14px 16px;">
+                <div class="display" style="font-size:14px;">PMDG 737 / 777 · MSFS</div>
+                <ol class="hop-steps" style="margin:10px 0 0;padding-left:22px;font-size:12.5px;line-height:1.7;color:var(--text-dim);">
+                  <li>PMDG doesn't ship native Hoppie. Use <b>SayIntentions</b>, <b>vPilot+CPDLC plugin</b>, or external <b>vACARS</b> / <b>VATSIM Hoppie bridge</b>. None are bundled with AIVA — AIVA's own ACARS panel (Hoppie tab here) keeps working regardless.</li>
+                  <li>If using vACARS: set <b>From callsign</b> to <code class="mono" style="background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;">${myCall}</code>, paste the logon code, and bind via SimConnect.</li>
+                </ol>
+              </div>
+
+              <!-- Troubleshooting -->
+              <div class="card mt-3" style="padding:14px 16px;background:rgba(252,165,165,.05);border-color:rgba(252,165,165,.25);">
+                <div class="row" style="gap:10px;align-items:center;">
+                  <span class="pill pill-red" style="font-size:10px;">DEBUG</span>
+                  <div class="display" style="font-size:14px;">Message sent from AIVA but not arriving in the cockpit?</div>
+                </div>
+                <ol class="hop-steps" style="margin:12px 0 0;padding-left:22px;font-size:12.5px;line-height:1.7;color:var(--text-dim);">
+                  <li><b style="color:var(--ai-cream);">Callsign mismatch</b> — most common cause. AIVA addresses <b>${myCall}</b>. Open the MCDU FLT NO / FLT NBR field and confirm it's <i>exactly</i> that string. Any spaces or different digits and Hoppie silently drops it.</li>
+                  <li><b style="color:var(--ai-cream);">ATSU not logged on</b> — the aircraft has to poll Hoppie. Status must read READY/CONNECTED on the AOC INIT page. If it says OFFLINE, hit LOGON.</li>
+                  <li><b style="color:var(--ai-cream);">Different logon code</b> — your AIVA Profile and the aircraft EFB must hold the <i>same</i> Hoppie code. Otherwise the cockpit is polling a different account's inbox.</li>
+                  <li><b style="color:var(--ai-cream);">Wait one poll cycle</b> — the A350 ATSU polls every ~60s. Your test message may be sitting in the Hoppie queue. AIVA polls every 60s too; hit <b>Poll inbox</b> on the Diagnostics card to force-refresh AIVA's side.</li>
+                  <li><b style="color:var(--ai-cream);">Self-ping confirmation</b> — hit <b>Self-ping</b> below. AIVA sends a TELEX from your callsign TO your callsign. If it lands in AIVA's inbox but NOT in the A350 DCDU, the aircraft side isn't logged on. If neither sees it, the logon code is wrong.</li>
+                </ol>
+              </div>
+            </div>
+          </details>
+        ` }));
+
         /* ============ ADMIN VIEW ============ */
         if (viewMode === 'admin') {
           const sb_user = P.pref('simbrief_user','');
@@ -4169,6 +4248,10 @@
                   <button class="btn btn-ghost btn-sm" id="hopPoll2">${I('refresh',14)} Poll now</button>
                   <button class="btn btn-ghost btn-sm" id="prAckAll">${I('check',14)} Ack all</button>
                 </div>
+                <div class="row gap-2 mt-3" style="flex-wrap:wrap;border-top:1px solid var(--border);padding-top:10px;">
+                  <button class="btn btn-ghost btn-sm" id="hopVerify2">${I('shield',14)} Verify logon</button>
+                  <button class="btn btn-ghost btn-sm" id="hopSelfPing2">${I('star',14)} Self-ping cockpit</button>
+                </div>
                 <div class="text-mute mono mt-3" id="hopAutoStatus" style="font-size:11px;">auto-poll: ${code ? 'ON (60s)' : 'off'}</div>
               </div>
             </div>
@@ -4251,6 +4334,29 @@
             AIVA.Store.set('hoppie_log', log);
             refreshInbox();
             toast('All messages acknowledged', 'ok');
+          };
+
+          /* Pilot-side diagnostics (mirrors the admin-view buttons).
+             Verify logon proves AIVA can reach Hoppie at all. Self-ping
+             sends a TELEX from your callsign TO your callsign — if it
+             lands in AIVA's inbox but doesn't appear in your aircraft
+             DCDU/AOC pages within ~60s, the cockpit ATSU isn't logged on
+             with the same logon code. */
+          $('#hopVerify2', c).onclick = async () => {
+            if (!code) { toast('No logon code set in Profile', 'bad'); return; }
+            const r = await hopSend({ from: myCall, to:'SERVER', type:'ping', body:'' });
+            $('#hopLogonBadge', c).textContent = r.ok ? 'LOGON ✓' : 'LOGON ✗';
+            $('#hopLogonBadge', c).className   = 'pill ' + (r.ok ? 'pill-gold' : 'pill-red');
+            toast(r.ok ? 'Hoppie logon valid' : ('Hoppie: ' + r.error), r.ok ? 'ok' : 'bad');
+          };
+          $('#hopSelfPing2', c).onclick = async () => {
+            if (!code) { toast('No logon code set in Profile', 'bad'); return; }
+            const stamp = new Date().toISOString().slice(11,19);
+            const r = await hopSend({ from: myCall, to: myCall, type:'telex', body:`AIVA SELF-PING @ ${stamp}Z · if this appears in your cockpit DCDU, Hoppie is wired correctly` });
+            if (r.ok) {
+              toast('Self-ping sent · checking AIVA inbox in 2s · check your cockpit DCDU too', 'ok', 6000);
+              setTimeout(() => { hopPoll(false); refreshInbox(); }, 2000);
+            } else toast('Self-ping failed: ' + r.error, 'bad');
           };
           refreshInbox();
         }

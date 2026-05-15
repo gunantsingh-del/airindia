@@ -909,6 +909,13 @@ function _block(dist, op) {
    These take precedence over the synthetic seed-based times for known routes.
    Source: Air India / Air India Express published schedules. */
 const SCHEDULE_OVERRIDES = {
+  /* ===== DEL ↔ Ludhiana (Halwara) — twice-daily AI service from
+     2026-05 per the official Air India press release. */
+  'AI481': { dep: '05:55', arr: '07:05' },   // DEL → HWR
+  'AI482': { dep: '07:55', arr: '09:10' },   // HWR → DEL
+  'AI483': { dep: '12:55', arr: '14:10' },   // DEL → HWR
+  'AI484': { dep: '14:40', arr: '15:55' },   // HWR → DEL
+
   /* ===== Leh (IXL) ===== */
   'AI2448': { dep: '09:40', arr: '11:25' },   // IXC → IXL
   'AI2454': { dep: '07:25', arr: '09:30' },   // DEL → IXL

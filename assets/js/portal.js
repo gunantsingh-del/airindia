@@ -395,14 +395,51 @@
   /* Desktop-only native notification helper. Silently no-ops in the
      browser. Honors the per-pilot opt-out (Profile → OS notifications).
      Only fires when the window isn't focused — in-foreground we use
-     toasts, OS notifications would just be noise. */
-  function desktopNotify(title, body) {
+     toasts, OS notifications would just be noise. The `force` flag
+     overrides the focus check for high-priority events (FDTL violation,
+     sim crash, etc). */
+  function desktopNotify(title, body, opts = {}) {
     if (!window.AIVA_DESKTOP?.isDesktop) return;
     if (AIVA.Store.get('desktop_notif', true) === false) return;
-    if (document.hasFocus()) return;
+    if (!opts.force && document.hasFocus()) return;
     try { window.AIVA_DESKTOP.notify({ title, body }); } catch {}
   }
   AIVA._desktopNotify = desktopNotify;
+
+  /* ============ AIVA RELEASE NOTES =============
+     Chronological feed of platform updates + new routes. The dashboard
+     shows the latest few; the OS-notification system fires once per
+     new entry the first time the pilot loads the portal after the
+     release date. Add new items at the TOP. */
+  const AIVA_RELEASE_NOTES = [
+    { date: '2026-05-15', tag: 'ROUTE',    title: 'Delhi ↔ Ludhiana service launched',
+      body: 'Air India commenced twice-daily AI481/482/483/484 between DEL and Halwara on A320 family. Live in Book Roster.' },
+    { date: '2026-05-15', tag: 'PLATFORM', title: 'AIVA v1.3 — Maharaja release',
+      body: 'EFB Vista redesign, system tray + OS notifications (desktop), end-to-end encrypted chat, profile-pic cropper with cross-device sync, FSUIPC diagnostic.' },
+    { date: '2026-05-14', tag: 'PLATFORM', title: 'Chat reactions, replies, DMs',
+      body: 'Hover a message to react, reply with quoted context, or click a pilot to DM them. 2-hour rolling retention.' },
+    { date: '2026-05-13', tag: 'PLATFORM', title: 'NOTAMs from SimBrief OFP',
+      body: 'NOTAM page now pulls live NOTAMs from your latest dispatched SimBrief OFP — no API keys needed.' },
+  ];
+  AIVA.RELEASE_NOTES = AIVA_RELEASE_NOTES;
+
+  /* Fire desktop notifications for any release notes newer than the
+     pilot's last-seen marker. Capped at 3 so a fresh install doesn't
+     spam the Action Center on first launch. */
+  (function announceReleaseNotes() {
+    try {
+      const lastSeen = P.get('last_seen_release', '2000-01-01');
+      const fresh = AIVA_RELEASE_NOTES.filter(n => n.date > lastSeen);
+      if (!fresh.length) return;
+      fresh.slice(0, 3).forEach((n, i) => {
+        setTimeout(() => desktopNotify(`AIVA · ${n.tag === 'ROUTE' ? 'New route' : 'New release'}`,
+                                       `${n.title}\n${n.body.slice(0, 120)}${n.body.length > 120 ? '…' : ''}`,
+                                       { force: i === 0 }),
+                   2000 + i * 1500);
+      });
+      P.set('last_seen_release', AIVA_RELEASE_NOTES[0].date);
+    } catch {}
+  })();
   function route() {
     const id = (location.hash.replace('#','').split('/')[0] || 'dashboard');
     $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.route === id));
@@ -1478,6 +1515,14 @@
                an explicit yes/no dialog so the pilot acknowledges before
                we file it. Otherwise just save. */
             if (fdtlExceeded || longHaul) {
+              /* Fire a Windows toast too — pilots flagged that FDTL
+                 advisory can fly past you in the toast and you confirm
+                 by reflex. OS notification stays until dismissed. */
+              if (fdtlExceeded) {
+                AIVA._desktopNotify?.(`AIVA · FDTL advisory`,
+                  `${(tb/60).toFixed(1)} h block / ${sc} sectors exceeds 10 h FDP. Confirm dialog open.`,
+                  { force: true });
+              }
               const body = el('div');
               const warnLines = [];
               if (tb > 600)
@@ -3436,6 +3481,9 @@
       sub: 'Press releases · corporate news',
       render: (c) => {
         const news = [
+          { cat:'PRESS RELEASE', date:'MAY 15, 2026', title:'Air India commences twice-daily services to Ludhiana (Halwara)',
+            img:'route', tone:'red', loc:'GURUGRAM',
+            body:`Air India today commenced twice-daily non-stop services between Delhi and Ludhiana (Halwara), strengthening the airline's domestic network across Punjab and offering enhanced connectivity to one of north India's most economically vibrant cities.\n\nThe new service operates on Air India's narrowbody A320 family aircraft, with morning and afternoon rotations daily. The schedule has been timed to support same-day return business travel from Ludhiana to Delhi, as well as onward connections from Delhi to Air India's domestic and international network.\n\nIndicative schedule (Daily, all timings local):\n• AI481  DEL → LUH  05:55 → 07:05\n• AI482  LUH → DEL  07:55 → 09:10\n• AI483  DEL → LUH  12:55 → 14:10\n• AI484  LUH → DEL  14:40 → 15:55\n\n"Ludhiana is one of India's most enterprising cities. With twice-daily services from Delhi, our customers in the region will now have seamless, full-service connectivity to our domestic and international destinations across our growing network," said the Chief Commercial Officer.\n\nThe new Halwara airport, developed jointly by the Airports Authority of India and the Indian Air Force, opened earlier this year. Air India is one of the first carriers to operate scheduled commercial services from the new terminal.` },
           { cat:'PRESS RELEASE', date:'MAY 13, 2026', title:'Air India rationalises international route network through August 2026, to continue operating 1,200+ weekly flights',
             img:'info', tone:'red', loc:'NEW DELHI',
             body:`Air India today announced a rationalisation of its international network for the May–August 2026 schedule, retaining over 1,200 weekly flights across 70+ international destinations.\n\nThe carrier will temporarily reduce frequencies on six long-haul routes between June 1 and August 31, 2026 — including DEL–SFO, BOM–EWR and DEL–YVR — to accommodate phased induction of seven new A350-900 aircraft and the ongoing B787 retrofit programme. All affected passengers will be re-accommodated on alternate Air India flights or partner-airline services.\n\n"This is a deliberate, planned step to enable our refleet ramp-up while keeping our customers connected. Our network reach actually grows in the Middle East and South-East Asia during this window," said the Chief Network Officer.\n\nNew frequencies are being added on DEL–HAN, DEL–CMB, DEL–BKK, BOM–DXB and BLR–LHR. Domestic capacity remains unchanged.` },

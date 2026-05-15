@@ -1664,11 +1664,16 @@
             <h3 class="display mt-2" style="font-size:22px;">${fp ? AIVA.findFlight(fp.fno)?.fno + ' active' : 'No flight in progress'}</h3>
             <div class="text-mute" style="font-size:11.5px;margin-top:4px;" id="fsHint">Connect FSUIPC first — Start Flight unlocks once the bridge is live.</div>
           </div>
-          <div class="row gap-2">
+          <div class="row gap-2" style="flex-wrap:wrap;">
             <button class="btn btn-primary btn-sm" id="fsConnect">${I('wifi',14)} Connect FSUIPC</button>
+            <button class="btn btn-ghost btn-sm" id="fsDiag">${I('search',14)} Run diagnostic</button>
             <button class="btn btn-ghost btn-sm" id="fsStart" disabled title="Connect FSUIPC first">▶ Start Flight</button>
             <button class="btn btn-ghost btn-sm" id="fsEnd" ${fp ? '' : 'disabled'}>${I('close',14)} End Flight</button>
           </div>
+        </div>
+        <div id="fsDiagPanel" hidden style="margin-top:14px;padding:14px 16px;border:1px solid rgba(255,225,89,.32);border-radius:12px;background:rgba(255,225,89,.04);">
+          <div class="eyebrow">Connection diagnostic</div>
+          <div id="fsDiagLog" class="mono mt-2" style="font-size:11.5px;line-height:1.7;color:var(--text-dim);white-space:pre-wrap;"></div>
         </div>
         <div class="gold-rule"></div>
         <div class="fsuipc-grid">
@@ -1773,6 +1778,118 @@
           if (!ws || ws.readyState !== 1) update(s);
         });
       }
+
+      /* ============ FSUIPC connection diagnostic ============
+         Runs a battery of tests so a stuck pilot can see exactly which
+         step is failing. Tests in order:
+           1. Origin + Mixed-Content check (HTTPS vs plain ws://)
+           2. ws://localhost:2048/fsuipc/ — Paul Henty's path
+           3. ws://localhost:2048           — root path (older bridges)
+           4. ws://127.0.0.1:2048/fsuipc/   — IPv4 literal (DNS quirks)
+           5. wss://localhost:2048/fsuipc/  — SSL variant
+           6. Probe https://localhost:2048/ to detect a self-signed-cert
+              wall (means SSL is on but cert isn't trusted)
+         Each test gets a 2-second timeout. Every result is printed
+         live to a log panel so the pilot can screenshot / share. */
+      function probeWS(url) {
+        return new Promise((resolve) => {
+          let done = false;
+          let sock;
+          try { sock = new WebSocket(url); }
+          catch (e) { return resolve({ ok:false, code:'ctor', err: e.message }); }
+          const t = setTimeout(() => {
+            if (done) return; done = true;
+            try { sock.close(); } catch {}
+            resolve({ ok:false, code:'timeout', err:'No response within 2s' });
+          }, 2000);
+          sock.onopen = () => {
+            if (done) return; done = true;
+            clearTimeout(t);
+            try { sock.close(); } catch {}
+            resolve({ ok:true });
+          };
+          sock.onerror = (e) => {
+            if (done) return; done = true;
+            clearTimeout(t);
+            resolve({ ok:false, code:'error', err:'WebSocket error event' });
+          };
+          sock.onclose = (e) => {
+            if (done) return; done = true;
+            clearTimeout(t);
+            resolve({ ok:false, code:'close', err:`closed before open (code ${e.code})` });
+          };
+        });
+      }
+      async function probeHTTPS(url) {
+        try {
+          const r = await fetch(url, { mode:'no-cors', signal: AbortSignal.timeout(2000) });
+          return { ok:true, status: r.status || 'opaque' };
+        } catch (e) {
+          return { ok:false, err: e.name + ' ' + (e.message || '') };
+        }
+      }
+      $('#fsDiag', c).onclick = async () => {
+        const panel = $('#fsDiagPanel', c);
+        const log = $('#fsDiagLog', c);
+        panel.hidden = false;
+        const lines = [];
+        const w = (s) => { lines.push(s); log.textContent = lines.join('\n'); };
+        const PASS = '✓';
+        const FAIL = '✗';
+        w(`Diagnostic started · ${new Date().toLocaleTimeString()}`);
+        w(`──────────────────────────────────────────`);
+        w(`Page origin       : ${location.origin}`);
+        w(`Protocol          : ${location.protocol}`);
+        const isHttps = location.protocol === 'https:';
+        const isDesktop = !!window.AIVA_DESKTOP?.isDesktop;
+        w(`Inside AIVA .exe  : ${isDesktop ? 'YES' : 'no (regular browser)'}`);
+        w(`Mixed-Content gate: ${isHttps && !isDesktop ? '⚠ ws:// from HTTPS blocked by browser' : 'OK (ws:// allowed)'}`);
+        w(``);
+        const trials = [
+          ['ws://localhost:2048/fsuipc/',  'Paul Henty WebSockets Server — recommended'],
+          ['ws://127.0.0.1:2048/fsuipc/',  'Same, via IPv4 literal'],
+          ['ws://localhost:2048',          'Legacy root path (older bridges)'],
+          ['wss://localhost:2048/fsuipc/', 'SSL variant (Use SSL ticked in server)'],
+        ];
+        let foundOpen = null;
+        for (const [url, note] of trials) {
+          w(`Trying ${url}`);
+          w(`   ↳ ${note}`);
+          const r = await probeWS(url);
+          if (r.ok) { w(`   ${PASS} OPENED — this is your working URL`); foundOpen = url; break; }
+          w(`   ${FAIL} ${r.code}: ${r.err}`);
+        }
+        if (!foundOpen) {
+          w(``);
+          w(`Probing https://localhost:2048/ for self-signed cert wall…`);
+          const httpsProbe = await probeHTTPS('https://localhost:2048/');
+          if (httpsProbe.ok) {
+            w(`   ${PASS} Server IS reachable on 2048 over TLS — but the browser`);
+            w(`     hasn't trusted its self-signed cert yet. Open`);
+            w(`     https://localhost:2048/fsuipc/ in this same window, click`);
+            w(`     Advanced → Proceed to accept the cert, then retry.`);
+          } else {
+            w(`   ${FAIL} ${httpsProbe.err}`);
+            w(`     Nothing seems to be listening on port 2048 at all. Check:`);
+            w(`       1. FSUIPC WebSockets Server (Paul Henty) is OPEN`);
+            w(`       2. Web Services badge is green/Running`);
+            w(`       3. No other app has grabbed port 2048 (try netstat -ano | findstr 2048)`);
+            w(`       4. Windows Firewall isn't blocking localhost (try disabling temporarily)`);
+            w(`       5. If using the .exe, you may need a rebuild — the bundled build`);
+            w(`          on the site is older than the latest fixes. Manually trigger`);
+            w(`          'Build AIVA Desktop' in the GitHub Actions tab + replace`);
+            w(`          AIVA-Setup.exe in the repo root.`);
+          }
+        }
+        w(``);
+        w(`Result: ${foundOpen ? `WORKING URL = ${foundOpen}` : 'NO WORKING URL FOUND'}`);
+        w(`──────────────────────────────────────────`);
+        if (foundOpen) {
+          toast(`Diagnostic found a working URL: ${foundOpen}. Click Connect FSUIPC.`, 'ok', 6000);
+        } else {
+          toast('Diagnostic done — see the panel for next steps.', 'warn', 6000);
+        }
+      };
 
       $('#fsConnect', c).onclick = () => {
         if (ws && ws.readyState === 1) {

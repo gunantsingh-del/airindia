@@ -1655,26 +1655,66 @@
        "started a flight without the sim attached" ghosts. */
     fsuipc: (c) => {
       const fp = P.get('flight_in_progress');
-      c.appendChild(el('div', { class:'embed-bar', html:`<span class="dot" id="fsDot"></span> FSUIPC7 WebSocket bridge · <span id="fsAddr">ws://localhost:2048/fsuipc/</span> <span class="right"><span class="fsuipc-status off" id="fsStatus">DISCONNECTED</span></span>` }));
+      const me = AIVA.Auth.currentPilot?.();
+      const isAdmin = me?.role === 'admin';
+      c.appendChild(el('div', { class:'embed-bar', html:`<span class="dot" id="fsDot"></span> Sim connection <span class="right"><span class="fsuipc-status off" id="fsStatus">NOT CONNECTED</span></span>` }));
       const card = el('div', { class:'efb-card fsuipc-card' });
       card.innerHTML = `
-        <div class="row between">
-          <div>
-            <div class="eyebrow">Live flight tracking</div>
-            <h3 class="display mt-2" style="font-size:22px;">${fp ? AIVA.findFlight(fp.fno)?.fno + ' active' : 'No flight in progress'}</h3>
-            <div class="text-mute" style="font-size:11.5px;margin-top:4px;" id="fsHint">Connect FSUIPC first — Start Flight unlocks once the bridge is live.</div>
+        <div class="row between" style="align-items:flex-start;gap:18px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:240px;">
+            <div class="eyebrow">Sim connection</div>
+            <h3 class="display mt-2" style="font-size:22px;" id="fsHeadline">${fp ? (AIVA.findFlight(fp.fno)?.fno || 'Flight') + ' tracking' : 'Looking for your sim…'}</h3>
+            <div class="text-mute" style="font-size:13px;line-height:1.55;margin-top:8px;" id="fsHint">
+              AIVA looks for MSFS every few seconds. Start your sim and the bridge and we'll pick it up automatically.
+            </div>
           </div>
           <div class="row gap-2" style="flex-wrap:wrap;">
-            <button class="btn btn-primary btn-sm" id="fsConnect">${I('wifi',14)} Connect FSUIPC</button>
-            <button class="btn btn-ghost btn-sm" id="fsDiag">${I('search',14)} Run diagnostic</button>
-            <button class="btn btn-ghost btn-sm" id="fsStart" disabled title="Connect FSUIPC first">▶ Start Flight</button>
+            <button class="btn btn-primary btn-sm" id="fsConnect">${I('wifi',14)} Retry now</button>
+            <button class="btn btn-ghost btn-sm" id="fsHelp">${I('book',14)} Setup help</button>
+            <button class="btn btn-ghost btn-sm" id="fsStart" disabled title="Connect to the sim first">▶ Start Flight</button>
             <button class="btn btn-ghost btn-sm" id="fsEnd" ${fp ? '' : 'disabled'}>${I('close',14)} End Flight</button>
+            ${isAdmin ? `<button class="btn btn-ghost btn-sm" id="fsDiag" title="Admin: technical connection diagnostic">${I('search',14)} Tech check</button>` : ''}
           </div>
         </div>
-        <div id="fsDiagPanel" hidden style="margin-top:14px;padding:14px 16px;border:1px solid rgba(255,225,89,.32);border-radius:12px;background:rgba(255,225,89,.04);">
-          <div class="eyebrow">Connection diagnostic</div>
-          <div id="fsDiagLog" class="mono mt-2" style="font-size:11.5px;line-height:1.7;color:var(--text-dim);white-space:pre-wrap;"></div>
+
+        <!-- Pilot-friendly setup steps. Three plain-English steps; no
+             ports, no URLs, no Mixed-Content jargon. The "Tech check"
+             button (admin-only) holds all the protocol detail. -->
+        <div id="fsSetupSteps" class="mt-4">
+          <div class="fs-step" data-step="1">
+            <span class="fs-step-num">1</span>
+            <div>
+              <div class="fs-step-title">Start Microsoft Flight Simulator</div>
+              <div class="fs-step-sub">Load any aircraft to the gate or runway. AIVA will pick it up automatically.</div>
+            </div>
+            <span class="fs-step-pill" id="fsStep1Pill">CHECKING…</span>
+          </div>
+          <div class="fs-step" data-step="2">
+            <span class="fs-step-num">2</span>
+            <div>
+              <div class="fs-step-title">Start the FSUIPC bridge</div>
+              <div class="fs-step-sub">Open <b>FSUIPC WebSockets Server</b> and click <b>Start</b>. Only needed once — leave it running.</div>
+              <div class="fs-step-sub" style="margin-top:4px;"><a href="https://www.fsuipc.com/" target="_blank" rel="noopener" class="text-gold">Download FSUIPC WebSockets Server (free)</a></div>
+            </div>
+            <span class="fs-step-pill" id="fsStep2Pill">CHECKING…</span>
+          </div>
+          <div class="fs-step" data-step="3">
+            <span class="fs-step-num">3</span>
+            <div>
+              <div class="fs-step-title">Fly</div>
+              <div class="fs-step-sub">When the badge turns green you can press Start Flight. Telemetry below goes live.</div>
+            </div>
+            <span class="fs-step-pill" id="fsStep3Pill">WAITING</span>
+          </div>
         </div>
+
+        ${isAdmin ? `
+          <div id="fsDiagPanel" hidden style="margin-top:14px;padding:14px 16px;border:1px solid rgba(255,225,89,.32);border-radius:12px;background:rgba(255,225,89,.04);">
+            <div class="eyebrow" style="color:var(--ai-gold-bright);">Technical diagnostic (admin only)</div>
+            <div id="fsDiagLog" class="mono mt-2" style="font-size:11.5px;line-height:1.7;color:var(--text-dim);white-space:pre-wrap;"></div>
+          </div>
+        ` : ''}
+
         <div class="gold-rule"></div>
         <div class="fsuipc-grid">
           <div class="fsuipc-stat"><div class="lbl">LAT</div><div class="val" id="fsLat">—</div><div class="sub">degrees</div></div>
@@ -1686,38 +1726,83 @@
           <div class="fsuipc-stat"><div class="lbl">HDG</div><div class="val" id="fsHdg">—</div><div class="sub">°mag</div></div>
           <div class="fsuipc-stat"><div class="lbl">FUEL</div><div class="val" id="fsFuel">—</div><div class="sub">kg</div></div>
         </div>
-        <div class="gold-rule"></div>
-        <div class="eyebrow">Why a bridge is needed</div>
-        <p class="text-dim" style="font-size:12.5px;line-height:1.6;margin-top:6px;">
-          Browsers can't read shared-memory IPC, which is how FSUIPC normally talks to
-          add-ons. We need <b>something listening on a local port</b> that translates
-          FSUIPC offsets to JSON over WebSocket. VAMSYS ships a <code>vamsys-connector.exe</code>;
-          we use FSUIPC7's built-in WebSocket Server instead so you don't need a second app.
-          <b>If you're seeing "port 2048" errors, the server isn't running yet.</b>
-        </p>
-        <div class="eyebrow mt-3" style="color:#FBBF24;">⚠ HTTPS Mixed-Content blocking</div>
-        <p class="text-dim" style="font-size:12.5px;line-height:1.6;margin-top:6px;">
-          If you're using AIVA in a normal browser at <code>airindiavirtual.online</code> (HTTPS), Chrome will <b>block</b> the plain <code>ws://localhost:2048</code> connection as Mixed Content. You'll see "Cannot reach FSUIPC" even when the server is clearly Running. Two ways around it:
-        </p>
-        <ol style="font-size:13px;color:var(--text-dim);line-height:1.9;padding-left:22px;margin-top:6px;">
-          <li><b>Quick fix:</b> In FSUIPC WebSockets Server, tick <b>Use SSL</b>, save, restart. The Client URL becomes <code>wss://localhost:2048/fsuipc/</code>. First time you connect, AIVA shows a "certificate not trusted" toast — open <a href="https://localhost:2048/fsuipc/" target="_blank" class="text-gold">https://localhost:2048/fsuipc/</a> in the same browser, click <b>Advanced → Proceed</b> to accept the self-signed cert. Then come back, it'll just work.</li>
-          <li><b>Permanent fix:</b> Install the AIVA desktop <code>.exe</code> (latest release on the <a href="https://github.com/gunantsingh-del/airindia/releases" target="_blank" class="text-gold">GitHub releases page</a>). It runs from <code>file://</code> so Mixed Content doesn't apply, and plain <code>ws://localhost:2048/fsuipc/</code> works directly with no cert dance.</li>
-        </ol>
-        <div class="eyebrow mt-3">Setup — FSUIPC WebSockets Server (Paul Henty)</div>
-        <ol style="font-size:13px;color:var(--text-dim);line-height:1.9;padding-left:22px;margin-top:8px;">
-          <li>Download <b>FSUIPC WebSockets Server</b> from <a href="https://www.fsuipc.com/" target="_blank" rel="noopener" class="text-gold">fsuipc.com</a> (free companion to FSUIPC7).</li>
-          <li>Open the app. Listen on <code>localhost</code> + port <code>2048</code>. If you're using AIVA in a browser, tick <b>Use SSL</b>. If you're using the AIVA desktop .exe, leave SSL off.</li>
-          <li>Click <b>Start</b>. Web Services badge flips to <span style="color:#6EE7B7;">Running</span>.</li>
-          <li>Launch MSFS, load aircraft.</li>
-          <li>AIVA auto-detects within ~5 seconds — the topbar <span class="mono" style="color:#6EE7B7;">FSUIPC ●</span> chip lights up. Start Flight unlocks.</li>
-        </ol>
-        <div class="eyebrow mt-3">Alternative bridge</div>
-        <p class="text-dim" style="font-size:12.5px;line-height:1.6;margin-top:6px;">
-          <a href="https://github.com/koesie10/fsuipc-websocket" target="_blank" rel="noopener" class="text-gold">koesie10/fsuipc-websocket</a> on GitHub —
-          open-source single .exe with the same protocol. Run before MSFS.
-        </p>
       `;
       c.appendChild(card);
+
+      /* Inject one-shot styles for the pilot-friendly step list. */
+      if (!document.getElementById('fs-step-styles')) {
+        const s = document.createElement('style'); s.id = 'fs-step-styles';
+        s.textContent = `
+          #fsSetupSteps { display: flex; flex-direction: column; gap: 10px; }
+          .fs-step {
+            display: flex; align-items: flex-start; gap: 14px;
+            padding: 14px 18px;
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px;
+            transition: border-color .2s ease, background .2s ease;
+          }
+          .fs-step.done { border-color: rgba(110,231,183,.42); background: rgba(110,231,183,.06); }
+          .fs-step.fail { border-color: rgba(248,113,113,.32); background: rgba(248,113,113,.05); }
+          .fs-step-num {
+            flex: 0 0 28px; height: 28px;
+            border-radius: 50%;
+            display: grid; place-items: center;
+            background: rgba(255,225,89,.14);
+            border: 1px solid rgba(255,225,89,.32);
+            color: #FFE9A8;
+            font-family: var(--font-display); font-weight: 700; font-size: 12px;
+          }
+          .fs-step.done .fs-step-num { background: rgba(110,231,183,.18); border-color: rgba(110,231,183,.55); color: #6EE7B7; }
+          .fs-step > div { flex: 1; min-width: 0; }
+          .fs-step-title { font-family: var(--font-display); font-weight: 600; font-size: 15px; color: var(--ai-cream); }
+          .fs-step-sub { font-size: 12px; color: var(--text-mute); margin-top: 3px; line-height: 1.45; }
+          .fs-step-pill {
+            flex: 0 0 auto;
+            font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .18em;
+            padding: 4px 10px; border-radius: 99px;
+            background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
+            color: rgba(248,241,228,.5);
+          }
+          .fs-step.done .fs-step-pill { background: rgba(110,231,183,.18); border-color: rgba(110,231,183,.55); color: #6EE7B7; }
+          .fs-step.fail .fs-step-pill { background: rgba(248,113,113,.14); border-color: rgba(248,113,113,.42); color: #FCA5A5; }
+        `;
+        document.head.appendChild(s);
+      }
+
+      /* Plain-English setup-help modal. No URLs, no ports — just the
+         three things a pilot has to do. */
+      $('#fsHelp', c).addEventListener('click', () => {
+        modal({
+          title: 'How to connect AIVA to your sim',
+          width: '540px',
+          body: (() => {
+            const body = el('div');
+            body.innerHTML = `
+              <p style="font-size:13px;line-height:1.7;color:var(--text-dim);margin:0 0 14px;">
+                AIVA reads your aircraft's position, altitude and speed in real time so we can log your flight. To do that, two things need to be running on your PC:
+              </p>
+              <ol style="font-size:13.5px;line-height:1.8;padding-left:22px;color:var(--ai-cream);">
+                <li>
+                  <b>Microsoft Flight Simulator</b> — load any aircraft.
+                </li>
+                <li>
+                  <b>FSUIPC WebSockets Server</b> — a tiny free utility that lets AIVA talk to MSFS.<br>
+                  <a href="https://www.fsuipc.com/" target="_blank" rel="noopener" class="text-gold" style="font-size:12.5px;">Download it from fsuipc.com</a> · open the app · click <b>Start</b> · leave it running.
+                </li>
+              </ol>
+              <p style="font-size:12.5px;line-height:1.6;color:var(--text-mute);margin:18px 0 0;">
+                The badge at the top of this card turns green within 5 seconds once both are running. You don't need to click anything — AIVA finds them on its own.
+              </p>
+              <p style="font-size:11.5px;line-height:1.6;color:var(--text-mute);margin:14px 0 0;font-style:italic;">
+                Coming soon: AIVA will talk to MSFS directly through Microsoft's built-in SimConnect API — no FSUIPC bridge needed. Until then, the utility above is the one moving part.
+              </p>
+            `;
+            return body;
+          })(),
+          actions: [{ label:'Got it', cls:'btn-primary' }],
+        });
+      });
 
       let ws = null;
       let connected = false;
@@ -1738,17 +1823,47 @@
         $('#fsHdg').textContent = d.hdg != null ? Math.round(d.hdg) : '—';
         $('#fsFuel').textContent= d.fuel!= null ? Math.round(d.fuel): '—';
       };
+      /* Reflect the connection state across the three pilot-facing
+         setup steps in plain English. If the bridge is up we mark
+         steps 1 + 2 done; step 3 turns green once telemetry actually
+         starts flowing. */
+      const stepPillText = (state) => state === 'on' ? '✓ READY' : state === 'busy' ? 'CHECKING…' : 'NOT YET';
+      const setStepState = (n, state) => {
+        const step = c.querySelector(`.fs-step[data-step="${n}"]`);
+        const pill = c.querySelector(`#fsStep${n}Pill`);
+        if (!step || !pill) return;
+        step.classList.remove('done', 'fail');
+        if (state === 'on')  step.classList.add('done');
+        if (state === 'fail') step.classList.add('fail');
+        pill.textContent = state === 'on' ? '✓ READY' : state === 'fail' ? '✗ NOT FOUND' : state === 'busy' ? 'CHECKING…' : 'WAITING';
+      };
       const setConnected = (on) => {
         connected = on;
         const startBtn = $('#fsStart', c);
         startBtn.disabled = !on;
         startBtn.classList.toggle('btn-primary', on);
         startBtn.classList.toggle('btn-ghost', !on);
-        startBtn.title = on ? 'Start the flight' : 'Connect FSUIPC first';
-        $('#fsHint', c).textContent = on
-          ? 'FSUIPC bridge live. You can start the flight.'
-          : 'Connect FSUIPC first — Start Flight unlocks once the bridge is live.';
+        startBtn.title = on ? 'Start the flight' : 'Waiting for the sim';
+        const headline = $('#fsHeadline', c);
+        const hint = $('#fsHint', c);
+        if (on) {
+          if (headline) headline.textContent = 'Sim connected · ready to fly';
+          if (hint) hint.textContent = 'AIVA is talking to your sim. Press Start Flight whenever you push back.';
+          setStepState(1, 'on');
+          setStepState(2, 'on');
+          setStepState(3, 'on');
+        } else {
+          if (headline) headline.textContent = 'Looking for your sim…';
+          if (hint) hint.textContent = 'Start MSFS and the FSUIPC WebSockets utility. AIVA will pick them up automatically within a few seconds.';
+          setStepState(1, 'busy');
+          setStepState(2, 'busy');
+          setStepState(3, '');
+        }
       };
+      /* Initial state */
+      setStepState(1, 'busy');
+      setStepState(2, 'busy');
+      setStepState(3, '');
 
       /* Reflect the BACKGROUND AUTO-DETECT — if AIVA.FSUIPC has already
          connected (because the pilot opened MSFS + the WebSocket Server
@@ -1828,7 +1943,9 @@
           return { ok:false, err: e.name + ' ' + (e.message || '') };
         }
       }
-      $('#fsDiag', c).onclick = async () => {
+      /* Admin-only diagnostic button — only present in DOM if isAdmin
+         was true at render time, so this `?.` guard is just defensive. */
+      $('#fsDiag', c)?.addEventListener('click', async () => {
         const panel = $('#fsDiagPanel', c);
         const log = $('#fsDiagLog', c);
         panel.hidden = false;
@@ -1885,11 +2002,11 @@
         w(`Result: ${foundOpen ? `WORKING URL = ${foundOpen}` : 'NO WORKING URL FOUND'}`);
         w(`──────────────────────────────────────────`);
         if (foundOpen) {
-          toast(`Diagnostic found a working URL: ${foundOpen}. Click Connect FSUIPC.`, 'ok', 6000);
+          toast(`Diagnostic found a working URL: ${foundOpen}. Click Retry now.`, 'ok', 6000);
         } else {
           toast('Diagnostic done — see the panel for next steps.', 'warn', 6000);
         }
-      };
+      });
 
       $('#fsConnect', c).onclick = () => {
         if (ws && ws.readyState === 1) {

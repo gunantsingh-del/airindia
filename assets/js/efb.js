@@ -349,10 +349,12 @@
             <div class="ms-stat"><div class="lbl">VS</div><div class="val" id="msVS">—</div><div class="unit">FPM</div></div>
           </div>
 
-          <!-- FSUIPC pill -->
+          <!-- Sim link pill — text + class set by JS in updateLivePill().
+               Initial text is "Checking…" so it never lies about the
+               connection state even if the tick loop hasn't run yet. -->
           <div class="efb2-livepill" id="efbLivePill">
             <span class="dot"></span>
-            <span class="lbl" id="efbLiveLbl">FSUIPC OFFLINE</span>
+            <span class="lbl" id="efbLiveLbl">Checking…</span>
           </div>
 
           <!-- Nearby pilots -->
@@ -2729,6 +2731,42 @@ The SimBrief OFP — what's on each page:
        2) Immediately on every FSUIPC 'state' event (≈5 Hz from
           SimConnect) so the player's plane updates on the map within
           ~200 ms, not 5 s. */
+  /* Shared pill updater — source-aware. Reads AIVA.FSUIPC state and
+     applies "SIM: LIVE / SIM: SEARCHING / FSUIPC: USE DESKTOP APP"
+     to the pill text + green/red class. Called from:
+       - startLiveDraw's 2-second tick (steady-state refresh)
+       - AIVA.FSUIPC.on('connect')/('disconnect') event handlers (instant)
+     Either path fires updates within ~1 s of MSFS state changing. */
+  function updateLivePill(host) {
+    if (!host) return;
+    const lp  = host.querySelector('#efbLivePill');
+    const lbl = host.querySelector('#efbLiveLbl');
+    if (!lp && !lbl) return;
+    const fsConn    = AIVA.FSUIPC?.isConnected?.() === true;
+    const usingSc   = !!window.AIVA_DESKTOP?.simConnect;
+    const inDesktop = !!window.AIVA_DESKTOP?.isDesktop;
+    if (lp) {
+      lp.classList.toggle('on', fsConn);
+      lp.title = fsConn
+        ? `${usingSc ? 'SimConnect' : 'FSUIPC'} live — tracking your aircraft`
+        : (inDesktop
+            ? 'Waiting for MSFS to load a flight. SimConnect auto-detects within ~5s.'
+            : 'No sim link — your browser blocks the local sim bridge. Launch AIVA from Start Menu.');
+    }
+    if (lbl) {
+      const tag = usingSc ? 'SIM' : 'FSUIPC';
+      lbl.textContent = fsConn
+        ? `${tag}: LIVE`
+        : (inDesktop ? `${tag}: SEARCHING` : `${tag}: USE DESKTOP APP`);
+    }
+  }
+
+  /* Wire pill to FSUIPC events directly so it flips the instant the
+     bridge connects, not just on the next 2s tick. We have to find the
+     pill via document.querySelector since `host` isn't in scope here. */
+  AIVA.FSUIPC?.on?.('connect',    () => updateLivePill(document));
+  AIVA.FSUIPC?.on?.('disconnect', () => updateLivePill(document));
+
   function startLivePosBroadcast() {
     if (livePosTimer) clearInterval(livePosTimer);
     const me = AIVA.Auth.currentPilot();
@@ -2843,30 +2881,12 @@ The SimBrief OFP — what's on each page:
         }
       }
 
-      /* FSUIPC status pill — labels itself based on the source:
-         - SimConnect (desktop app): "SIM: LIVE" / "SIM: SEARCHING"
-         - WebSocket-FSUIPC (browser fallback): "FSUIPC: LIVE" / "FSUIPC: OFFLINE"
-         The hover tooltip explains the browser-Mixed-Content gotcha so the
-         pilot knows to launch the .exe instead of the website. */
-      const lp = host.querySelector('#efbLivePill');
-      const lbl = host.querySelector('#efbLiveLbl');
-      const fsConn = AIVA.FSUIPC?.isConnected?.();
-      const usingSc = !!window.AIVA_DESKTOP?.simConnect;
-      const inDesktop = !!window.AIVA_DESKTOP?.isDesktop;
-      if (lp) {
-        lp.classList.toggle('on', !!fsConn);
-        lp.title = fsConn
-          ? `${usingSc ? 'SimConnect' : 'FSUIPC'} live — tracking your aircraft`
-          : (inDesktop
-              ? 'Waiting for MSFS to load a flight. SimConnect picks it up within ~5s.'
-              : 'No sim link — your browser blocks the local sim bridge. Launch AIVA from Start Menu (the .exe) for live telemetry.');
-      }
-      if (lbl) {
-        const tag = usingSc ? 'SIM' : 'FSUIPC';
-        lbl.textContent = fsConn
-          ? `${tag}: LIVE`
-          : (inDesktop ? `${tag}: SEARCHING` : `${tag}: USE DESKTOP APP`);
-      }
+      /* Pill text + class is now a single helper that the tick loop AND
+         AIVA.FSUIPC's connect/disconnect/state events all call. Belts
+         and suspenders: even if the 2-second tick somehow doesn't run
+         (timer cleared, exception in loop body, etc.), the event-driven
+         path keeps the pill correct. */
+      updateLivePill(host);
     }
     tick();
     liveDrawTimer = setInterval(tick, 2000);

@@ -849,7 +849,7 @@ html[data-theme="light"] .livery-title { color: #1A0F12; }
 .ng-side {
   position: absolute;
   right: 14px; top: 14px; bottom: 14px;
-  width: 360px; max-width: 92%;
+  width: 340px; max-width: 92%;
   background: rgba(10,7,9,.92);
   backdrop-filter: blur(18px) saturate(140%);
   border: 1px solid rgba(218,25,47,.4);
@@ -861,12 +861,13 @@ html[data-theme="light"] .livery-title { color: #1A0F12; }
   transition: transform .25s var(--ease-emph), opacity .15s ease;
   z-index: 5;
   overflow: hidden;
+  min-height: 0;   /* allow inner flex children to shrink + scroll */
 }
 .ng-side.open { transform: translateX(0); opacity: 1; }
 
 /* Compact city photo header */
 .ng-side-photo {
-  height: 110px;
+  height: 86px;
   background-size: cover; background-position: center;
   background-color: rgba(168,16,31,.25);
   position: relative;
@@ -874,34 +875,41 @@ html[data-theme="light"] .livery-title { color: #1A0F12; }
 }
 .ng-side-photo::after {
   content: ''; position: absolute; inset: 0;
-  background: linear-gradient(180deg, rgba(10,7,9,.05) 0%, rgba(10,7,9,.4) 55%, rgba(10,7,9,.92) 100%);
+  background: linear-gradient(180deg, rgba(10,7,9,.05) 0%, rgba(10,7,9,.5) 55%, rgba(10,7,9,.94) 100%);
+}
+/* Fallback when no curated photo exists — clean Air India red gradient */
+.ng-side-photo-fallback {
+  background:
+    radial-gradient(ellipse at top right, rgba(255,225,89,.18), transparent 60%),
+    linear-gradient(135deg, #5A0815, #A8101F);
 }
 
 .ng-side-head {
-  padding: 0 20px 16px;
+  padding: 0 18px 12px;
   background: transparent;
   border-bottom: 1px solid rgba(255,255,255,.06);
   display: flex; justify-content: space-between; align-items: flex-end; gap: 10px;
-  position: relative; margin-top: -42px;
+  position: relative; margin-top: -34px;
   z-index: 1;
   font-family: var(--font-sans);
+  flex-shrink: 0;
 }
 .ng-side-code {
   font-family: var(--font-display);
-  font-size: 28px; font-weight: 700;
+  font-size: 24px; font-weight: 700;
   color: #FFFFFF;
   letter-spacing: -.01em;
   line-height: 1;
 }
 .ng-side-name {
   font-family: var(--font-sans);
-  font-size: 13px; color: var(--text);
-  margin-top: 6px; font-weight: 500;
+  font-size: 12px; color: var(--text);
+  margin-top: 4px; font-weight: 500;
 }
 .ng-side-city {
   font-family: var(--font-sans);
-  font-size: 11.5px; color: var(--text-mute);
-  margin-top: 2px;
+  font-size: 11px; color: var(--text-mute);
+  margin-top: 1px;
 }
 .ng-side-close {
   width: 30px; height: 30px;
@@ -913,28 +921,30 @@ html[data-theme="light"] .livery-title { color: #1A0F12; }
 .ng-side-close:hover { background: rgba(255,255,255,.14); }
 .ng-side-stats {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
-  padding: 14px 20px;
+  padding: 10px 18px;
   border-bottom: 1px solid rgba(255,255,255,.06);
+  flex-shrink: 0;
 }
 .ng-side-stats > div { text-align: center; }
 .ng-side-stats .lbl {
-  font-family: var(--font-mono); font-size: 9px;
+  font-family: var(--font-mono); font-size: 8.5px;
   letter-spacing: .22em; color: var(--text-mute);
   text-transform: uppercase;
 }
 .ng-side-stats .val {
   font-family: var(--font-display);
-  font-size: 24px; font-weight: 700;
+  font-size: 20px; font-weight: 700;
   color: var(--ai-gold-bright);
-  margin-top: 4px; line-height: 1;
+  margin-top: 3px; line-height: 1;
 }
 .ng-side-tabs {
   display: flex; gap: 0;
-  padding: 12px 14px 0;
+  padding: 8px 14px 0;
+  flex-shrink: 0;
 }
 .ng-side-tab {
   flex: 1;
-  padding: 8px 0;
+  padding: 7px 0;
   background: transparent; border: 0;
   border-bottom: 2px solid transparent;
   color: var(--text-mute);
@@ -943,10 +953,15 @@ html[data-theme="light"] .livery-title { color: #1A0F12; }
 }
 .ng-side-tab.on { color: var(--ai-gold-bright); border-bottom-color: var(--ai-gold); }
 .ng-side-list {
-  flex: 1; overflow-y: auto;
+  flex: 1 1 auto; min-height: 0;          /* critical: lets flex child shrink */
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   padding: 8px 12px 14px;
   display: flex; flex-direction: column; gap: 4px;
 }
+.ng-side-list::-webkit-scrollbar { width: 6px; }
+.ng-side-list::-webkit-scrollbar-thumb { background: rgba(255,225,89,.25); border-radius: 3px; }
+.ng-side-list::-webkit-scrollbar-track { background: transparent; }
 .ng-side-row {
   display: grid; grid-template-columns: 22px 58px 1fr 50px 52px 22px; gap: 8px;
   align-items: center;
@@ -981,26 +996,32 @@ html[data-theme="light"] .livery-title { color: #1A0F12; }
 }
 .ng-side-row:hover .ng-add { background: rgba(255,225,89,.2); border-color: rgba(255,225,89,.4); color: var(--ai-gold-bright); }
 
-/* Bottom CTA when basket has flights */
+/* Bottom CTA when basket has flights — compact text link, not a chunky pill */
 .ng-basket-cta {
-  border-top: 1px solid rgba(255,225,89,.32);
-  background: rgba(255,225,89,.08);
-  padding: 12px 16px;
+  border-top: 1px solid rgba(255,225,89,.2);
+  background: rgba(255,225,89,.04);
+  padding: 8px 14px;
+  flex-shrink: 0;
 }
 .ng-basket-row {
   display: flex; justify-content: space-between; align-items: center; gap: 10px;
 }
 .ng-basket-count {
-  font-family: var(--font-mono); font-size: 11px;
+  font-family: var(--font-mono); font-size: 10px;
   letter-spacing: .14em; color: var(--ai-gold-bright);
+  text-transform: uppercase;
 }
 .ng-basket-btn {
-  background: var(--ai-gold-bright); color: #1A1414;
-  padding: 8px 14px; border-radius: 99px;
-  font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ai-gold-bright);
+  background: transparent;
+  padding: 4px 0;
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: .14em; font-weight: 600;
   text-decoration: none;
+  border-bottom: 1px solid rgba(255,225,89,.5);
+  transition: color .15s, border-color .15s;
 }
-.ng-basket-btn:hover { background: #FFFFFF; }
+.ng-basket-btn:hover { color: #FFFFFF; border-bottom-color: #FFFFFF; }
 
 @media (max-width: 700px) {
   .ng-side { right: 10px; left: 10px; width: auto; top: 60%; }

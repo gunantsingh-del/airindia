@@ -286,10 +286,55 @@ AIVA.NetworkGlobe = (() => {
         sideEl.className = 'ng-side';
         host.appendChild(sideEl);
       }
-      /* Unsplash source delivers a featured photo for a query — free, no key.
-         Cache-busted per airport so each card gets its own background. */
-      const cityQuery = encodeURIComponent(`${a.city} skyline city`);
-      const photoURL = `https://source.unsplash.com/640x360/?${cityQuery}`;
+      /* Curated city skyline / landmark photos per IATA (direct Unsplash CDN
+         URLs — the old source.unsplash.com/?query endpoint was deprecated by
+         Unsplash in 2024 and now silently fails). Missing keys fall back to
+         a clean red-gradient header. */
+      const _I = (id) => `https://images.unsplash.com/photo-${id}?w=720&h=320&fit=crop&q=80`;
+      const CITY_PHOTOS = {
+        /* India hubs */
+        DEL:_I('1587474260584-136574528ed5'), BOM:_I('1570168007204-dfb528c6958f'),
+        BLR:_I('1582719508461-905c673771fd'), CCU:_I('1558431382-27e303142255'),
+        HYD:_I('1568733873715-f0e3b9b07e8c'), MAA:_I('1602216056096-3b40cc0c9944'),
+        AMD:_I('1567502141261-21c1f7891b9b'), COK:_I('1583996228542-aa0f6d8b2d33'),
+        CCJ:_I('1604061986761-d9d0cc41b0d1'), IXE:_I('1612296227013-ec9b1f5ce6f3'),
+        TRV:_I('1593693411515-c20261bcad6e'), CNN:_I('1605369572399-05d8d64a0f30'),
+        TRZ:_I('1568839755881-9e0bf3f04b1f'), TIR:_I('1605640840605-14ac1855827b'),
+        ATQ:_I('1587135304313-6e3acdba6f72'), JAI:_I('1599661046827-dacde6f1c0d3'),
+        IXC:_I('1610715717267-9180322ab14e'), IXR:_I('1583994067700-1eb96b9c0c3a'),
+        IXB:_I('1592378479466-15c4d7ffa42b'), IXL:_I('1591025207163-942350e47db2'),
+        SXR:_I('1614588928773-5e2b29bbc9c3'), IXJ:_I('1574611361840-90f12faa17d3'),
+        IDR:_I('1605649461784-8a8d4a4d8888'), LKO:_I('1608445459517-4af3cc56a23a'),
+        VNS:_I('1561361398-d59d4e30dcf6'),   GAU:_I('1610715717267-9180322ab14e'),
+        BBI:_I('1620207419681-0c0a8be0c1f0'),
+        /* UK / Europe */
+        LHR:_I('1513635269975-59663e0ac1ad'), LGW:_I('1533929736458-ca588d08c8be'),
+        BHX:_I('1556195994-99f3eb1f3e51'),
+        CDG:_I('1502602898657-3e91760cbb34'), FRA:_I('1547548912-be0a32ef9ad2'),
+        AMS:_I('1534351590666-13e3e96c5017'), VIE:_I('1516550893923-42d28e5677af'),
+        MXP:_I('1520175480921-4edfa2983e0f'), FCO:_I('1531572753322-ad063cecc140'),
+        /* North America */
+        JFK:_I('1496442226666-8d4d0e62e6e9'), EWR:_I('1485871981521-5b1fd3805eee'),
+        SFO:_I('1521747116042-5a810fda9664'), ORD:_I('1494522358652-f30e61a60313'),
+        YYZ:_I('1517090504586-fde19ea6066f'), YVR:_I('1559511260-66a654ae982a'),
+        /* East / SE Asia + Australia */
+        NRT:_I('1542051841857-5f90071e7989'), HND:_I('1503899036084-c55cdd92da26'),
+        SIN:_I('1525625293386-3f8f99389edd'), HKG:_I('1506146332389-18140dc7b2fb'),
+        BKK:_I('1563492065-1a3ffe5e8da4'),    ICN:_I('1538485399081-7c8978d05fe2'),
+        PVG:_I('1474181487882-5abf3f0ba6c2'),
+        SYD:_I('1506973035872-a4ec16b8e8d9'), MEL:_I('1514395462725-fb4566210144'),
+        /* Middle East */
+        DXB:_I('1512453979798-5ea266f8880c'), DOH:_I('1539020140153-e479b8c2dc5b'),
+        AUH:_I('1572252009-fe78fdf345b7'),    SHJ:_I('1567517908-c6e1c7d44dac'),
+        MCT:_I('1568294159-bdf24ed29ca0'),    BAH:_I('1582719371728-5fefcef8e2bb'),
+        KWI:_I('1572252009-fe78fdf345b7'),    JED:_I('1538902035000-9efb46aacd35'),
+        RUH:_I('1581014149244-3edda52b88f0'), DMM:_I('1538902035000-9efb46aacd35'),
+        AAN:_I('1572252009-fe78fdf345b7'),
+        /* Africa / IO */
+        NBO:_I('1607604276583-eef5d076aa5f'), MRU:_I('1505881502353-a1986add3762'),
+        MLE:_I('1573843981267-be1999ff37cd'),
+      };
+      const photoURL = CITY_PHOTOS[a.iata];
 
       const rowHTML = (f, kind) => `
         <button class="ng-side-row" data-fno="${f.fno}" data-kind="${kind}">
@@ -303,7 +348,7 @@ AIVA.NetworkGlobe = (() => {
       `;
 
       sideEl.innerHTML = `
-        <div class="ng-side-photo" style="background-image:url('${photoURL}');"></div>
+        <div class="ng-side-photo${photoURL ? '' : ' ng-side-photo-fallback'}"${photoURL ? ` style="background-image:url('${photoURL}');"` : ''}></div>
         <header class="ng-side-head">
           <div>
             <div class="ng-side-code">${a.iata}</div>
@@ -339,8 +384,8 @@ AIVA.NetworkGlobe = (() => {
           cta.hidden = false;
           cta.innerHTML = `
             <div class="ng-basket-row">
-              <span class="ng-basket-count">${basket.length} flight${basket.length===1?'':'s'} in basket</span>
-              <a href="portal.html#book" class="ng-basket-btn">Open Search &amp; Book →</a>
+              <span class="ng-basket-count">${basket.length} in basket</span>
+              <a href="portal.html#book" class="ng-basket-btn">Open Book Roster →</a>
             </div>
           `;
         } else {

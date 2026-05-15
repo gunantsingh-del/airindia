@@ -7,8 +7,9 @@ window.AIVA = window.AIVA || {};
 AIVA.Auth = (() => {
 
   /* Roster version — bump when PILOTS_SEED changes so existing browsers
-     re-seed from the new locked roster. */
-  const ROSTER_VERSION = 'v3-locked-2026-05-13';
+     re-seed from the new locked roster. Naadir Shaikh spelling fix +
+     credential rotation (AIV008) → v4. */
+  const ROSTER_VERSION = 'v4-naadir-shaikh-2026-05-15';
   const ensureSeed = () => {
     const ver = AIVA.Store.get('roster_version');
     if (ver !== ROSTER_VERSION) {

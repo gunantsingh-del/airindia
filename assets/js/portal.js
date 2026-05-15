@@ -529,15 +529,40 @@
 
   /* ----------------------- BOOKING ----------------------- */
   function getBookings() {
+    const raw = P.get('roster_bookings', []);
+
+    /* ===== Migration: fix UTC-shifted dates from pre-ymd() code =====
+       Pilots who confirmed rosters BEFORE the local-date fix had their
+       booking dates saved using `new Date().toISOString().slice(0,10)`,
+       which for IST users after 05:30 local returned YESTERDAY's UTC
+       date. Those bookings end up < today and get nuked by the purge
+       below, even though they were intended for today (or later).
+
+       Heuristic: if a booking's date string is EARLIER than the local
+       date of its ts (creation) timestamp, the date was wrong at save
+       time — bump it to match the local date of ts. Future-dated
+       bookings (auto-generated rotations) have date >= ts-day so they
+       pass through untouched. */
+    let migrated = false;
+    const fixed = raw.map(b => {
+      if (!b.ts || !b.date) return b;
+      const tsLocal = ymd(new Date(b.ts));
+      if (b.date < tsLocal) { migrated = true; return { ...b, date: tsLocal, _migrated: true }; }
+      return b;
+    });
+    if (migrated) {
+      P.set('roster_bookings', fixed);
+      console.info(`[AIVA] Migrated stale UTC-shifted booking date(s) to local.`);
+    }
+
     /* Auto-clean past-dated bookings on read. Stale bookings from the old
        deterministic bid generator (pre-2026-05-14) littered the roster with
        past dates that were never actually flown. We purge them here once. */
-    const raw = P.get('roster_bookings', []);
     const today = ymd();
-    const cleaned = raw.filter(b => (b.date || '') >= today);
-    if (cleaned.length !== raw.length) {
+    const cleaned = fixed.filter(b => (b.date || '') >= today);
+    if (cleaned.length !== fixed.length) {
       P.set('roster_bookings', cleaned);
-      console.info(`[AIVA] Purged ${raw.length - cleaned.length} past-dated booking(s).`);
+      console.info(`[AIVA] Purged ${fixed.length - cleaned.length} past-dated booking(s).`);
     }
     return cleaned;
   }

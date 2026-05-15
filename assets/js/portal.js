@@ -232,6 +232,127 @@
     AIVA.FSUIPC?.on?.('connect', () => { /* keep firedStages — same sector */ });
     AIVA.FSUIPC?.on?.('landing', () => { /* allow post-landing stages */ });
 
+    /* ============ AUTOMATED HOPPIE DISPATCH PIPELINE ============
+       Pilot books AI441 → spawns at gate → AIVA detects PHASE=GATE
+       holding for 3 minutes → fires pre-flight pack (SimBrief OFP)
+       automatically to the cockpit ATSU. No clicks. Same idea for
+       weather (~5 min into GATE, after pre-flight), arrival gate
+       (on descent10k), landing goodbye (on landing event).
+
+       Guarded by firedAcars set so a single sector only triggers
+       each dispatch once. Resets on resetSector (after landing) so
+       multi-leg flights re-arm for the next departure.
+
+       All sends go through hoppieAutoSend which uses the current
+       active-flight callsign as `from` — matches what the cockpit
+       ATSU is logged on with. Pilot doesn't have to fill any
+       admin form. */
+    const firedAcars = new Set();
+    let gateEnteredAt = null;
+
+    function activeFlightForACARS() {
+      const fp = P.get('flight_in_progress');
+      if (!fp) return null;
+      return AIVA.findFlight?.(fp.fno) || null;
+    }
+    function pilotCallsign() {
+      const fl = activeFlightForACARS();
+      const cs = (fl?.cs || '').toString().toUpperCase().trim();
+      if (/^[A-Z]{2,3}\d{2,4}$/.test(cs)) return cs;
+      return 'AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3).padStart(3,'0');
+    }
+
+    async function autoFirePreflight() {
+      if (firedAcars.has('preflight')) return;
+      const sbUser = P.pref('simbrief_user', '');
+      if (!sbUser) { toast('Auto-dispatch: no SimBrief username set in Profile — skipping pre-flight pack', 'warn', 5000); firedAcars.add('preflight'); return; }
+      const fl = activeFlightForACARS();
+      if (!fl) return;
+      firedAcars.add('preflight');
+      try {
+        const ofp = await AIVA.Dispatch.fetchSimbriefOFP(sbUser);
+        const body = AIVA.Dispatch.preflightPack(ofp);
+        await hoppieAutoSend(pilotCallsign(), 'telex', body);
+        toast(`✓ Pre-flight pack auto-sent to your cockpit (${pilotCallsign()} · ${ofp.flightNo || fl.fno})`, 'ok', 6000);
+        AIVA._desktopNotify?.('Pre-flight pack uplinked', `OFP for ${fl.fno} ${fl.from}→${fl.to} sent to cockpit ACARS.`, { force: true });
+      } catch (e) {
+        toast(`Pre-flight auto-dispatch: ${e.message}`, 'bad', 7000);
+      }
+    }
+    async function autoFireWeather() {
+      if (firedAcars.has('weather')) return;
+      const fl = activeFlightForACARS();
+      if (!fl) return;
+      const dest = AIVA.airport(fl.to)?.icao || fl.to;
+      firedAcars.add('weather');
+      try {
+        const wx = await AIVA.Dispatch.fetchMETAR(dest);
+        if (!wx) return;
+        /* Always send the dest METAR — even if "OK" — so the pilot has
+           it on the CDU for cross-check during cruise. */
+        const body = wx.severity?.level === 'OK'
+          ? `${dest} WX SUMMARY · NOMINAL\n${wx.raw}`
+          : AIVA.Dispatch.weatherWarning(dest, wx);
+        await hoppieAutoSend(pilotCallsign(), 'inforeq', body);
+        toast(`✓ Destination weather auto-sent (${dest})`, 'ok', 5000);
+      } catch (e) { /* swallow — non-blocking */ }
+    }
+
+    /* Drive auto-fires off the phase machine + a gate timer. */
+    AIVA.FSUIPC?.on?.('phase', ({ from, to, state }) => {
+      if (to === 'GATE' && !gateEnteredAt) gateEnteredAt = Date.now();
+      if (to === 'TAXI_OUT') {
+        /* Weather goes out as the pilot starts taxiing — fresh data
+           when they need it for take-off decisions. */
+        autoFireWeather();
+      }
+    });
+    /* Per-frame gate-dwell check. 3 minutes after the first GATE
+       detection, fire the pre-flight pack. */
+    AIVA.FSUIPC?.on?.('state', () => {
+      if (firedAcars.has('preflight')) return;
+      const phase = AIVA.FSUIPC?.phase?.();
+      if (phase !== 'GATE') return;
+      if (!gateEnteredAt) gateEnteredAt = Date.now();
+      if (Date.now() - gateEnteredAt > 180_000) {
+        autoFirePreflight();
+      }
+    });
+    /* Arrival gate goes out as the pilot crosses 10k descending. */
+    AIVA.FSUIPC?.on?.('descent10k', async (info) => {
+      if (firedAcars.has('arrival')) return;
+      firedAcars.add('arrival');
+      const fl = activeFlightForACARS();
+      if (!fl) return;
+      const dest = AIVA.airport(fl.to);
+      const iata = dest?.iata || fl.to;
+      const firstName = (pilot?.name || '').split(' ')[0] || '';
+      const body = AIVA.Dispatch.arrivalGate?.(iata, fl.ac, firstName) ||
+        `ARRIVAL · ${fl.fno}\nDESCENDING THROUGH FL100 INTO ${iata}\nEXPECT GATE ASSIGNMENT ON GROUND`;
+      await hoppieAutoSend(pilotCallsign(), 'telex', body);
+      toast(`✓ Arrival info uplinked (${iata})`, 'ok', 5000);
+    });
+    /* Landing goodbye on touchdown. */
+    AIVA.FSUIPC?.on?.('landing', async () => {
+      if (firedAcars.has('goodbye')) return;
+      firedAcars.add('goodbye');
+      const fl = activeFlightForACARS();
+      if (!fl) return;
+      const dest = AIVA.airport(fl.to);
+      const iata = dest?.iata || fl.to;
+      const firstName = (pilot?.name || '').split(' ')[0] || '';
+      const body = AIVA.Dispatch.goodbye?.(firstName, iata) ||
+        `WELCOME TO ${iata}\nGREAT FLIGHT ${firstName.toUpperCase() || 'CAPTAIN'} · THANKS FOR FLYING AIVA`;
+      await hoppieAutoSend(pilotCallsign(), 'telex', body);
+      toast('✓ Landing goodbye uplinked', 'ok', 5000);
+      /* Reset for the next sector — multi-leg pilots will trigger
+         the full dispatch flow again on their next gate hold. */
+      setTimeout(() => {
+        firedAcars.clear();
+        gateEnteredAt = null;
+      }, 60_000);
+    });
+
     /* === "Install AIVA" button ===
        Takes the pilot to /install — branded landing page with the
        step-by-step guide. The page reads ?go=1 and auto-kicks the
@@ -4761,34 +4882,29 @@
           };
           $('#hopSelfPing2', c).onclick = async () => {
             if (!code) { toast('No logon code set in Profile', 'bad'); return; }
-            /* Three-step self-ping:
-                 1. Send a TELEX from myCall → myCall.
-                 2. Poll Hoppie for messages addressed to myCall.
-                 3. Report which steps succeeded so the pilot knows
-                    whether it's a SEND problem, a POLL problem, or
-                    a "Hoppie doesn't queue self-messages" quirk.
-               This is much more diagnostic than a single fire-and-
-               hope-it-comes-back attempt. */
-            toast('Self-ping running — sending, polling, reporting…', 'ok', 3000);
+            /* Self-ping is designed to land in the COCKPIT — so AIVA must
+               NOT auto-poll afterwards. Hoppie's poll is destructive:
+               whoever polls first consumes the message. If AIVA grabs it,
+               the cockpit ATSU's next poll returns empty. Solution: send,
+               PAUSE the auto-poll loop for 120s, ask the pilot to watch
+               the CDU, resume auto-poll once the cockpit's had its turn. */
+            toast('Self-ping firing — AIVA auto-poll paused for 2 min so your cockpit can pick it up first…', 'ok', 5000);
             const stamp = new Date().toISOString().slice(11,19);
             const probe = `AIVA SELF-PING @ ${stamp}Z`;
-            const sendR = await hopSend({ from: myCall, to: myCall, type:'telex', body: `${probe} · if this appears in your cockpit DCDU, Hoppie is wired correctly` });
+            const sendR = await hopSend({ from: myCall, to: myCall, type:'telex', body: `${probe} · if this lands on your cockpit CDU, Hoppie is wired correctly` });
             refreshOutbox();
             if (!sendR.ok) {
               toast(`✗ SEND failed: ${sendR.error}. Hoppie can't accept messages — check logon code + proxy.`, 'bad', 9000);
               return;
             }
-            /* Wait 2 s for Hoppie to enqueue, then poll. */
-            await new Promise(r => setTimeout(r, 2000));
-            const before = AIVA.Store.get('hoppie_log', []).filter(m => m.dir==='rx').length;
-            await hopPoll(true);
-            const after  = AIVA.Store.get('hoppie_log', []).filter(m => m.dir==='rx').length;
-            refreshInbox();
-            if (after > before) {
-              toast('✓ Self-ping round-tripped — AIVA → Hoppie → AIVA confirmed. Now watch your cockpit DCDU for the same message (~60s for ATSU poll).', 'ok', 9000);
-            } else {
-              toast(`✓ SEND ok, but POLL returned no message in 2s. Hoppie may not queue self-loops (some networks block from===to), OR the cockpit will see it on its next poll. Send a normal TELEX to another crew member to confirm full round-trip.`, 'warn', 12000);
-            }
+            /* Suspend the 60s auto-poll for 120s so the cockpit ATSU's
+               own poll cycle (usually ~60s) gets first crack at the queue. */
+            if (timer) { clearInterval(timer); timer = null; }
+            toast('✓ Sent. Watch your cockpit CDU AOC inbox in the next 30-60s. Do NOT click "Poll now" in AIVA — it will steal the message from the cockpit.', 'ok', 14000);
+            setTimeout(() => {
+              if (code) timer = setInterval(() => hopPoll(true), 60_000);
+              toast('AIVA auto-poll resumed.', 'ok', 3000);
+            }, 120_000);
           };
           refreshInbox();
           refreshOutbox();

@@ -1,14 +1,22 @@
 /* =====================================================================
    AIVA · Crew Chat
    ---------------------------------------------------------------------
-   Group chat shared by all 14 pilots. Cross-tab realtime via the
-   BroadcastChannel API. Persists to localStorage so messages survive
-   reload. Also surfaces auto-generated CREW UPDATES (took off / passing
-   10k / landed / diverted / PSR filed) so the chat doubles as an ops feed.
+   Group chat shared by all 14 pilots.
 
-   Storage shape:
-     localStorage['aiva.crew_chat']           → [Message, …]
-     localStorage['aiva.crew_chat_presence']  → { pilotId: lastSeen, … }
+   Sync layers (all run in parallel; messages dedup by ID):
+     1) BroadcastChannel — same browser, cross-tab.
+     2) localStorage     — same browser, cross-session.
+     3) ntfy.sh relay    — cross-device, cross-pilot, real-time via SSE.
+                            Zero signup; a unique unguessable topic acts as
+                            the only credential. Configurable via
+                            window.AIVA_CHAT_TOPIC or AIVA.Store.set(
+                            'crew_chat_topic', '<your-topic>').
+
+   The ntfy layer is what fixes the "Aarush sent a message and Gunant
+   didn't get it" bug — localStorage alone is per-browser, so two pilots
+   on different machines never sync. Every send POSTs to the ntfy topic;
+   every browser subscribes via EventSource so messages arrive in real
+   time. If ntfy.sh is unreachable, the local layers still work.
 
    Message:
      { id, ts, type: 'msg'|'event', pilotId, pilotName, rank, text, meta? }
@@ -20,6 +28,7 @@
      AIVA.CrewChat.online()             → array of pilotIds active in last 5 min
      AIVA.CrewChat.clear()              → wipe (admin only)
      AIVA.CrewChat.onMessage(cb)        → subscribe to new messages
+     AIVA.CrewChat.relayState()         → 'connected' | 'disconnected' | 'off'
    ===================================================================== */
 
 window.AIVA = window.AIVA || {};
@@ -30,6 +39,40 @@ AIVA.CrewChat = (() => {
   const MAX_KEEP   = 500;                  // hard cap so storage stays bounded
   const ONLINE_MS  = 5 * 60 * 1000;        // 5 minutes counts as "online"
   const CH_NAME    = 'aiva-crew-chat';
+
+  /* ============ ntfy.sh realtime relay ============
+     Default topic is unguessable but hardcoded so all 14 pilots land on
+     the same channel without configuration. Anyone with the topic name
+     can read/write — that's fine for our 14-pilot closed VA but DO NOT
+     post sensitive info here. The pilot or admin can override via
+     window.AIVA_CHAT_TOPIC for extra paranoia. */
+  const DEFAULT_TOPIC = 'aiva-crew-b8f3xK9p7Q2mR5tNwE1cD6vY';
+  const NTFY_BASE     = 'https://ntfy.sh';
+  function chatTopic() {
+    if (typeof window.AIVA_CHAT_TOPIC === 'string' && window.AIVA_CHAT_TOPIC) return window.AIVA_CHAT_TOPIC;
+    try {
+      const stored = AIVA.Store?.get?.('crew_chat_topic', null);
+      if (stored) return stored;
+    } catch {}
+    return DEFAULT_TOPIC;
+  }
+  let relayState = 'disconnected';   // 'connected' | 'disconnected' | 'off'
+  let relaySource = null;
+  const relayStateListeners = [];
+  function notifyRelayStateChange() {
+    relayStateListeners.forEach(cb => { try { cb(relayState); } catch(_){} });
+  }
+  const seenIds = new Set();          // dedup buffer (capped)
+  function rememberSeen(id) {
+    if (!id) return;
+    seenIds.add(id);
+    if (seenIds.size > 2000) {
+      /* drop the oldest half so the set doesn't grow unbounded */
+      const arr = Array.from(seenIds);
+      seenIds.clear();
+      arr.slice(arr.length / 2).forEach(x => seenIds.add(x));
+    }
+  }
 
   const channel = (() => {
     try { return new BroadcastChannel(CH_NAME); } catch { return null; }
@@ -65,16 +108,76 @@ AIVA.CrewChat = (() => {
   beat();
   setInterval(beat, 60_000);
 
+  /* ============ ntfy relay: publish + subscribe ============ */
+  async function relayPublish(msg) {
+    if (relayState === 'off') return;
+    try {
+      const topic = chatTopic();
+      await fetch(`${NTFY_BASE}/${encodeURIComponent(topic)}`, {
+        method: 'POST',
+        headers: { 'Content-Type':'text/plain' },
+        body: JSON.stringify(msg),
+      });
+    } catch {
+      /* network glitch — local + BC paths still delivered it for this device */
+    }
+  }
+  function relayConnect() {
+    if (relayState === 'off') return;
+    try {
+      if (relaySource) try { relaySource.close(); } catch {}
+      const topic = chatTopic();
+      /* ntfy returns events as JSON envelopes; event=message means a real
+         publish (vs. keepalive). poll=1 replays recent history once on open
+         so a pilot who was offline catches up without manual refresh. */
+      relaySource = new EventSource(`${NTFY_BASE}/${encodeURIComponent(topic)}/sse?poll=1`);
+      relaySource.onopen = () => { relayState = 'connected'; notifyRelayStateChange(); };
+      relaySource.onerror = () => {
+        relayState = 'disconnected';
+        notifyRelayStateChange();
+        /* auto-retry in 8s — public ntfy.sh occasionally bounces connections */
+        setTimeout(relayConnect, 8000);
+      };
+      relaySource.onmessage = (ev) => {
+        try {
+          const env = JSON.parse(ev.data);
+          if (env.event && env.event !== 'message') return;     // skip keepalives
+          if (!env.message) return;
+          const msg = JSON.parse(env.message);
+          if (!msg || !msg.id) return;
+          if (seenIds.has(msg.id)) return;                       // own echo / dedup
+          rememberSeen(msg.id);
+          /* Insert into local log if it's not already there, then notify UI */
+          const log = readLog();
+          if (!log.find(x => x.id === msg.id)) {
+            log.push(msg);
+            log.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+            writeLog(log);
+          }
+          listeners.forEach(cb => { try { cb(msg, readLog()); } catch(_){} });
+          if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
+        } catch {}
+      };
+    } catch {
+      relayState = 'disconnected';
+    }
+  }
+  /* Lazy connect — kick off once on script load */
+  relayConnect();
+
   /* ============ message push ============ */
   function push(msg) {
     msg.id = msg.id || (Date.now().toString(36) + Math.random().toString(36).slice(2,6));
     msg.ts = msg.ts || Date.now();
+    rememberSeen(msg.id);                          // suppress our own ntfy echo
     const log = readLog();
     log.push(msg);
     writeLog(log);
     /* Notify same-tab listeners + cross-tab via BroadcastChannel */
     listeners.forEach(cb => { try { cb(msg, log); } catch(_){} });
     if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
+    /* Cross-device fan-out via ntfy.sh — fire and forget */
+    relayPublish(msg);
     return msg;
   }
   function send(text) {
@@ -200,6 +303,9 @@ AIVA.CrewChat = (() => {
         updateBadge();
       }
     });
+    /* Re-render presence row whenever the ntfy relay state flips so
+       pilots see "synced" / "syncing…" in real time. */
+    relayStateListeners.push(() => updatePresence());
     setInterval(updatePresence, 30_000);
     mounted = true;
     return root;
@@ -215,9 +321,15 @@ AIVA.CrewChat = (() => {
     const names = ids.map(id => (all.find(p => p.id === id)?.name?.split(' ')[0]) || id).slice(0, 4);
     const p = root?.querySelector('#ccPresence');
     if (!p) return;
-    p.textContent = ids.length
+    const relayBadge = relayState === 'connected'
+      ? ' · <span style="color:#6EE7B7;">● synced</span>'
+      : relayState === 'disconnected'
+        ? ' · <span style="color:#FBBF24;">○ syncing…</span>'
+        : '';
+    const presence = ids.length
       ? `${ids.length} online · ${names.join(', ')}${ids.length > 4 ? ` +${ids.length - 4}` : ''}`
       : '— quiet right now';
+    p.innerHTML = presence + relayBadge;
   }
   function renderRoster() {
     const r = root?.querySelector('#ccRosterPanel');
@@ -464,5 +576,12 @@ AIVA.CrewChat = (() => {
     document.head.appendChild(style);
   })();
 
-  return { mount, send, event, online, onMessage, clear };
+  return {
+    mount, send, event, online, onMessage, clear,
+    relayState: () => relayState,
+    setTopic: (t) => {
+      try { AIVA.Store.set('crew_chat_topic', t); } catch {}
+      relayConnect();
+    },
+  };
 })();

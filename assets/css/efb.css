@@ -261,6 +261,8 @@ body.efb-body:not(:has(.efb-home-v2)) {
 }
 .fsuipc-status.on  { color: var(--ok); border: 1px solid rgba(74,222,128,.4); background: rgba(74,222,128,.06); }
 .fsuipc-status.off { color: var(--bad); border: 1px solid rgba(248,113,113,.4); background: rgba(248,113,113,.06); }
+.fsuipc-status.busy{ color: #FBBF24; border: 1px solid rgba(251,191,36,.4); background: rgba(251,191,36,.08); animation: fsPulse 1.2s ease-in-out infinite; }
+@keyframes fsPulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 
 .fsuipc-grid {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;

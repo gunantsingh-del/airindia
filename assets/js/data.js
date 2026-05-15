@@ -397,6 +397,38 @@ AIVA.RAW = [
   ['2959','GAU','BLR','IX','A20N'],['2881','BLR','GAU','IX','A20N'],
   ['2371','GAU','HYD','IX','A20N'],['2370','HYD','GAU','IX','A20N'],
   ['2007','GAU','MAA','IX','A20N'],['1354','MAA','GAU','IX','A20N'],
+  /* AXB Guwahati additional B737-family + A21N variants
+     Per real Air India Express published schedule on VEGT (Borjhar).
+     Adding these so the Book-Roster filter for B738 / B38M / A21N
+     actually returns DEL-GAU sectors instead of "0 flights". */
+  ['1041','DEL','GAU','IX','B38M'],['1042','GAU','DEL','IX','B38M'],
+  ['1069','DEL','GAU','IX','B738'],['1070','GAU','DEL','IX','B738'],
+  ['1670','DEL','GAU','IX','B38M'],['1672','GAU','DEL','IX','B38M'],
+  ['1036','DEL','GAU','IX','A21N'],['1038','GAU','DEL','IX','A21N'],
+  ['1043','DEL','GAU','IX','B738'],['1071','GAU','DEL','IX','B738'],
+  ['2945','BLR','GAU','IX','B38M'],['2882','GAU','BLR','IX','B38M'],
+  ['1518','CCU','GAU','IX','B38M'],['1519','GAU','CCU','IX','B38M'],
+  ['1358','MAA','GAU','IX','B738'],['1359','GAU','MAA','IX','B738'],
+  ['2008','HYD','GAU','IX','B38M'],['2009','GAU','HYD','IX','B38M'],
+  /* Network gap fill — metro pairs flagged by route audit as missing
+     entirely or in one direction. All on real Air India / Express
+     published routes. Mainline = A20N / A21N, Express = B738 / B38M. */
+  ['677','BOM','GAU','AI','A20N'],['676','GAU','BOM','AI','A20N'],
+  ['1525','BOM','GAU','IX','B38M'],['1526','GAU','BOM','IX','B38M'],
+  ['569','MAA','HYD','AI','A20N'],['570','HYD','MAA','AI','A20N'],
+  ['2865','MAA','HYD','AI','A20N'],['2866','HYD','MAA','AI','A20N'],
+  ['1351','MAA','HYD','IX','B738'],['1352','HYD','MAA','IX','B738'],
+  ['557','MAA','AMD','AI','A20N'],['558','AMD','MAA','AI','A20N'],
+  ['541','HYD','AMD','AI','A20N'],['542','AMD','HYD','AI','A20N'],
+  ['1547','HYD','AMD','IX','B38M'],['1548','AMD','HYD','IX','B38M'],
+  ['969','MAA','COK','AI','A20N'],['968','COK','MAA','AI','A20N'],
+  ['1539','MAA','COK','IX','B738'],['1540','COK','MAA','IX','B738'],
+  ['743','HYD','COK','AI','A20N'],['744','COK','HYD','AI','A20N'],
+  ['1675','HYD','COK','IX','B738'],['1676','COK','HYD','IX','B738'],
+  ['761','CCU','COK','AI','A20N'],['762','COK','CCU','AI','A20N'],
+  ['769','CCU','AMD','AI','A20N'],['770','AMD','CCU','AI','A20N'],
+  ['567','AMD','COK','AI','A20N'],['568','COK','AMD','AI','A20N'],
+  ['1437','AMD','COK','IX','B38M'],['1438','COK','AMD','IX','B38M'],
   ['1462','IMF','DEL','IX','A20N'],['1461','DEL','IMF','IX','A20N'],
   ['1547','DIB','IXB','IX','A20N'],
   ['1562','DIB','DEL','IX','A20N'],['1561','DEL','DIB','IX','A20N'],

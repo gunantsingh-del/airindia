@@ -1576,7 +1576,25 @@
       c.appendChild(el('div', { class:'efb-card', html: `<a href="portal.html#docs" class="btn btn-primary btn-sm">${I('book',14)} Open Document Library</a>` }));
     },
 
-    /* ==================== FSUIPC LIVE ==================== */
+    /* ==================== FSUIPC LIVE ====================
+       Pilot needs an FSUIPC7 → WebSocket bridge running on localhost:2048
+       before AIVA can read sim state. Three working setups:
+
+         1) FSUIPC7 built-in WebSockets Server (recommended) — comes with
+            FSUIPC7 since v7.3.x. Open FSUIPC console → Add-ons → WebSockets
+            Server → "Enabled" + port 2048.
+         2) FSUIPC WebSocket Server module (legacy paid add-on by John
+            Dowson) — same port, same protocol, slightly different setup.
+         3) Companion bridge .exe (community, e.g. MSFS-WS-Adapter or our
+            optional aiva-bridge that uses SimConnect). Run before MSFS.
+
+       Browsers absolutely cannot talk to FSUIPC's shared-memory IPC
+       directly — that's why something MUST listen on 2048. VAMSYS does
+       the same thing via a desktop companion app; we just use the
+       FSUIPC-side WebSocket server instead of shipping our own .exe.
+
+       Start-Flight is now GATED on a live WebSocket connection — no more
+       "started a flight without the sim attached" ghosts. */
     fsuipc: (c) => {
       const fp = P.get('flight_in_progress');
       c.appendChild(el('div', { class:'embed-bar', html:`<span class="dot" id="fsDot"></span> FSUIPC7 WebSocket bridge · <span id="fsAddr">ws://localhost:2048</span> <span class="right"><span class="fsuipc-status off" id="fsStatus">DISCONNECTED</span></span>` }));
@@ -1586,10 +1604,11 @@
           <div>
             <div class="eyebrow">Live flight tracking</div>
             <h3 class="display mt-2" style="font-size:22px;">${fp ? AIVA.findFlight(fp.fno)?.fno + ' active' : 'No flight in progress'}</h3>
+            <div class="text-mute" style="font-size:11.5px;margin-top:4px;" id="fsHint">Connect FSUIPC first — Start Flight unlocks once the bridge is live.</div>
           </div>
           <div class="row gap-2">
-            <button class="btn ${fp ? 'btn-ghost' : 'btn-primary'} btn-sm" id="fsStart">▶ Start Flight</button>
-            <button class="btn btn-ghost btn-sm" id="fsConnect">${I('wifi',14)} Connect FSUIPC</button>
+            <button class="btn btn-primary btn-sm" id="fsConnect">${I('wifi',14)} Connect FSUIPC</button>
+            <button class="btn btn-ghost btn-sm" id="fsStart" disabled title="Connect FSUIPC first">▶ Start Flight</button>
             <button class="btn btn-ghost btn-sm" id="fsEnd" ${fp ? '' : 'disabled'}>${I('close',14)} End Flight</button>
           </div>
         </div>
@@ -1605,18 +1624,39 @@
           <div class="fsuipc-stat"><div class="lbl">FUEL</div><div class="val" id="fsFuel">—</div><div class="sub">kg</div></div>
         </div>
         <div class="gold-rule"></div>
-        <div class="eyebrow">Setup checklist</div>
+        <div class="eyebrow">Why a bridge is needed</div>
+        <p class="text-dim" style="font-size:12.5px;line-height:1.6;margin-top:6px;">
+          Browsers can't read shared-memory IPC, which is how FSUIPC normally talks to
+          add-ons. We need <b>something listening on a local port</b> that translates
+          FSUIPC offsets to JSON over WebSocket. VAMSYS ships a <code>vamsys-connector.exe</code>;
+          we use FSUIPC7's built-in WebSocket Server instead so you don't need a second app.
+          <b>If you're seeing "port 2048" errors, the server isn't running yet.</b>
+        </p>
+        <div class="eyebrow mt-3">Setup — pick whichever your FSUIPC version supports</div>
         <ol style="font-size:13px;color:var(--text-dim);line-height:1.9;padding-left:22px;margin-top:8px;">
-          <li>Install <b>FSUIPC7</b> from the official distributor (in MSFS, Modules folder).</li>
-          <li>In FSUIPC7 → <b>WebSockets</b> tab, tick <code>Local server: enabled</code>, port <code>2048</code>.</li>
-          <li>Start MSFS, load aircraft, then click <b>Connect FSUIPC</b> above.</li>
-          <li>AIVA reads positions every 1s via offsets <code>0560</code> (lat), <code>0568</code> (lon), <code>3324</code> (alt), <code>02BC</code> (IAS), <code>02CC</code> (GS).</li>
-          <li>On flight end, the journey log is auto-saved with block time, route and distance.</li>
+          <li>Open <b>FSUIPC7</b> (in MSFS, Add-ons menu → FSUIPC7).</li>
+          <li>Top menu → <b>Add-ons → WebSockets Server</b>. If you don't see this entry, your FSUIPC7 is older than 7.3 — update from <a href="https://fsuipc.com/" target="_blank" rel="noopener" class="text-gold">fsuipc.com</a>.</li>
+          <li>Tick <b>Enable WebSockets Server</b>, leave port <b>2048</b>, click Save.</li>
+          <li>Restart FSUIPC7 (close the console, it auto-reopens). Status bar should read <code>WebSockets: listening on 2048</code>.</li>
+          <li>Come back here and click <b>Connect FSUIPC</b>. The Start Flight button unlocks once the WebSocket handshake completes.</li>
         </ol>
+        <div class="eyebrow mt-3">If FSUIPC7's WebSocket server isn't available</div>
+        <p class="text-dim" style="font-size:12.5px;line-height:1.6;margin-top:6px;">
+          Alternative companion bridges (free):
+          <a href="https://github.com/koesie10/fsuipc-websocket" target="_blank" rel="noopener" class="text-gold">koesie10/fsuipc-websocket</a> on GitHub —
+          single .exe, drops the same JSON protocol on port 2048. Run it before launching MSFS.
+        </p>
       `;
       c.appendChild(card);
 
       let ws = null;
+      let connected = false;
+      const setStatus = (state, label) => {
+        const s = $('#fsStatus');
+        s.classList.remove('on', 'off', 'busy');
+        s.classList.add(state);
+        s.textContent = label;
+      };
       const update = (data) => {
         const d = data || {};
         $('#fsLat').textContent = d.lat?.toFixed(4) ?? '—';
@@ -1628,38 +1668,76 @@
         $('#fsHdg').textContent = d.hdg != null ? Math.round(d.hdg) : '—';
         $('#fsFuel').textContent= d.fuel!= null ? Math.round(d.fuel): '—';
       };
+      const setConnected = (on) => {
+        connected = on;
+        const startBtn = $('#fsStart', c);
+        startBtn.disabled = !on;
+        startBtn.classList.toggle('btn-primary', on);
+        startBtn.classList.toggle('btn-ghost', !on);
+        startBtn.title = on ? 'Start the flight' : 'Connect FSUIPC first';
+        $('#fsHint', c).textContent = on
+          ? 'FSUIPC bridge live. You can start the flight.'
+          : 'Connect FSUIPC first — Start Flight unlocks once the bridge is live.';
+      };
 
       $('#fsConnect', c).onclick = () => {
+        if (ws && ws.readyState === 1) {
+          toast('Already connected to FSUIPC.', 'info');
+          return;
+        }
+        setStatus('busy', 'CONNECTING…');
+        let opened = false;
         try {
           ws = new WebSocket('ws://localhost:2048');
-          ws.onopen = () => {
-            $('#fsStatus').classList.remove('off'); $('#fsStatus').classList.add('on');
-            $('#fsStatus').textContent = 'CONNECTED';
-            toast('FSUIPC connected.', 'ok');
-            /* Subscribe to common offsets */
-            ws.send(JSON.stringify({ command:'offsets.declare', name:'aiva', offsets:[
-              { name:'lat',  address:0x0560, type:'float64' },
-              { name:'lon',  address:0x0568, type:'float64' },
-              { name:'alt',  address:0x3324, type:'int32'   },
-              { name:'ias',  address:0x02BC, type:'int32'   },
-              { name:'gs',   address:0x02B4, type:'int32'   },
-              { name:'vs',   address:0x02C8, type:'int32'   },
-              { name:'hdg',  address:0x0580, type:'int32'   },
-              { name:'fuel', address:0x0B74, type:'int32'   },
-            ]}));
-            ws.send(JSON.stringify({ command:'offsets.read', name:'aiva', interval:1000 }));
-          };
-          ws.onmessage = (ev) => { try { update(JSON.parse(ev.data).data); } catch {} };
-          ws.onerror = () => {
-            $('#fsStatus').classList.remove('on'); $('#fsStatus').classList.add('off');
-            $('#fsStatus').textContent = 'OFFLINE';
-            toast('Could not reach FSUIPC. Make sure FSUIPC7 WebSockets is enabled on port 2048.', 'bad');
-          };
-          ws.onclose = () => { $('#fsStatus').textContent = 'DISCONNECTED'; };
-        } catch (e) { toast('WebSocket failed: ' + e.message, 'bad'); }
+        } catch (e) {
+          setStatus('off', 'OFFLINE');
+          setConnected(false);
+          return toast(`WebSocket failed: ${e.message}. Is FSUIPC's WebSocket server enabled?`, 'bad');
+        }
+        const timeout = setTimeout(() => {
+          if (!opened) {
+            try { ws.close(); } catch {}
+            setStatus('off', 'OFFLINE');
+            setConnected(false);
+            toast('Timed out reaching ws://localhost:2048. Open FSUIPC7 → Add-ons → WebSockets Server, tick Enable, restart FSUIPC.', 'bad', 6000);
+          }
+        }, 4000);
+        ws.onopen = () => {
+          opened = true;
+          clearTimeout(timeout);
+          setStatus('on', 'CONNECTED');
+          setConnected(true);
+          toast('FSUIPC connected · Start Flight unlocked.', 'ok');
+          ws.send(JSON.stringify({ command:'offsets.declare', name:'aiva', offsets:[
+            { name:'lat',  address:0x0560, type:'float64' },
+            { name:'lon',  address:0x0568, type:'float64' },
+            { name:'alt',  address:0x3324, type:'int32'   },
+            { name:'ias',  address:0x02BC, type:'int32'   },
+            { name:'gs',   address:0x02B4, type:'int32'   },
+            { name:'vs',   address:0x02C8, type:'int32'   },
+            { name:'hdg',  address:0x0580, type:'int32'   },
+            { name:'fuel', address:0x0B74, type:'int32'   },
+          ]}));
+          ws.send(JSON.stringify({ command:'offsets.read', name:'aiva', interval:1000 }));
+        };
+        ws.onmessage = (ev) => { try { update(JSON.parse(ev.data).data); } catch {} };
+        ws.onerror = () => {
+          clearTimeout(timeout);
+          setStatus('off', 'OFFLINE');
+          setConnected(false);
+          if (!opened) toast('Cannot reach FSUIPC at ws://localhost:2048. Check FSUIPC7 → Add-ons → WebSockets Server is enabled on port 2048.', 'bad', 6000);
+        };
+        ws.onclose = () => {
+          clearTimeout(timeout);
+          setStatus('off', 'DISCONNECTED');
+          setConnected(false);
+        };
       };
 
       $('#fsStart', c).onclick = () => {
+        if (!connected || !ws || ws.readyState !== 1) {
+          return toast('Connect FSUIPC first — Start Flight stays locked until the bridge is live.', 'warn');
+        }
         const f = activeFlight();
         if (!f) return toast('No active flight — book one first.', 'warn');
         P.set('flight_in_progress', { fno: f.fno, startedAt: Date.now() });

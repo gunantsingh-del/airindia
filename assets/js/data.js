@@ -838,6 +838,9 @@ AIVA.RAW = [
   ['5305','BLR','MAA','IX','B738'], ['690','SIN','MAA','IX','B738'], , ['5306','MAA','BLR','IX','B738'], ['689','MAA','SIN','IX','B738'], , ['1489','BLR','CCJ','IX','B738'], ['5313','BLR','CCJ','IX','B38M'], ['5314','BLR','CCJ','IX','B38M'], ['398','JED','CCJ','IX','B38M']
   /* === MCT / DXB / AUH / AAN schedules — author-verified directions === */
   ['197','ATQ','DXB','IX','B738'], ['749','CNN','DXB','IX','B738'], ['833','IXE','DXB','IX','B38M'], ['615','TRZ','DXB','IX','B738'], ['420','COK','AUH','IX','B738'], ['348','CCJ','AUH','IX','B38M'], ['816','IXE','AUH','IX','B38M'], ['258','BOM','AUH','IX','A320'], ['542','TRV','AUH','IX','B738'], ['419','AUH','COK','IX','B738'], ['179','AUH','DEL','IX','B38M'], ['347','AUH','CCJ','IX','B38M'], ['815','AUH','IXE','IX','B38M'], ['257','AUH','BOM','IX','A320'], ['541','AUH','TRV','IX','B738'],
+
+  /* === HYD + AMD network expansion — published AI schedule === */
+  ['2890','HYD','DEL','AI','A20N'], ['2493','BOM','AMD','AI','A321'], ['2503','BOM','AMD','AI','A321'], ['2847','BOM','AMD','AI','A20N'], ['2915','BOM','AMD','AI','A20N'], ['2919','BOM','AMD','AI','A20N'], ['424','AMD','DEL','AI','B788'], ['532','AMD','DEL','AI','A321'], ['810','AMD','DEL','AI','A321'], ['882','AMD','DEL','AI','A321'], ['1876','AMD','DEL','AI','A20N'], ['2546','AMD','DEL','AI','A20N'], ['2716','AMD','DEL','AI','A20N'], ['2906','AMD','DEL','AI','A20N'], ['2938','AMD','DEL','AI','A20N'], ['2946','AMD','DEL','AI','A321'], ['494','AMD','BOM','AI','A321'], ['2494','AMD','BOM','AI','A321'], ['2504','AMD','BOM','AI','A321'], ['2848','AMD','BOM','AI','A20N'], ['2916','AMD','BOM','AI','A20N'],
 ];
 
 /* ---------- HELPERS ---------- */

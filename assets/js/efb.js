@@ -500,17 +500,22 @@
     }
 
     $('#startFlight', home)?.addEventListener('click', () => {
-      /* GATE: must have FSUIPC bridge live before a flight can be
-         started. The Chief Pilot's complaint was that the progress bar
-         was ticking with no sim attached — this is the root cause fix. */
+      /* Gate the Start Flight action behind a live sim connection,
+         regardless of whether the source is SimConnect (desktop app)
+         or the WebSocket-FSUIPC bridge (browser fallback). The
+         AIVA.FSUIPC singleton reports `isConnected()` for whichever
+         source is active. */
       if (!AIVA.FSUIPC?.isConnected?.()) {
-        toast('Connect FSUIPC first — Start unlocks once the bridge handshakes (ws://localhost:2048/fsuipc/).', 'bad', 6000);
+        const directMode = !!window.AIVA_DESKTOP?.simConnect;
+        const msg = directMode
+          ? 'Looking for MSFS — start the sim and we\'ll auto-connect within ~5 seconds.'
+          : 'Connect the FSUIPC bridge first — Start unlocks once telemetry is live.';
+        toast(msg, 'bad', 6000);
         location.hash = '#fsuipc';
         return;
       }
       P.set('flight_in_progress', { fno: f.fno, startedAt: Date.now() });
       toast(`Flight ${f.fno} started.`, 'ok');
-      /* Broadcast to the crew chat */
       AIVA.CrewChat?.event(`pushed back on ${f.fno} ${f.from} → ${f.to}`, { fno: f.fno });
       location.hash = '#fsuipc';
     });
@@ -2120,8 +2125,16 @@
       };
 
       $('#fsStart', c).onclick = () => {
-        if (!connected || !ws || ws.readyState !== 1) {
-          return toast('Connect FSUIPC first — Start Flight stays locked until the bridge is live.', 'warn');
+        /* Source-agnostic gate. In SimConnect mode the local `ws` is
+           null on purpose (the bridge lives in the main process), so
+           we must NOT require `ws.readyState === 1`. Instead, ask the
+           AIVA.FSUIPC singleton — it reflects either source. */
+        const live = AIVA.FSUIPC?.isConnected?.() === true;
+        if (!live) {
+          const msg = directMode
+            ? 'Looking for MSFS — start the sim and we\'ll auto-connect within ~5 seconds.'
+            : 'Connect the FSUIPC bridge first — Start Flight unlocks once telemetry is live.';
+          return toast(msg, 'warn', 5000);
         }
         const f = activeFlight();
         if (!f) return toast('No active flight — book one first.', 'warn');

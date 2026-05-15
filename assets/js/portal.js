@@ -792,11 +792,41 @@
   function findBooking(date) {
     return getBookings().find(b => b.date === date);
   }
+  /* Returns a merged flight record for a booking — the live flight
+     looked up from data.js, but with from/to/ac OVERLAID from the
+     booking record where present. AIVA.RAW has duplicate flight
+     numbers for legitimate multi-leg sectors (e.g. AI173 DEL→VIE
+     and AI173 VIE→ORD); findFlight returns the first match, which
+     isn't always the leg the pilot booked. Saving from/to in the
+     booking gives us the right answer regardless. */
+  function bookingFlight(b) {
+    const live = AIVA.findFlight(b.fno) || null;
+    if (!b.from && !b.to) return live;
+    /* If the booking has from/to but the live tuple disagrees, fall
+       back to a synthesised flight that respects the booking. */
+    if (live && live.from === b.from && live.to === b.to) return live;
+    /* Search RAW for a matching directional variant of this fno. */
+    const variants = (AIVA.FLIGHTS || []).filter(f => f.fno === b.fno);
+    const matched = variants.find(f => f.from === b.from && f.to === b.to);
+    if (matched) return matched;
+    /* As a last resort: shape an object from the booking + best-effort
+       fields off the live tuple so the UI doesn't crash. */
+    return {
+      fno: b.fno, cs: live?.cs || b.fno,
+      from: b.from, to: b.to,
+      op: b.op || live?.op || 'AI',
+      ac: b.ac || live?.ac || 'A20N',
+      acName: AIVA.acTypeName(b.ac || live?.ac || 'A20N'),
+      dist: live?.dist || 0, dur: live?.dur || '0:00', durMins: live?.durMins || 0,
+      dep:  live?.dep  || '—', arr: live?.arr  || '—',
+      cat:  live?.cat  || 'unknown', region: live?.region || 'India',
+    };
+  }
   /* Returns ALL bookings on a given date, sorted by departure time. */
   function findBookingsOnDate(date) {
     return getBookings()
       .filter(b => b.date === date)
-      .map(b => ({ ...b, _f: AIVA.findFlight(b.fno) }))
+      .map(b => ({ ...b, _f: bookingFlight(b) }))
       .sort((x, y) => (x._f?.dep || '99:99').localeCompare(y._f?.dep || '99:99'));
   }
 
@@ -1497,7 +1527,18 @@
 
             const doSave = () => {
               const bookings = getBookings();
-              const newOnes = selectedSectors.map(f => ({ date: targetDate, fno: f.fno, ac: f.ac, op: f.op, ts: Date.now() }));
+              /* Persist from/to + ac in the booking record. Display
+                 sites prefer these over AIVA.findFlight(fno) — that
+                 lookup can return the wrong duplicate when a flight
+                 number appears on multiple sectors (return legs, tag
+                 flights). Without the saved from/to we were rendering
+                 JAI→BOM as BOM→JAI when the data had both. */
+              const newOnes = selectedSectors.map(f => ({
+                date: targetDate, fno: f.fno,
+                from: f.from, to: f.to,
+                ac: f.ac, op: f.op,
+                ts: Date.now(),
+              }));
               setBookings([...bookings, ...newOnes]);
               const human = new Date(targetDate + 'T00:00:00').toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
               toast(`✓ Roster confirmed — ${newOnes.length} sector${newOnes.length===1?'':'s'} on ${human}`, 'ok');
@@ -1797,7 +1838,12 @@
               const newOnes = [];
               rotation.forEach((day, i) => {
                 const date = ymd(new Date(startDate.getTime() + i * 86400000));
-                day.legs.forEach(f => newOnes.push({ date, fno: f.fno, ac: f.ac, op: f.op, ts: Date.now() }));
+                day.legs.forEach(f => newOnes.push({
+                  date, fno: f.fno,
+                  from: f.from, to: f.to,
+                  ac: f.ac, op: f.op,
+                  ts: Date.now(),
+                }));
               });
               setBookings([...bookings, ...newOnes]);
               toast(`✓ Added ${newOnes.length} sectors across ${rotation.length} days`, 'ok');
@@ -2129,7 +2175,12 @@
               const line = lines[parseInt(b.dataset.bid, 10)];
               const bookings = getBookings();
               const newOnes = [];
-              line.days.forEach(d => d.legs.forEach(f => newOnes.push({ date: d.date, fno: f.fno, ac: f.ac, op: f.op, ts: Date.now() })));
+              line.days.forEach(d => d.legs.forEach(f => newOnes.push({
+                date: d.date, fno: f.fno,
+                from: f.from, to: f.to,
+                ac: f.ac, op: f.op,
+                ts: Date.now(),
+              })));
               setBookings([...bookings, ...newOnes]);
               toast(`✓ Bid Line ${String.fromCharCode(65+parseInt(b.dataset.bid,10))} accepted — ${newOnes.length} sectors over ${line.days.length} days`, 'ok');
               buildNav();

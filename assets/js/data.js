@@ -440,6 +440,53 @@ AIVA.RAW = [
   ['1851','BOM','DEL','AI','A20N'],
   ['1890','BOM','DEL','AI','A20N'],
   ['2408','BOM','DEL','AI','A359'],
+  ['2930','BOM','DEL','AI','A20N'],
+  ['2944','BOM','DEL','AI','A20N'],
+  ['2960','BOM','DEL','AI','A20N'],
+  ['2986','BOM','DEL','AI','A20N'],
+  ['2996','BOM','DEL','AI','A321'],
+  /* NAG Nagpur inbound */
+  ['466','NAG','DEL','AI','A20N'],   // (NAG→DEL — second daily reciprocal of AI465)
+  /* PAT Patna inbound */
+  ['1892','PAT','DEL','AI','A20N'],
+  ['2646','PAT','DEL','AI','A20N'],
+  /* PNQ Pune inbound */
+  ['1838','PNQ','DEL','AI','A20N'],
+  ['1853','PNQ','DEL','AI','A319'],
+  ['2470','PNQ','DEL','AI','A21N'],
+  ['2972','PNQ','DEL','AI','A20N'],
+  /* RPR Raipur inbound */
+  ['1811','RPR','DEL','AI','A20N'],
+  ['2636','RPR','DEL','AI','A20N'],
+  /* HSR Rajkot Hirasar inbound */
+  ['2538','HSR','DEL','AI','A320'],
+  /* SXR Srinagar inbound */
+  ['1818','SXR','DEL','AI','A20N'],
+  ['1893','SXR','DEL','AI','A20N'],
+  /* TRV Trivandrum inbound */
+  ['1830','TRV','DEL','AI','A321'],
+  /* UDR Udaipur inbound */
+  ['1897','UDR','DEL','AI','A20N'],
+  /* BDQ Vadodara inbound */
+  ['2867','BDQ','DEL','AI','A20N'],
+  /* VNS Varanasi inbound */
+  ['2624','VNS','DEL','AI','A321'],
+  /* VGA Vijayawada inbound */
+  ['2904','VGA','DEL','AI','A20N'],
+  /* VTZ Visakhapatnam inbound */
+  ['1802','VTZ','DEL','AI','A20N'],
+  /* International inbound */
+  ['122','FCO','DEL','AI','B788'],   // Rome → DEL
+  ['214','KTM','DEL','AI','A320'],   // Kathmandu inbound (second daily)
+  ['218','KTM','DEL','AI','A320'],
+  ['224','KTM','DEL','AI','A320'],
+  ['2119','SIN','DEL','AI','A21N'],  // Singapore inbound (second daily)
+  ['278','CMB','DEL','AI','A20N'],   // Colombo inbound (reciprocal of AI277/281)
+  ['2333','BKK','DEL','AI','A20N'],  // Bangkok inbound (reciprocal of AI2332)
+  ['2356','BKK','DEL','AI','A20N'],
+  ['4306','DXB','DEL','AI','B788'],  // Dubai inbound (second daily)
+  ['112','LHR','DEL','AI','B789'],   // London Heathrow inbound
+  ['102','JFK','DEL','AI','A359'],   // New York JFK inbound
 
   /* ====== AIR INDIA EXPRESS (AXB) — 278 routes ====== */
   /* International ex-Kerala / South India */
@@ -1266,6 +1313,41 @@ const SCHEDULE_OVERRIDES = {
   'AI1851': { dep: '15:30', arr: '17:50' },    // BOM
   'AI1890': { dep: '08:55', arr: '11:15' },    // BOM
   'AI2408': { dep: '19:25', arr: '21:45' },    // BOM
+  /* === Round-three inbound additions === */
+  'AI2930': { dep: '07:25', arr: '09:45' },    // BOM
+  'AI2944': { dep: '14:35', arr: '16:55' },    // BOM
+  'AI2960': { dep: '14:05', arr: '16:25' },    // BOM
+  'AI2986': { dep: '22:40', arr: '01:00+1' },  // BOM
+  'AI2996': { dep: '18:30', arr: '20:50' },    // BOM
+  'AI466':  { dep: '18:10', arr: '20:15' },    // NAG → DEL
+  'AI1892': { dep: '10:25', arr: '12:20' },    // PAT
+  'AI2646': { dep: '15:20', arr: '17:15' },    // PAT
+  'AI1838': { dep: '08:30', arr: '11:10' },    // PNQ
+  'AI1853': { dep: '20:15', arr: '22:55' },    // PNQ
+  'AI2470': { dep: '07:25', arr: '10:05' },    // PNQ
+  'AI2972': { dep: '16:30', arr: '19:10' },    // PNQ
+  'AI1811': { dep: '20:50', arr: '22:55' },    // RPR
+  'AI2636': { dep: '14:40', arr: '16:45' },    // RPR
+  'AI2538': { dep: '19:50', arr: '21:55' },    // HSR
+  'AI1818': { dep: '13:50', arr: '15:25' },    // SXR
+  'AI1893': { dep: '12:10', arr: '13:45' },    // SXR
+  'AI1830': { dep: '19:00', arr: '23:10' },    // TRV
+  'AI1897': { dep: '15:35', arr: '17:20' },    // UDR
+  'AI2867': { dep: '18:00', arr: '19:50' },    // BDQ
+  'AI2624': { dep: '15:30', arr: '17:30' },    // VNS
+  'AI2904': { dep: '20:55', arr: '23:20' },    // VGA
+  'AI1802': { dep: '21:20', arr: '00:10+1' },  // VTZ red-eye
+  'AI122':  { dep: '23:50', arr: '08:55+1' },  // FCO → DEL overnight
+  'AI214':  { dep: '08:55', arr: '11:50' },    // KTM
+  'AI218':  { dep: '13:25', arr: '16:20' },    // KTM
+  'AI224':  { dep: '05:35', arr: '08:30' },    // KTM
+  'AI2119': { dep: '01:15', arr: '14:00' },    // SIN → DEL  (afternoon)
+  'AI278':  { dep: '16:20', arr: '20:50' },    // CMB
+  'AI2333': { dep: '01:00', arr: '10:25' },    // BKK overnight
+  'AI2356': { dep: '08:55', arr: '18:15' },    // BKK
+  'AI4306': { dep: '08:30', arr: '13:50' },    // DXB
+  'AI112':  { dep: '03:10', arr: '15:45' },    // LHR → DEL
+  'AI102':  { dep: '01:25', arr: '18:35' },    // JFK → DEL
 };
 AIVA.SCHEDULE_OVERRIDES = SCHEDULE_OVERRIDES;
 

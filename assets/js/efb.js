@@ -67,7 +67,7 @@
     { id:'perf',      nm:'Performance',icon:'target',     ico:'dark' },
     { id:'mel',       nm:'MEL',        icon:'doc',        ico:'dark' },
     { id:'docs',      nm:'Library',    icon:'book',       ico:'gold' },
-    { id:'fsuipc',    nm:'FSUIPC',     icon:'wifi',       ico:'green', live:true },
+    { id:'fsuipc',    nm:'Sim Bridge', icon:'wifi',       ico:'green', live:true },
     { id:'hoppie',    nm:'ACARS',      icon:'send',       ico:'red' },
     { id:'journey',   nm:'Journey Log',icon:'newspaper',  ico:'gold' },
     { id:'notoc',     nm:'NOTOC',      icon:'briefcase',  ico:'dark' },
@@ -2346,10 +2346,12 @@ The SimBrief OFP — what's on each page:
         return;
       }
       /* Iframe-host the full Hoppie page (admin + pilot views, send,
-         inbox, outbox, diagnostics, aircraft setup guide). */
+         inbox, outbox, diagnostics, aircraft setup guide). The ?embed=1
+         query param tells portal.js to skip its sidebar + topbar shell
+         so we don't get "EFB-inside-EFB" duplication. */
       const wrap = el('div', { class:'efb-card', style:{ padding:0, overflow:'hidden', minHeight:'720px', display:'flex' } });
       const frame = document.createElement('iframe');
-      frame.src = 'portal.html#hoppie';
+      frame.src = 'portal.html?embed=1#hoppie';
       frame.style.cssText = 'flex:1;border:0;width:100%;min-height:720px;background:transparent;';
       frame.title = 'Hoppie ACARS';
       wrap.appendChild(frame);

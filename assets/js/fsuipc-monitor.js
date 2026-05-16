@@ -416,6 +416,58 @@ AIVA.Situations = (() => {
   function on(cb) { subs.push(cb); }
   function emit(s, opts) { subs.forEach(cb => { try { cb(s, opts); } catch(_){} }); }
 
+  /* Phase gate. A drone sighting near approach shouldn't fire while
+     the pilot is taxiing out at the gate — that's the bug pilots hit.
+     Each scenario gets a list of valid phases. If the phase doesn't
+     match, the dice never rolls. Defaults are conservative: most
+     events skip GATE/PARKED. */
+  const GROUND_PHASES   = ['GATE','PUSHBACK','TAXI_OUT','TAXI_IN','PARKED','LANDED'];
+  const AIRBORNE_PHASES = ['TAKEOFF','CLIMB','CRUISE','DESCENT','APPROACH','LANDED'];
+  function validPhases(s) {
+    /* Specific overrides keyed by scenario id — the precise mapping that
+       matches the real-world circumstances. */
+    const map = {
+      sec_drone:               ['APPROACH','DESCENT'],
+      ops_birds:               ['TAKEOFF','CLIMB'],
+      ops_lightning:           ['CLIMB','CRUISE','DESCENT'],
+      ops_fuel_pi:             ['CRUISE','CLIMB','DESCENT'],
+      wx_turbulence:           ['CRUISE','CLIMB','DESCENT'],
+      wx_tafdest:              ['CLIMB','CRUISE','DESCENT'],
+      wx_alt_deteriorating:    ['CRUISE','DESCENT','APPROACH'],
+      world_airspace:          ['CLIMB','CRUISE','DESCENT'],
+      world_volcano:           ['CLIMB','CRUISE','DESCENT'],
+      world_geomag:            ['CLIMB','CRUISE','DESCENT'],
+      world_gnd_stop:          ['CRUISE','DESCENT','APPROACH'],
+      world_curfew:            ['CRUISE','DESCENT','APPROACH'],
+      pax_unruly:              AIRBORNE_PHASES,
+      pax_medical:             AIRBORNE_PHASES,
+      pax_lavatory_smoke:      AIRBORNE_PHASES,
+      pax_child:               AIRBORNE_PHASES,
+      pax_belt:                ['CRUISE','CLIMB','DESCENT'],
+      pax_birth:               AIRBORNE_PHASES,
+      pax_lost_item:           [...AIRBORNE_PHASES,'LANDED','TAXI_IN'],
+      pax_drunk:               AIRBORNE_PHASES,
+      cc_short:                ['GATE','PUSHBACK','TAXI_OUT'],
+      galley_fault:            AIRBORNE_PHASES,
+      sec_bomb_threat:         ['GATE','TAXI_OUT','CRUISE'],
+      sec_pax_aggressive:      AIRBORNE_PHASES,
+      pic_incap:               AIRBORNE_PHASES,
+      crew_food_pois:          ['CRUISE','CLIMB','DESCENT'],
+      co_swap:                 GROUND_PHASES,
+      co_vip:                  ['GATE','PUSHBACK','TAXI_OUT'],
+      co_minconn:              ['CRUISE','DESCENT','APPROACH'],
+      co_dx_change:            GROUND_PHASES,
+      co_press:                ['GATE','PUSHBACK'],
+      ops_mel:                 GROUND_PHASES,
+      eq_radar_inop:           ['CRUISE','CLIMB','DESCENT'],
+      eq_ifr_box:              [...AIRBORNE_PHASES,'GATE'],
+    };
+    if (s.phases) return s.phases;       /* explicit override on scenario */
+    if (map[s.id]) return map[s.id];
+    /* Fallback: allow all phases EXCEPT idle ground ones. */
+    return [...AIRBORNE_PHASES, 'TAXI_OUT'];
+  }
+
   function fire(scenario, opts = {}) {
     if (!scenario) return;
     if (fired.has(scenario.id) && !opts.manual) return;
@@ -432,9 +484,19 @@ AIVA.Situations = (() => {
       } catch {}
     }
     activeList.push({ ...scenario, ts: Date.now(), acked: false });
-    /* Auto-send ACARS */
-    if (AIVA.Hoppie?.sendDispatch) {
-      AIVA.Hoppie.sendDispatch(scenario.acars).catch(()=>{});
+
+    /* Push to the pilot's cockpit CDU via Hoppie. Previously Situations
+       only emitted to EFB toasts — pilots flying the 777 had no way to
+       see the scenario fire unless they were watching the EFB. Now the
+       ACARS body lands on the AOC inbox of whatever aircraft is logged
+       on with the active flight callsign. */
+    if (AIVA._hoppieAutoSend && scenario.acars) {
+      const callsign = AIVA._activeCallsign?.() || null;
+      if (callsign) {
+        AIVA._hoppieAutoSend(callsign, 'telex',
+          `SITUATION · ${scenario.title.toUpperCase()}\n${scenario.acars}`
+        ).catch(()=>{});
+      }
     }
     /* Auto-uplink CPDLC if datalink configured + scenario has cpdlc text */
     if (scenario.cpdlc && AIVA.Hoppie?.sendCPDLC) {
@@ -446,8 +508,15 @@ AIVA.Situations = (() => {
   function rollDice() {
     const cfg = AIVA.Store?.get?.('sit_cfg', { intensity: 0.4, enabled: true, categories: [] });
     if (!cfg.enabled || !cfg.intensity) return;
+    /* Read current flight phase from the AIVA.FSUIPC state machine.
+       If we can't tell what phase we're in, do nothing — don't risk
+       firing inappropriate scenarios. */
+    const phase = AIVA.FSUIPC?.phase?.();
+    if (!phase) return;
     const pool = (AIVA.SITUATIONS || []).filter(s =>
-      (!cfg.categories?.length || cfg.categories.includes(s.cat)) && !fired.has(s.id)
+      (!cfg.categories?.length || cfg.categories.includes(s.cat)) &&
+      !fired.has(s.id) &&
+      validPhases(s).includes(phase)
     );
     /* Each scenario gets its own per-minute chance = baseProb × intensity × 0.6
        (0.6 calibration so 100% slider = roughly the listed baseProb per minute). */

@@ -75,9 +75,27 @@
   ];
 
   /* ----------------------- SHELL ----------------------- */
+  /* Embed mode: when portal.html is loaded inside an iframe (e.g. the
+     EFB's Hoppie tile), passing ?embed=1 strips the sidebar + topbar so
+     only the page content renders. Prevents the "EFB-inside-EFB"
+     duplication where the iframe showed the full portal with its own
+     sidebar + Open-EFB button. */
+  const EMBED_MODE = new URLSearchParams(location.search).get('embed') === '1';
+  if (EMBED_MODE) document.documentElement.classList.add('aiva-embed');
+
   function shell() {
     document.body.innerHTML = '';
-    const root = el('div', { class: 'app-shell' });
+    const root = el('div', { class: 'app-shell' + (EMBED_MODE ? ' app-embed' : '') });
+
+    if (EMBED_MODE) {
+      /* Bare shell: just a content area, no sidebar / topbar. The host
+         page (EFB) provides its own chrome. */
+      const main = el('main');
+      main.innerHTML = `<div class="content" id="content"></div>`;
+      root.appendChild(main);
+      document.body.appendChild(root);
+      return;
+    }
 
     const sb = el('aside', { class: 'sidebar', id: 'sidebar' });
     sb.innerHTML = `
@@ -116,7 +134,7 @@
         </div>
         <div class="clock-grp">
           <button class="btn btn-ghost btn-sm pwa-install" id="pwaInstall" hidden title="Install AIVA as a desktop app">${I('download', 12)} Install AIVA</button>
-          <span class="fs-chip fs-off" id="fsChip" title="FSUIPC not connected — start MSFS + FSUIPC WebSockets Server">FSUIPC ○</span>
+          <span class="fs-chip fs-off" id="fsChip" title="Sim Bridge not connected — start MSFS so SimConnect can attach">SIM ○</span>
           <div class="clock"><span class="lbl">Z</span><span id="zuluClock">—</span></div>
           <div class="clock"><span class="lbl">IST</span><span id="istClock">—</span></div>
           <button class="iconbtn tt theme-toggle" id="themeToggle" data-tt="Toggle light/dark">${I('moon', 16)}</button>
@@ -443,6 +461,18 @@
       setTimeout(() => AIVA._openCrashReport?.(info), 1500);
     });
 
+    /* Expose the active callsign so AIVA.Situations + other modules can
+       address the pilot's cockpit (not just the EFB toast). */
+    AIVA._activeCallsign = () => {
+      const fpRec     = P.get('flight_in_progress');
+      const activeFl  = fpRec ? AIVA.findFlight?.(fpRec.fno) : null;
+      const activeCs  = (activeFl?.cs || '').toString().trim().toUpperCase();
+      if (/^[A-Z]{2,3}\d{2,4}$/.test(activeCs)) return activeCs;
+      const savedCs   = (P.pref('my_callsign', '') || '').trim();
+      if (/^[A-Z]{2,3}\d{2,4}$/i.test(savedCs)) return savedCs.toUpperCase();
+      return 'AIC' + (pilot.id || '001').replace(/[^0-9]/g, '').slice(-3).padStart(3, '0');
+    };
+
     /* Small helper — fires a Hoppie POST (no response needed for one-way
        auto-messages). Goes through AIVA.Dispatch.fetchViaProxies so a
        rate-limited corsproxy.io doesn't silently swallow phase-trigger
@@ -472,6 +502,9 @@
         AIVA.Store.set('hoppie_log', log.slice(-200));
       } catch(_){}
     }
+    /* Expose hoppieAutoSend on AIVA so Situations + other modules can
+       relay scenario ACARS straight to the pilot's cockpit CDU. */
+    AIVA._hoppieAutoSend = hoppieAutoSend;
 
     /* === PILOT AUTO-FLOW (everyone) ===
        Whenever the pilot crosses 10k ft on descent OR touches down, send
@@ -595,6 +628,15 @@
     });
   }
   function bindShell() {
+    /* Embed mode skips the topbar / sidebar entirely; their wiring would
+       crash on null. Just keep theme + hashchange routing alive so the
+       embedded page still navigates + paints in the host theme. */
+    if (EMBED_MODE) {
+      window.addEventListener('hashchange', route);
+      const t = AIVA.Store.get('theme', 'dark');
+      document.documentElement.setAttribute('data-theme', t);
+      return;
+    }
     $('#doLogout').addEventListener('click', AIVA.Auth.logout);
     $('#openEfb').addEventListener('click', () => location.href = 'efb.html');
     $('#burger').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
@@ -1663,34 +1705,54 @@
           });
 
           function doSearch() {
+            /* Ultra-flexible filter: ANY combination of From / To / Aircraft.
+               Empty fields = wildcards. So "blank · blank · B77W" returns
+               every 777 flight in the network. "VIDP · blank · B77W" returns
+               every 777 departing Delhi. "blank · VABB · A20N" returns every
+               A320neo inbound to Mumbai. No "Pick a route" dead-end. */
             const opts = {};
             if (acFilter) {
               if (acFilter.startsWith('fam:')) opts.acTypes = FAMILIES[acFilter.slice(4)];
               else opts.acTypes = AIVA.acSubstitutes(acFilter);
             }
-            let list;
-            if (fromCode && toCode) {
-              list = AIVA.flightsOnRoute(fromCode, toCode, opts);
-              $('#resultsTitle', c).textContent = `${AIVA.airport(fromCode).city} → ${AIVA.airport(toCode).city}`;
-              $('#resultsSub', c).textContent = `${list.length} flights · sorted by departure time` + (acFilter ? ` · ${acFilter.replace('fam:', '')} substitution allowed` : '');
-            } else if (fromCode) {
-              list = AIVA.FLIGHTS.filter(f => f.from === fromCode);
-              if (opts.acTypes) list = list.filter(f => opts.acTypes.includes(f.ac));
-              list = list.sort((a,b) => a.dep.localeCompare(b.dep));
-              $('#resultsTitle', c).textContent = `Departing ${AIVA.airport(fromCode).city}`;
-              $('#resultsSub', c).textContent = `${list.length} flights to all destinations · sorted by dep time`;
-            } else if (toCode) {
-              list = AIVA.FLIGHTS.filter(f => f.to === toCode);
-              if (opts.acTypes) list = list.filter(f => opts.acTypes.includes(f.ac));
-              list = list.sort((a,b) => a.dep.localeCompare(b.dep));
-              $('#resultsTitle', c).textContent = `Arriving ${AIVA.airport(toCode).city}`;
-              $('#resultsSub', c).textContent = `${list.length} flights inbound · sorted by dep time`;
-            } else {
-              list = [];
-              $('#resultsTitle', c).textContent = 'Pick a route';
-              $('#resultsSub', c).textContent = 'Type a From and To, or click a hub chip';
-            }
-            renderResults(list);
+            /* Accept either IATA (3-letter) or ICAO (4-letter) in the boxes —
+               doc'd in placeholders. Match by either. */
+            const fc = (fromCode || (fromBox.value || '').toUpperCase().split(/\s+/)[0].replace(/[^A-Z]/g, '') || '').trim();
+            const tc = (toCode   || (toBox.value   || '').toUpperCase().split(/\s+/)[0].replace(/[^A-Z]/g, '') || '').trim();
+            const matchAirport = (val, f) => {
+              if (!val) return true;
+              const a = AIVA.airport(f);
+              if (!a) return false;
+              return (a.iata === val) || (a.icao === val) || (f === val);
+            };
+            let list = AIVA.FLIGHTS.filter(f =>
+              matchAirport(fc, f.from) &&
+              matchAirport(tc, f.to)   &&
+              (!opts.acTypes || opts.acTypes.includes(f.ac))
+            );
+            list = list.sort((a, b) => a.dep.localeCompare(b.dep));
+
+            /* Title + sub reflect whichever filters are active. */
+            const parts = [];
+            const cityFor = (code) => {
+              if (!code) return null;
+              const a = AIVA.FLIGHTS.find(f => f.from === code) ? AIVA.airport(code)
+                      : AIVA.FLIGHTS.find(f => f.to === code)   ? AIVA.airport(code)
+                      : null;
+              return a?.city || code;
+            };
+            if (fc && tc) parts.push(`${cityFor(fc)} → ${cityFor(tc)}`);
+            else if (fc) parts.push(`Departing ${cityFor(fc)}`);
+            else if (tc) parts.push(`Arriving ${cityFor(tc)}`);
+            else parts.push('All flights');
+            if (acFilter) parts.push(acFilter.replace('fam:', '') + ' family');
+            $('#resultsTitle', c).textContent = parts.join(' · ');
+            $('#resultsSub', c).textContent = `${list.length} flight${list.length===1?'':'s'} match — sorted by departure time`;
+
+            /* Cap the display to 300 to keep DOM perf bearable on
+               "any aircraft, any route" queries. The full network has
+               ~2,000 sectors and rendering all of them lags. */
+            renderResults(list.slice(0, 300));
           }
 
           function renderResults(list) {

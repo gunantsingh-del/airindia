@@ -779,21 +779,25 @@ AIVA.CrewChat = (() => {
   (function injectCSS() {
     if (document.getElementById('cc-styles')) return;
     const css = `
-      /* Bottom-RIGHT, sitting to the LEFT of the Maharaja launcher.
-         Maharaja lives at right: 22px with a ~64px button → place us at
-         right: 96px so we're horizontally adjacent (not stacked above). */
-      .cc-root { position: fixed; bottom: 22px; right: 96px; z-index: 92; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
-      .cc-root.cc-compact { bottom: 14px; right: 14px; }   /* EFB has no Maharaja so we sit at the corner */
+      /* Bottom-LEFT cluster so we don't collide with the EFB right tile
+         rail (which has the Pax Manifest tile at the bottom). Maharaja
+         and crew-chat are now horizontally adjacent on the LEFT edge of
+         the viewport, well away from the EFB's right-side tools. */
+      .cc-root { position: fixed; bottom: 22px; left: 96px; z-index: 92; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
+      .cc-root.cc-compact { bottom: 14px; left: 22px; }
       .cc-launch {
-        width: 48px; height: 48px; border-radius: 50%;
+        /* Size-match Maharaja (64×64) so the two launchers visually
+           belong together — same proportions, no asymmetric clustering. */
+        width: 64px; height: 64px; border-radius: 50%;
         background: linear-gradient(180deg, #C8102E, #8B1A2B);
-        color: #FFFFFF; border: 1px solid rgba(255,225,89,.4);
+        color: #FFFFFF; border: 2px solid rgba(255,225,89,.4);
         display: flex; align-items: center; justify-content: center;
         cursor: pointer;
         box-shadow: 0 14px 36px rgba(168,16,31,.42);
         position: relative;
         transition: transform .2s, box-shadow .2s, background .2s;
       }
+      .cc-launch svg { width: 26px; height: 26px; }
       .cc-launch:hover { transform: translateY(-2px); box-shadow: 0 20px 48px rgba(168,16,31,.55); }
       /* When the drawer is open, the launcher shows an X so the user knows
          a click will close it (not re-open). */
@@ -815,7 +819,7 @@ AIVA.CrewChat = (() => {
          Re-assert display:none for the hidden state. */
       .cc-badge[hidden] { display: none !important; }
       .cc-drawer {
-        position: fixed; bottom: 88px; right: 22px;
+        position: fixed; bottom: 100px; left: 22px;
         width: 380px; max-width: calc(100vw - 44px);
         height: 520px; max-height: calc(100vh - 140px);
         background: rgba(14, 9, 12, .96);

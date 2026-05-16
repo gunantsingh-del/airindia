@@ -6988,14 +6988,21 @@
         }
         /* Expose so other modules / future consumers can resolve clips. */
         AIVA.AnnStorage = { put: annPut, getBlob: annGetBlob, del: annDel };
-        /* Helper: take a file metadata row { name, idbKey?, dataURL? }
-           and return a playable URL. For new clips (idbKey set) we
-           generate a fresh blob URL each play; for legacy rows with an
-           inline dataURL, just hand that back. */
+        /* Helper: take a file metadata row { name, url?, idbKey?, dataURL? }
+           and return a playable URL. Resolution order:
+             1. Catbox URL (works on every device — set when admin
+                uploaded + this clip arrived via ntfy `ann_set` event).
+             2. IDB blob (set when THIS device uploaded the clip itself).
+             3. Legacy inline dataURL (pre-IDB era).
+           A pilot on a different machine to the uploader only ever has
+           (1) — they never touched the file locally. */
         async function annResolveURL(row) {
+          if (row?.url) return row.url;
           if (row?.idbKey) {
-            const blob = await annGetBlob(row.idbKey);
-            if (blob) return URL.createObjectURL(blob);
+            try {
+              const blob = await annGetBlob(row.idbKey);
+              if (blob) return URL.createObjectURL(blob);
+            } catch {}
           }
           return row?.dataURL || null;
         }
@@ -7015,11 +7022,12 @@
               if (!files.length) return;
               const cur = AIVA.Store.get('ann_lib', {});
               cur[stageId] = cur[stageId] || [];
-              /* 8 MB hard limit on the input side. Audio bytes go to
-                 IndexedDB (typically 50+ MB quota), so a single 8 MB
-                 clip fits with room for a full safety-demo library
-                 across all stages. localStorage only carries metadata
-                 (name + IDB key) so the per-origin cap doesn't bite. */
+              /* 8 MB hard limit. Each clip uploads to Catbox via
+                 /api/announce-upload, gets a public URL, AND is cached
+                 locally in IndexedDB. The URL is broadcast over the
+                 crew-chat ntfy relay as an `ann_set` event so other
+                 pilots' devices append the clip to THEIR ann_lib
+                 (linking the URL — they don't have to re-upload). */
               const MAX_MB = 8;
               let added = 0, failed = 0;
               for (const f of files) {
@@ -7028,19 +7036,56 @@
                   continue;
                 }
                 try {
+                  /* 1. Local cache to IDB so playback works offline /
+                        before the network upload finishes. */
                   const idbKey = `ann_${stageId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                   await annPut(idbKey, f);
-                  cur[stageId].push({ name: f.name, idbKey, size: f.size, type: f.type });
+
+                  /* 2. Upload to Catbox via our Vercel function. */
+                  let url = null;
+                  try {
+                    const dataUrl = await new Promise(res => {
+                      const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f);
+                    });
+                    const resp = await fetch('/api/announce-upload', {
+                      method:'POST',
+                      headers:{ 'Content-Type':'application/json' },
+                      body: JSON.stringify({ stageId, name: f.name, dataUrl }),
+                    });
+                    if (resp.ok) {
+                      const j = await resp.json();
+                      url = j.url;
+                    } else {
+                      const j = await resp.json().catch(() => ({}));
+                      toast(`Upload to cloud failed (${resp.status}): ${j.error || 'unknown'}. Clip saved locally — other pilots won't see it until you re-upload.`, 'warn', 8000);
+                    }
+                  } catch (netErr) {
+                    toast(`Cloud upload offline: ${netErr.message}. Clip saved locally only.`, 'warn', 7000);
+                  }
+
+                  const row = { name: f.name, idbKey, size: f.size, type: f.type, url, ts: Date.now() };
+                  cur[stageId].push(row);
                   added++;
+
+                  /* 3. Broadcast to other pilots via the crew-chat
+                        ntfy relay. They'll cache the URL in their own
+                        ann_lib and play it directly from Catbox. */
+                  if (url && AIVA.CrewChat?.broadcastAnnouncement) {
+                    try {
+                      AIVA.CrewChat.broadcastAnnouncement({
+                        stageId, name: f.name, url, size: f.size, mime: f.type,
+                      });
+                    } catch {}
+                  }
                 } catch (err) {
                   failed++;
-                  console.warn('[AIVA Ann] IDB put failed for', f.name, err);
+                  console.warn('[AIVA Ann] save failed for', f.name, err);
                 }
               }
               try {
                 updateLib(cur);
-                if (added)  toast(`${added} clip${added===1?'':'s'} saved to IndexedDB.`, 'ok');
-                if (failed) toast(`${failed} clip${failed===1?'':'s'} failed to save — IDB quota or permission denied. Check DevTools.`, 'bad', 8000);
+                if (added)  toast(`${added} clip${added===1?'':'s'} saved + broadcast to crew.`, 'ok', 6000);
+                if (failed) toast(`${failed} clip${failed===1?'':'s'} failed.`, 'bad', 8000);
               } catch (err) {
                 toast('Metadata save failed: ' + err.message, 'bad', 8000);
                 updateLib(AIVA.Store.get('ann_lib', {}));

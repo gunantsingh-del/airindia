@@ -271,6 +271,7 @@ AIVA.CrewChat = (() => {
       rememberSeen(msg.id);
       if (msg.type === 'reaction') { applyRemoteReaction(msg); if (channel) try { channel.postMessage({ kind:'msg', msg }); } catch {} return; }
       if (msg.type === 'avatar_set') { applyAvatarSet(msg); if (channel) try { channel.postMessage({ kind:'msg', msg }); } catch {} return; }
+      if (msg.type === 'ann_set')    { applyAnnSet(msg);    if (channel) try { channel.postMessage({ kind:'msg', msg }); } catch {} return; }
       const log = readLog();
       if (!log.find(x => x.id === msg.id)) {
         log.push(msg);
@@ -331,6 +332,14 @@ AIVA.CrewChat = (() => {
              render the new image immediately. */
           if (msg.type === 'avatar_set') {
             applyAvatarSet(msg);
+            if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
+            return;
+          }
+          /* Announcement clip uploaded by another pilot — append the
+             Catbox URL to our local ann_lib so we can play it without
+             having the file on this device. */
+          if (msg.type === 'ann_set') {
+            applyAnnSet(msg);
             if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
             return;
           }
@@ -1192,6 +1201,28 @@ AIVA.CrewChat = (() => {
     if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
     relayPublish(msg);
   }
+
+  /* Announcement clip published to the crew. Catbox URL is the
+     payload — every pilot's device caches it in their ann_lib so the
+     Auto-mode phase machine can play it without re-uploading. */
+  function broadcastAnnouncement(payload) {
+    if (!payload?.stageId || !payload?.url) return;
+    const msg = {
+      id: (Date.now().toString(36) + Math.random().toString(36).slice(2,6)),
+      ts: Date.now(),
+      type: 'ann_set',
+      stageId: payload.stageId,
+      name:    payload.name || 'clip.mp3',
+      url:     payload.url,
+      size:    payload.size,
+      mime:    payload.mime,
+    };
+    rememberSeen(msg.id);
+    /* Apply locally first so the uploader's UI updates immediately. */
+    applyAnnSet(msg);
+    if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
+    relayPublish(msg);
+  }
   function applyAvatarSet(msg) {
     if (!msg?.pilotId) return;
     try {
@@ -1204,9 +1235,35 @@ AIVA.CrewChat = (() => {
     listeners.forEach(cb => { try { cb({ type:'avatar_set', pilotId: msg.pilotId }, readLog()); } catch(_){} });
   }
 
+  /* Cabin-announcement clip from another pilot. Append the row to
+     this device's ann_lib so it shows up in the Announcements page
+     and the phase-driven auto-play can pick it up at the right phase.
+     We dedupe by url — re-broadcasts (e.g. on a sync replay) don't
+     pile up duplicate rows. */
+  function applyAnnSet(msg) {
+    if (!msg?.stageId || !msg?.url) return;
+    try {
+      const lib = AIVA.Store?.get?.('ann_lib', {}) || {};
+      lib[msg.stageId] = lib[msg.stageId] || [];
+      const exists = lib[msg.stageId].some(r => r.url === msg.url);
+      if (!exists) {
+        lib[msg.stageId].push({
+          name: msg.name || 'remote clip.mp3',
+          url:  msg.url,
+          size: msg.size,
+          type: msg.mime,
+          ts:   msg.ts || Date.now(),
+          remote: true,
+        });
+        AIVA.Store?.set?.('ann_lib', lib);
+      }
+    } catch (e) { console.warn('[AIVA Ann] applyAnnSet failed:', e); }
+    listeners.forEach(cb => { try { cb({ type:'ann_set', stageId: msg.stageId }, readLog()); } catch(_){} });
+  }
+
   return {
     mount, send, event, online, onMessage, clear, react,
-    broadcastAvatar,
+    broadcastAvatar, broadcastAnnouncement,
     relayState: () => relayState,
     setTopic: (t) => {
       try { AIVA.Store.set('crew_chat_topic', t); } catch {}

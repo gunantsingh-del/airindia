@@ -1,48 +1,32 @@
 /* =====================================================================
    AIVA · PilotSync — cross-device flight state sync
    ---------------------------------------------------------------------
-   Pilots can open AIVA on their PC AND on their FSLabs iPad EFB
-   browser at the same time. Without sync, each device has its own
-   localStorage — the iPad doesn't know the PC has a flight in progress.
+   Goal: pilot logs into AIVA on their PC, opens AIVA EFB on their
+   FSLabs A321 in-cockpit browser, and the iPad shows the SAME active
+   flight without re-clicking Start.
 
-   This module broadcasts each pilot's current flight state over a
-   per-pilot ntfy topic every 30 seconds (heartbeat) AND immediately
-   on state changes. Other devices logged into the same pilot account
-   subscribe to the same topic, see the broadcasts, and apply the
-   newer state to their local store.
+   v2 — Vercel function instead of ntfy.sh.
+   The FSLabs iPad's embedded Chromium blocks external HTTPS hosts
+   (ntfy.sh and community mirrors all time out). We solve this by
+   routing through OUR /api/pilot-state endpoint on the same origin
+   (airindiavirtual.online) — guaranteed reachable from any device
+   that can load AIVA at all.
 
-   Broadcast payload (JSON):
-     {
-       pilotId, ts,
-       flight_in_progress: { fno, startedAt } | null,
-       active_flight: 'AI2577' | null,
-       phase: 'CRUISE' | ...
-     }
-
-   Topic name: aiva-pilot-<pilotId>-state
-   Public ntfy.sh topic — flight state isn't sensitive (no pax / no PII).
-   Uses the same NTFY_HOSTS rotation pattern as crew-chat for ISP
-   blocking resilience.
+   Cycle:
+     • POST /api/pilot-state?pilotId=X  body=snapshot   every 30 s + on change
+     • GET  /api/pilot-state?pilotId=X                   every 30 s
+   When the GET returns a state newer than ours, apply it locally and
+   fire `aiva-sync` so the renderers (portal + EFB) re-render.
    ===================================================================== */
 
 window.AIVA = window.AIVA || {};
 
 AIVA.PilotSync = (() => {
-  const NTFY_HOSTS = [
-    'https://ntfy.sh',
-    'https://ntfy.envs.net',
-    'https://ntfy.jonas-meyer.de',
-  ];
-  let hostIdx = 0;
+  const ENDPOINT = '/api/pilot-state';
   let pollTimer = null;
   let beatTimer = null;
   let lastSent  = null;
   let lastApply = 0;
-
-  function host() { return NTFY_HOSTS[hostIdx]; }
-  function rotate() { hostIdx = (hostIdx + 1) % NTFY_HOSTS.length; }
-
-  function topic(pilotId) { return `aiva-pilot-${pilotId}-state`; }
 
   function snapshot() {
     const p = AIVA.Auth?.currentPilot?.();
@@ -54,25 +38,28 @@ AIVA.PilotSync = (() => {
       flight_in_progress: ps.get('flight_in_progress', null),
       active_flight:      ps.get('active_flight',      null),
       phase:              AIVA.FSUIPC?.phase?.() || null,
+      device:             /Electron/i.test(navigator.userAgent) ? 'desktop'
+                          : /iPad|iPhone|Android/i.test(navigator.userAgent) ? 'mobile'
+                          : 'web',
     };
   }
 
   async function broadcast() {
     const s = snapshot();
     if (!s) return;
-    /* Skip the network round-trip if nothing's changed since last send. */
+    /* Skip if unchanged since last send (dedup on the meaningful keys). */
     const key = JSON.stringify({ f: s.flight_in_progress, a: s.active_flight, p: s.phase });
     if (key === lastSent) return;
     lastSent = key;
     try {
-      await fetch(`${host()}/${encodeURIComponent(topic(s.pilotId))}`, {
+      await fetch(`${ENDPOINT}?pilotId=${encodeURIComponent(s.pilotId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(s),
       });
-    } catch (e) {
-      /* Network glitch — try next host on the next beat. */
-      rotate();
+    } catch {
+      /* Network glitch — keep lastSent unchanged so we retry next beat */
+      lastSent = null;
     }
   }
 
@@ -80,71 +67,50 @@ AIVA.PilotSync = (() => {
     const p = AIVA.Auth?.currentPilot?.();
     if (!p) return;
     try {
-      /* Last 5 min of broadcasts on the topic, NDJSON. */
-      const r = await fetch(`${host()}/${encodeURIComponent(topic(p.id))}/json?poll=1&since=300s`, {
+      const r = await fetch(`${ENDPOINT}?pilotId=${encodeURIComponent(p.id)}`, {
         cache: 'no-store',
       });
-      if (!r.ok) { rotate(); return; }
-      const text = await r.text();
-      if (!text.trim()) return;
-      let latest = null;
-      for (const line of text.split('\n')) {
-        if (!line.trim()) continue;
-        try {
-          const env = JSON.parse(line);
-          if (env.event && env.event !== 'message') continue;
-          if (!env.message) continue;
-          const state = JSON.parse(env.message);
-          if (!latest || state.ts > latest.ts) latest = state;
-        } catch {}
-      }
-      if (latest) apply(latest);
-    } catch (e) {
-      rotate();
-    }
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j?.state) apply(j.state);
+    } catch {}
   }
 
-  /* Apply an incoming state IF it's newer than what we just sent. We
-     dedupe against THIS device's own broadcasts so we don't bounce
-     state back and forth. */
+  /* Apply an incoming snapshot if it's newer than what we have. Also
+     skip if it came from THIS device (dedup against our own broadcast
+     that came back through the poll). */
   function apply(s) {
     if (!s || s.pilotId !== AIVA.Auth?.currentPilot?.()?.id) return;
-    /* Discard if we applied something newer recently. */
     if (s.ts <= lastApply) return;
-    /* Discard if it's older than what we have locally already. */
-    const local = snapshot();
-    if (local && local.ts > s.ts + 5000) return;
     lastApply = s.ts;
     const ps = AIVA.Store.pilot(s.pilotId);
-    /* Only write if the incoming value differs — avoids needless storage
-       events / re-renders. */
+    /* flight_in_progress: only write if different from current local. */
     const cur = ps.get('flight_in_progress', null);
-    if (JSON.stringify(cur) !== JSON.stringify(s.flight_in_progress)) {
-      if (s.flight_in_progress) ps.set('flight_in_progress', s.flight_in_progress);
+    const want = s.flight_in_progress || null;
+    if (JSON.stringify(cur) !== JSON.stringify(want)) {
+      if (want) ps.set('flight_in_progress', want);
       else ps.remove('flight_in_progress');
-      /* Tell any open page to re-render. */
-      try { window.dispatchEvent(new CustomEvent('aiva-sync', { detail: { kind: 'flight_in_progress' } })); } catch {}
+      try { window.dispatchEvent(new CustomEvent('aiva-sync', { detail: { kind:'flight_in_progress' } })); } catch {}
     }
     const curAct = ps.get('active_flight', null);
     if (s.active_flight && s.active_flight !== curAct) {
       ps.set('active_flight', s.active_flight);
-      try { window.dispatchEvent(new CustomEvent('aiva-sync', { detail: { kind: 'active_flight' } })); } catch {}
+      try { window.dispatchEvent(new CustomEvent('aiva-sync', { detail: { kind:'active_flight' } })); } catch {}
     }
   }
 
   function start() {
     if (!AIVA.Auth?.currentPilot?.()) return;
     stop();
-    /* Initial pull so a fresh tab catches up to what other devices
-       already broadcast. */
+    /* Pull immediately so a fresh tab catches up to whatever the OTHER
+       device last broadcast. */
     pollLatest();
-    /* Heartbeat: broadcast + poll every 30 s. Broadcast is no-op when
-       nothing's changed. Poll catches what other devices sent. */
-    beatTimer = setInterval(broadcast, 30_000);
+    /* Heartbeat every 30 s — broadcast (no-op if unchanged) + poll. */
+    beatTimer = setInterval(broadcast,  30_000);
     pollTimer = setInterval(pollLatest, 30_000);
-    /* Immediate broadcast a few seconds after load so the OTHER device
-       sees us quickly. */
-    setTimeout(broadcast, 3_000);
+    /* First broadcast a few seconds in so the OTHER device sees us
+       quickly after we open AIVA. */
+    setTimeout(broadcast, 2_500);
   }
   function stop() {
     if (beatTimer) { clearInterval(beatTimer); beatTimer = null; }
@@ -155,10 +121,8 @@ AIVA.PilotSync = (() => {
   return { start, stop, broadcast, pollLatest, pushNow, apply };
 })();
 
-/* Auto-start once AIVA.Auth is ready. */
 if (typeof window !== 'undefined') {
   document.addEventListener('DOMContentLoaded', () => {
-    /* Small delay so AIVA.Auth has loaded the session. */
     setTimeout(() => AIVA.PilotSync.start(), 500);
   });
 }

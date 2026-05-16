@@ -486,8 +486,16 @@ AIVA.FSUIPC = (() => {
     };
     startScPoll();
   } else {
-    /* Browser / no-desktop fallback — WebSocket auto-detect. */
-    setTimeout(startAutoDetect, 200);
+    /* Browser / no-desktop fallback — WebSocket auto-detect.
+       Skip on mobile (iPad / phone) — there's no FSUIPC on a tablet,
+       so the probe just spams console errors every 5 s. The pilot's
+       PC will run the probe instead. The FSLabs in-cockpit browser
+       also shouldn't try to reach a non-existent localhost FSUIPC. */
+    const isMobile = /iPad|iPhone|Android|FSLabs|MSFS/i.test(navigator.userAgent || '')
+      || (window.matchMedia && window.matchMedia('(pointer:coarse)').matches);
+    if (!isMobile) {
+      setTimeout(startAutoDetect, 200);
+    }
   }
 
   /* Public surface */

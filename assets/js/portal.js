@@ -8,6 +8,86 @@
   if (!pilot) return;
   const P = AIVA.Store.pilot(pilot.id);
 
+  /* ============================================================
+     AIVA._autoDispatch — manual fire-buttons surface.
+     Set up at IIFE top so it's available in BOTH embed-mode iframes
+     (EFB → Hoppie tile) AND the standalone portal. The full phase-
+     machine version (with firedAcars dedup) overwrites this later
+     inside shell() when FSUIPC events are wired, but the manual
+     button click path doesn't need that — just send + toast.
+     ============================================================ */
+  AIVA._autoDispatch = AIVA._autoDispatch || (() => {
+    /* Resolve the active flight callsign the way the rest of AIVA does. */
+    function callsign() {
+      const fp = AIVA.Store.pilot(pilot.id).get('flight_in_progress');
+      const fl = fp ? AIVA.findFlight?.(fp.fno) : null;
+      const cs = (fl?.cs || '').toString().toUpperCase().trim();
+      if (/^[A-Z]{2,3}\d{2,4}$/.test(cs)) return cs;
+      return 'AIC' + (pilot.id || '001').replace(/[^0-9]/g, '').slice(-3).padStart(3, '0');
+    }
+    function activeFlight() {
+      const fp = AIVA.Store.pilot(pilot.id).get('flight_in_progress');
+      return fp ? AIVA.findFlight?.(fp.fno) : null;
+    }
+    async function sendHoppie(body, type='telex') {
+      const code = AIVA.Store.pilot(pilot.id).get('hoppieCode', '') || AIVA.Store.get('hoppieCode', '');
+      if (!code) { window.toast?.('No Hoppie logon code in Profile', 'bad', 5000); return false; }
+      const to = callsign();
+      const url = 'https://www.hoppie.nl/acars/system/connect.html?' +
+        new URLSearchParams({ logon: code, from: to, to, type, packet: body });
+      try {
+        await AIVA.Dispatch.fetchViaProxies(url);
+        const log = AIVA.Store.get('hoppie_log', []);
+        log.push({ dir:'tx', from: to, to, type, body, ts: Date.now(), hoppie:'ok', auto:true });
+        AIVA.Store.set('hoppie_log', log.slice(-200));
+        return true;
+      } catch (e) { window.toast?.('Hoppie send failed: ' + e.message, 'bad', 6000); return false; }
+    }
+    return {
+      firePreflight: async () => {
+        const sbUser = AIVA.Store.pilot(pilot.id).get('simbrief_user', '') || AIVA.Store.get('simbrief_user', '');
+        if (!sbUser) { window.toast?.('No SimBrief username set in Profile', 'bad', 5000); return; }
+        const fl = activeFlight();
+        if (!fl) { window.toast?.('No active flight — book one first', 'bad', 5000); return; }
+        try {
+          const ofp = await AIVA.Dispatch.fetchSimbriefOFP(sbUser);
+          const body = AIVA.Dispatch.preflightPack(ofp);
+          if (await sendHoppie(body, 'telex')) {
+            window.toast?.(`✓ Pre-flight pack sent to ${callsign()} (${ofp.flightNo || fl.fno})`, 'ok', 6000);
+          }
+        } catch (e) { window.toast?.(`Pre-flight failed: ${e.message}`, 'bad', 7000); }
+      },
+      fireWeather: async () => {
+        const fl = activeFlight();
+        if (!fl) { window.toast?.('No active flight', 'bad', 5000); return; }
+        const dest = AIVA.airport(fl.to)?.icao || fl.to;
+        try {
+          const wx = await AIVA.Dispatch.fetchMETAR(dest).catch(() => null);
+          const body = wx
+            ? (wx.severity?.level === 'OK' ? `${dest} WX SUMMARY · NOMINAL\n${wx.raw || ''}`
+                                            : (AIVA.Dispatch.weatherWarning?.(dest, wx) || `${dest} WX\n${wx.raw || ''}`))
+            : `${dest} WX REQUEST\nUNABLE TO FETCH — CHECK MANUALLY`;
+          if (await sendHoppie(body, 'inforeq')) {
+            window.toast?.(`✓ Weather sent to ${callsign()} (${dest})`, 'ok', 5000);
+          }
+        } catch (e) { window.toast?.(`Weather failed: ${e.message}`, 'bad', 7000); }
+      },
+      fireArrival: async () => {
+        const fl = activeFlight();
+        if (!fl) { window.toast?.('No active flight', 'bad', 5000); return; }
+        const dest = AIVA.airport(fl.to);
+        const iata = dest?.iata || fl.to;
+        const firstName = (pilot?.name || '').split(' ')[0] || '';
+        const body = AIVA.Dispatch.arrivalGate?.(iata, fl.ac, firstName) ||
+          `ARRIVAL · ${fl.fno}\nINBOUND ${iata}\nEXPECT GATE ASSIGNMENT ON GROUND`;
+        if (await sendHoppie(body, 'telex')) {
+          window.toast?.(`✓ Arrival info sent to ${callsign()} (${iata})`, 'ok', 5000);
+        }
+      },
+      reset: () => { /* no-op in this minimal version */ },
+    };
+  })();
+
   /* One-time cleanup: drop active_flight if it points at a flight that's not
      on today's roster — fixes "AIC2807 ghost" from stale state. */
   (() => {

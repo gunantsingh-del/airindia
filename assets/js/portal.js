@@ -6892,7 +6892,9 @@
         c.appendChild(el('section', { html: `
           <div class="section-title">
             <div><h2>Cabin Announcements</h2><div class="sub">${STAGES.length} stages${isAdmin ? ' · upload audio (MP3/WAV)' : ' · play in flight'} · shuffled per leg</div></div>
-            <div class="actions">
+            <div class="actions row gap-2" style="flex-wrap:wrap;">
+              <button class="btn btn-ghost btn-sm" id="annSync" title="Pull the latest announcement clips from the crew relay">${I('refresh',12)} Sync from crew</button>
+              ${isAdmin ? `<button class="btn btn-ghost btn-sm" id="annPushAll" title="Upload every local-only clip to the cloud + broadcast to crew">${I('upload',12)} Push my clips to crew</button>` : ''}
               <div class="row gap-2" style="background:var(--surface);padding:4px;border-radius:99px;border:1px solid var(--border);">
                 <button class="btn btn-sm ${cfg.mode==='manual'?'btn-primary':'btn-ghost'}" data-mode="manual">Manual</button>
                 <button class="btn btn-sm ${cfg.mode==='auto'?'btn-primary':'btn-ghost'}" data-mode="auto">Auto</button>
@@ -7012,6 +7014,131 @@
           cfg.mode = b.dataset.mode;
           AIVA.Store.set('ann_cfg', cfg);
           route();
+        });
+
+        /* === Admin: "Push my clips to crew" ===
+           Scans every row in this device's ann_lib. For any that have
+           an IDB blob (local upload) but NO cloud URL yet (legacy or
+           upload-time failure), uploads to Catbox via /api/announce-
+           upload and broadcasts an ann_set event. Brings the cloud +
+           crew in sync with whatever this device has cached. */
+        $('#annPushAll', c)?.addEventListener('click', async () => {
+          const btn = $('#annPushAll', c);
+          btn.disabled = true;
+          const orig = btn.innerHTML;
+          btn.innerHTML = '⏳ Pushing…';
+          let pushed = 0, failed = 0;
+          try {
+            const lib = AIVA.Store.get('ann_lib', {});
+            for (const stageId of Object.keys(lib)) {
+              const arr = lib[stageId] || [];
+              for (let i = 0; i < arr.length; i++) {
+                const row = arr[i];
+                if (row.url) continue;             // already cloud-synced
+                if (!row.idbKey && !row.dataURL) continue;  // no payload to push
+                /* Resolve to a Blob, build a data URL, POST to upload */
+                let blob = null;
+                if (row.idbKey) {
+                  try { blob = await annGetBlob(row.idbKey); } catch {}
+                }
+                if (!blob && row.dataURL) {
+                  /* Legacy inline dataURL — convert to Blob for upload */
+                  try {
+                    const res = await fetch(row.dataURL);
+                    blob = await res.blob();
+                  } catch {}
+                }
+                if (!blob) { failed++; continue; }
+                try {
+                  const dataUrl = await new Promise(res => {
+                    const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob);
+                  });
+                  const resp = await fetch('/api/announce-upload', {
+                    method:'POST',
+                    headers:{ 'Content-Type':'application/json' },
+                    body: JSON.stringify({ stageId, name: row.name, dataUrl }),
+                  });
+                  if (!resp.ok) { failed++; continue; }
+                  const j = await resp.json();
+                  row.url  = j.url;
+                  row.size = j.size || row.size;
+                  row.type = j.mime || row.type;
+                  /* Broadcast immediately so other pilots pick it up. */
+                  if (AIVA.CrewChat?.broadcastAnnouncement) {
+                    AIVA.CrewChat.broadcastAnnouncement({
+                      stageId, name: row.name, url: row.url, size: row.size, mime: row.type,
+                    });
+                  }
+                  pushed++;
+                } catch (e) {
+                  failed++;
+                  console.warn('[AIVA Ann] push failed for', row.name, e);
+                }
+              }
+            }
+            AIVA.Store.set('ann_lib', lib);
+            if (pushed)  toast(`✓ Pushed ${pushed} clip${pushed===1?'':'s'} to the crew relay. Other pilots will see them within ~5s.`, 'ok', 7000);
+            if (failed)  toast(`${failed} clip${failed===1?'':'s'} failed to push — check console.`, 'bad', 6000);
+            if (!pushed && !failed) toast('Nothing to push — all clips are already cloud-synced.', 'ok', 4000);
+            route();
+          } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+          }
+        });
+
+        /* === Manual "Sync from crew" ===
+           Polls the ntfy crew topic directly for the last 24h of
+           messages and replays any ann_set events into THIS device's
+           ann_lib. Bypasses the crew-chat module's 5s polling loop —
+           one click brings the current device in sync immediately. */
+        $('#annSync', c)?.addEventListener('click', async () => {
+          const btn = $('#annSync', c);
+          btn.disabled = true;
+          const orig = btn.innerHTML;
+          btn.innerHTML = '⏳ Syncing…';
+          try {
+            const topic = AIVA.Store.get('crew_chat_topic',
+              /* Same default as crew-chat.js — derived from logon if
+                 nothing's stored. We just need to read whatever the
+                 chat module is using. */
+              window.AIVA_CHAT_DEFAULT_TOPIC || 'aiva-crew-default'
+            );
+            /* Pull last 24h of ntfy history as NDJSON. */
+            const url = `https://ntfy.sh/${encodeURIComponent(topic)}/json?poll=1&since=24h`;
+            const r = await fetch(url, { cache: 'no-store' });
+            if (!r.ok) throw new Error('ntfy returned HTTP ' + r.status);
+            const text = await r.text();
+            if (!text.trim()) {
+              toast('No announcements in the last 24h on the crew relay.', 'warn', 5000);
+              return;
+            }
+            let synced = 0;
+            for (const line of text.split('\n')) {
+              if (!line.trim()) continue;
+              let env; try { env = JSON.parse(line); } catch { continue; }
+              if (env.event && env.event !== 'message') continue;
+              if (!env.message) continue;
+              /* Messages on the crew topic are encrypted envelopes —
+                 hand the raw body to crew-chat.js's ingest so we get
+                 the decrypt + applyAnnSet pipeline for free. */
+              try {
+                if (AIVA.CrewChat?._ingestRaw) {
+                  await AIVA.CrewChat._ingestRaw(env.message);
+                }
+              } catch {}
+            }
+            /* Re-read ann_lib to count new rows for the toast. */
+            const after = AIVA.Store.get('ann_lib', {});
+            const total = Object.values(after).reduce((n, arr) => n + (arr?.length || 0), 0);
+            toast(`Sync complete — ${total} clip${total===1?'':'s'} total in library.`, 'ok', 4000);
+            route();
+          } catch (e) {
+            toast(`Sync failed: ${e.message}. Make sure crew chat is configured in Profile.`, 'bad', 7000);
+          } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+          }
         });
 
         if (isAdmin) {

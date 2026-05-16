@@ -1264,6 +1264,9 @@ AIVA.CrewChat = (() => {
   return {
     mount, send, event, online, onMessage, clear, react,
     broadcastAvatar, broadcastAnnouncement,
+    /* Allow other modules (Announcements page Sync button) to push raw
+       ntfy envelopes through the decrypt + dedup + apply pipeline. */
+    _ingestRaw: ingestEnvelope,
     relayState: () => relayState,
     setTopic: (t) => {
       try { AIVA.Store.set('crew_chat_topic', t); } catch {}

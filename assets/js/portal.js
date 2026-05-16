@@ -6893,14 +6893,41 @@
           <div class="section-title">
             <div><h2>Cabin Announcements</h2><div class="sub">${STAGES.length} stages${isAdmin ? ' · upload audio (MP3/WAV)' : ' · play in flight'} · shuffled per leg</div></div>
             <div class="actions row gap-2" style="flex-wrap:wrap;">
-              <button class="btn btn-ghost btn-sm" id="annSync" title="Pull the latest announcement clips from the crew relay">${I('refresh',12)} Sync from crew</button>
-              ${isAdmin ? `<button class="btn btn-ghost btn-sm" id="annPushAll" title="Upload every local-only clip to the cloud + broadcast to crew">${I('upload',12)} Push my clips to crew</button>` : ''}
+              ${isAdmin ? `<button class="btn btn-ghost btn-sm" id="annExport" title="Copy a sync code containing every clip URL — share it on Discord/WhatsApp/email, paste into other devices to import">${I('upload',12)} Copy sync code</button>` : ''}
+              <button class="btn btn-ghost btn-sm" id="annImport" title="Paste a sync code from another device to load its library">${I('download',12)} Paste sync code</button>
               <div class="row gap-2" style="background:var(--surface);padding:4px;border-radius:99px;border:1px solid var(--border);">
                 <button class="btn btn-sm ${cfg.mode==='manual'?'btn-primary':'btn-ghost'}" data-mode="manual">Manual</button>
                 <button class="btn btn-sm ${cfg.mode==='auto'?'btn-primary':'btn-ghost'}" data-mode="auto">Auto</button>
               </div>
             </div>
           </div>
+          ${isAdmin ? `
+            <div class="card mt-3" style="padding:14px 18px;background:rgba(255,225,89,.04);border-color:rgba(255,225,89,.20);">
+              <div class="row between" style="align-items:flex-start;gap:14px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:240px;">
+                  <div class="eyebrow" style="color:var(--ai-gold-bright);">Add a clip by URL</div>
+                  <div class="text-mute" style="font-size:12px;margin-top:4px;line-height:1.55;">
+                    Upload your MP3 to <a href="https://catbox.moe" target="_blank" class="text-gold">catbox.moe</a> (drag & drop, no signup), copy the URL it returns, pick a stage + paste below. Same URL works on every device — no Vercel, no ntfy, no upload limits.
+                  </div>
+                </div>
+              </div>
+              <div class="grid grid-3 mt-3" style="gap:10px;">
+                <div>
+                  <div class="label">Stage</div>
+                  <select class="input" id="annUrlStage">
+                    ${STAGES.map(s => `<option value="${s.id}">${s.label}</option>`).join('')}
+                  </select>
+                </div>
+                <div style="grid-column:span 2;">
+                  <div class="label">Catbox URL (or any direct audio URL)</div>
+                  <input class="input mono" id="annUrlInput" placeholder="https://files.catbox.moe/xxxxx.mp3" style="font-size:11.5px;">
+                </div>
+              </div>
+              <div class="row gap-2 mt-3">
+                <input class="input" id="annUrlName" placeholder="Display name (e.g. 'A350 safety v3')" style="flex:1;">
+                <button class="btn btn-primary btn-sm" id="annUrlAdd">${I('plus',12)} Add clip</button>
+              </div>
+            </div>` : ''}
 
           <div class="note-callout mb-4">
             <b>Auto mode</b> plays announcements automatically at the right phase of flight using FSUIPC telemetry.
@@ -7013,6 +7040,86 @@
         c.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
           cfg.mode = b.dataset.mode;
           AIVA.Store.set('ann_cfg', cfg);
+          route();
+        });
+
+        /* === Admin: "Add a clip by URL" — manual flow ===
+           Bypasses all the Vercel + ntfy plumbing. Admin uploads to
+           catbox.moe themselves (one-time, no signup), pastes the
+           URL here. URL works on every device since Catbox is just
+           an HTTPS host — no CORS issues for <audio> playback. */
+        $('#annUrlAdd', c)?.addEventListener('click', () => {
+          const stageId = $('#annUrlStage', c).value;
+          const url     = ($('#annUrlInput', c).value || '').trim();
+          const name    = ($('#annUrlName',  c).value || '').trim() || url.split('/').pop() || 'clip.mp3';
+          if (!/^https?:\/\/.+\.(mp3|wav|ogg|m4a|aac|mpeg)(\?.*)?$/i.test(url) && !/^https?:\/\/files\.catbox\.moe\/.+/i.test(url)) {
+            toast('That doesn\'t look like a direct audio URL. Catbox returns links like https://files.catbox.moe/xxxxx.mp3', 'bad', 8000);
+            return;
+          }
+          const lib = AIVA.Store.get('ann_lib', {});
+          lib[stageId] = lib[stageId] || [];
+          lib[stageId].push({ name, url, ts: Date.now(), manual: true });
+          AIVA.Store.set('ann_lib', lib);
+          $('#annUrlInput', c).value = '';
+          $('#annUrlName',  c).value = '';
+          toast(`✓ "${name}" added to ${stageId}.`, 'ok', 4000);
+          route();
+        });
+
+        /* === Sync code: shareable JSON of the whole library ===
+           Admin clicks "Copy sync code" → gets a JSON blob in the
+           clipboard. Sends it via Discord/WhatsApp/email. Other pilot
+           clicks "Paste sync code" → pastes → AIVA merges into their
+           library. Zero backend dependencies. */
+        $('#annExport', c)?.addEventListener('click', async () => {
+          const lib = AIVA.Store.get('ann_lib', {});
+          /* Strip local-only fields (idbKey, dataURL) — sync code is
+             URL-based only. */
+          const portable = {};
+          for (const [stage, rows] of Object.entries(lib)) {
+            portable[stage] = (rows || []).filter(r => r.url).map(r => ({
+              name: r.name, url: r.url, size: r.size, type: r.type,
+            }));
+          }
+          const code = 'AIVA-ANN:' + btoa(JSON.stringify(portable));
+          try {
+            await navigator.clipboard.writeText(code);
+            const total = Object.values(portable).reduce((n, a) => n + a.length, 0);
+            toast(`✓ Sync code copied (${total} clip${total===1?'':'s'}). Paste it on other devices.`, 'ok', 7000);
+          } catch (e) {
+            /* Clipboard API blocked — show modal with the code text. */
+            const w = window.prompt('Copy this sync code:', code);
+          }
+        });
+        $('#annImport', c)?.addEventListener('click', async () => {
+          let code = '';
+          try { code = await navigator.clipboard.readText(); } catch {}
+          if (!code) code = window.prompt('Paste the AIVA sync code:') || '';
+          code = code.trim();
+          if (!code.startsWith('AIVA-ANN:')) {
+            toast('Not a valid AIVA sync code — should start with "AIVA-ANN:".', 'bad', 6000);
+            return;
+          }
+          let incoming;
+          try {
+            incoming = JSON.parse(atob(code.slice('AIVA-ANN:'.length)));
+          } catch (e) {
+            toast('Sync code is corrupt — copy it again from the source device.', 'bad', 6000);
+            return;
+          }
+          const lib = AIVA.Store.get('ann_lib', {});
+          let added = 0, dedup = 0;
+          for (const [stage, rows] of Object.entries(incoming)) {
+            lib[stage] = lib[stage] || [];
+            for (const r of rows) {
+              if (!r.url) continue;
+              if (lib[stage].some(x => x.url === r.url)) { dedup++; continue; }
+              lib[stage].push({ ...r, ts: Date.now(), imported: true });
+              added++;
+            }
+          }
+          AIVA.Store.set('ann_lib', lib);
+          toast(`✓ Imported ${added} new clip${added===1?'':'s'}${dedup ? ` (${dedup} already there)` : ''}.`, 'ok', 5000);
           route();
         });
 

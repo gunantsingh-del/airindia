@@ -27,6 +27,15 @@ const SimBridge = require('./simconnect-bridge');
 
 const APP_URL = process.env.AIVA_URL || 'https://airindiavirtual.online/';
 
+/* Force WebGL on for the MapLibre globe + EFB live map. Some pilots'
+   GPUs are on Chromium's software-rasterizer blocklist (older Intel
+   integrated chips, AMD switchable graphics, certain laptop docks) —
+   without these switches MapLibre throws "Failed to initialize WebGL"
+   and the Network Globe + Book Roster maps render blank. */
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('enable-webgl');
+app.commandLine.appendSwitch('enable-accelerated-2d-canvas');
+
 /* ----- Single-instance lock so launching twice just focuses the window ----- */
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) { app.quit(); process.exit(0); }

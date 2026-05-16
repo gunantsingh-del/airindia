@@ -62,17 +62,50 @@ AIVA.NetworkGlobe = (() => {
     const me = AIVA.Auth?.currentPilot?.();
     const baseAp = me?.base ? AIVA.airport(me.base) : null;
 
-    const map = new ml.Map({
-      container: host,
-      style: styleUrl,
-      center: baseAp ? [baseAp.lon, baseAp.lat] : [77, 22],
-      zoom: 2.4,
-      minZoom: 1.4,
-      maxZoom: 8,
-      projection: 'globe',
-      antialias: true,
-      attributionControl: false,
-    });
+    /* WebGL probe + graceful fallback. Some pilot machines have GPU
+       acceleration disabled (sandbox, blocklist, AMD-switchable driver)
+       which makes MapLibre's getContext('webgl') return null. Without
+       this catch the page just throws "Failed to initialize WebGL" and
+       the user sees a blank container with no explanation. */
+    function webglOK() {
+      try {
+        const c = document.createElement('canvas');
+        return !!(c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl'));
+      } catch { return false; }
+    }
+    if (!webglOK()) {
+      host.innerHTML = `
+        <div style="display:grid;place-items:center;height:100%;min-height:380px;padding:32px;text-align:center;background:rgba(14,9,11,.55);border-radius:12px;">
+          <div style="max-width:480px;">
+            <div style="font-family:var(--font-display);font-size:18px;color:var(--ai-cream);margin-bottom:10px;">Map needs WebGL</div>
+            <div style="font-family:var(--font-sans);font-size:13px;line-height:1.6;color:rgba(255,255,255,.65);">
+              Your browser blocked the WebGL context — the network globe + live map can't render. Open your browser's <b>hardware acceleration</b> setting and turn it on, then reload AIVA.
+              <br><br>
+              <span class="text-mute mono" style="font-size:10.5px;">Chrome: chrome://settings/system → "Use hardware acceleration" · Edge: edge://settings/system · Firefox: about:preferences#performance</span>
+            </div>
+          </div>
+        </div>`;
+      return null;
+    }
+
+    let map;
+    try {
+      map = new ml.Map({
+        container: host,
+        style: styleUrl,
+        center: baseAp ? [baseAp.lon, baseAp.lat] : [77, 22],
+        zoom: 2.4,
+        minZoom: 1.4,
+        maxZoom: 8,
+        projection: 'globe',
+        antialias: true,
+        attributionControl: false,
+      });
+    } catch (e) {
+      console.warn('[AIVA NetworkGlobe] MapLibre init failed:', e);
+      host.innerHTML = `<div style="display:grid;place-items:center;height:100%;min-height:380px;padding:32px;color:rgba(255,255,255,.65);font-size:13px;text-align:center;">Map failed to load (${e?.message || 'unknown'}). Try reloading AIVA or enabling hardware acceleration.</div>`;
+      return null;
+    }
     map.addControl(new ml.NavigationControl({ visualizePitch: false }), 'top-right');
 
     /* Build dataset */

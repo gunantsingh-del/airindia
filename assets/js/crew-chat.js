@@ -259,6 +259,17 @@ AIVA.CrewChat = (() => {
       const topic = chatTopic();
       const url = `${NTFY_BASE_FN()}/${encodeURIComponent(topic)}/json?poll=1&since=${relayPollLastTs}`;
       const r = await fetch(url, { cache: 'no-store' });
+      if (r.status === 429) {
+        /* Rate-limited — back off the poll interval so we don't keep
+           getting throttled. Slow to 30 s for the next 2 min. */
+        if (relayPollTimer) clearInterval(relayPollTimer);
+        relayPollTimer = setInterval(relayPollBackfill, 30_000);
+        setTimeout(() => {
+          if (relayPollTimer) clearInterval(relayPollTimer);
+          relayPollTimer = setInterval(relayPollBackfill, 5_000);
+        }, 120_000);
+        return;
+      }
       if (!r.ok) { relayPollFails++; maybeRotateOnPollFail(); return; }
       relayPollFails = 0;
       const text = await r.text();
@@ -544,57 +555,25 @@ AIVA.CrewChat = (() => {
      bar above the input and the replyTo field on send. */
   let replyingTo = null;
 
-  /* Visibility filter: which messages belong to the current channel? */
-  function isInChannel(m, myId) {
+  /* DM channels removed per the pilot's request. Everything stays in
+     the shared crew room — simpler, faster, no per-pilot channel state
+     to sync. isInChannel just filters out reactions (which mutate
+     existing messages) and any leftover targeted messages from before
+     the DM removal. */
+  function isInChannel(m, _myId) {
     if (!m) return false;
-    if (m.type === 'reaction') return false;       // reactions aren't rendered as separate items
-    if (activeChannel === 'crew') return !m.to;    // group room → only un-targeted msgs
-    /* DM: show messages where (I sent to them) OR (they sent to me) */
-    return (m.pilotId === myId && m.to === activeChannel)
-        || (m.pilotId === activeChannel && m.to === myId);
+    if (m.type === 'reaction') return false;
+    return true; // group chat only — every visible message belongs
   }
 
   function renderChannels() {
-    const host = root?.querySelector('#ccChannels'); if (!host) return;
-    const me = pilot(); if (!me) { host.innerHTML = ''; return; }
-    const all = AIVA.Auth?.allPilots?.() || [];
-    const log = readLog();
-    /* Build the DM list from EVERY pilot we've exchanged a DM with,
-       most-recent first. Always show the group "Crew" channel. */
-    const dmIds = new Set();
-    for (const m of log) {
-      if (!m || m.type === 'reaction' || !m.to) continue;
-      if (m.pilotId === me.id) dmIds.add(m.to);
-      else if (m.to === me.id) dmIds.add(m.pilotId);
-    }
-    /* If we're currently in a DM that has no messages yet (just clicked
-       a pilot in the roster), keep the chip visible. */
-    if (activeChannel !== 'crew') dmIds.add(activeChannel);
-    const dmList = [...dmIds]
-      .map(id => ({ id, p: all.find(x => x.id === id) }))
-      .filter(x => x.p)
-      .sort((a, b) => a.p.name.localeCompare(b.p.name));
-
-    host.innerHTML = `
-      <button class="cc-chan ${activeChannel === 'crew' ? 'on' : ''}" data-cc-dm="crew">CREW</button>
-      ${dmList.map(({ id, p }) => {
-        const pic = avatarFor(id);
-        const avHtml = pic
-          ? `<span class="cc-chan-pic"><img src="${pic}" alt=""></span>`
-          : `<span class="cc-chan-pic"><span class="cc-chan-init">${initialsFor(p.name)}</span></span>`;
-        return `<button class="cc-chan ${activeChannel === id ? 'on' : ''}" data-cc-dm="${id}" title="DM ${p.name}">${avHtml}${p.name.split(' ')[0]}</button>`;
-      }).join('')}
-    `;
-    /* Title reflects the current channel */
-    const title = root.querySelector('#ccTitle');
-    if (title) title.textContent = activeChannel === 'crew'
-      ? 'Crew Chat'
-      : `DM · ${(all.find(p => p.id === activeChannel)?.name) || activeChannel}`;
-    /* Input placeholder reflects too */
-    const inp = root.querySelector('#ccInput');
-    if (inp) inp.placeholder = activeChannel === 'crew'
-      ? 'Message the crew…'
-      : `Message ${(all.find(p => p.id === activeChannel)?.name?.split(' ')[0]) || 'crew'}…`;
+    /* No-op now that DMs are gone. Title + placeholder are static. */
+    const title = root?.querySelector('#ccTitle');
+    if (title) title.textContent = 'Crew Chat';
+    const inp = root?.querySelector('#ccInput');
+    if (inp) inp.placeholder = 'Message the crew…';
+    const host = root?.querySelector('#ccChannels');
+    if (host) host.innerHTML = '';   // clear the channel rail
   }
 
   function renderReplyBar() {
@@ -677,12 +656,8 @@ AIVA.CrewChat = (() => {
       const inp = root.querySelector('#ccInput');
       const txt = inp.value.trim();
       if (!txt) return;
-      /* If we're in a DM channel, attach the recipient. If there's an
-         active replyTo, include it. Both fields are optional in send(). */
-      send(txt, {
-        to:      activeChannel === 'crew' ? null : activeChannel,
-        replyTo: replyingTo || null,
-      });
+      /* DMs removed — every message goes to the shared crew room. */
+      send(txt, { replyTo: replyingTo || null });
       inp.value = '';
       replyingTo = null;
       renderReplyBar();
@@ -708,13 +683,9 @@ AIVA.CrewChat = (() => {
         root.querySelector('#ccInput')?.focus();
         return;
       }
-      const dmBtn = e.target.closest('[data-cc-dm]');
-      if (dmBtn) {
-        activeChannel = dmBtn.dataset.ccDm;
-        renderChannels();
-        renderAll();
-        scrollBottom();
-      }
+      /* DM click handler removed — clicking a pilot's avatar/name is
+         now a no-op. Keep the data-cc-dm attribute in the DOM (some
+         older messages have it baked in) but ignore the click. */
     });
 
     /* Initial render + live updates */

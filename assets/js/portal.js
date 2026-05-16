@@ -134,7 +134,7 @@
         </div>
         <div class="clock-grp">
           <button class="btn btn-ghost btn-sm pwa-install" id="pwaInstall" hidden title="Install AIVA as a desktop app">${I('download', 12)} Install AIVA</button>
-          <span class="fs-chip fs-off" id="fsChip" title="Sim Bridge not connected — start MSFS so SimConnect can attach">SIM ○</span>
+          <span class="fs-chip fs-off" id="fsChip" hidden title="Sim Bridge not connected — start MSFS so SimConnect can attach">SIM ○</span>
           <div class="clock"><span class="lbl">Z</span><span id="zuluClock">—</span></div>
           <div class="clock"><span class="lbl">IST</span><span id="istClock">—</span></div>
           <button class="iconbtn tt theme-toggle" id="themeToggle" data-tt="Toggle light/dark">${I('moon', 16)}</button>
@@ -693,17 +693,21 @@
     const chip = $('#fsChip');
     const isDesktopApp = !!window.AIVA_DESKTOP?.isDesktop;
     const usingSimConnect = !!window.AIVA_DESKTOP?.simConnect;
+    /* Chip is meaningless on the web — browsers can't reach localhost
+       FSUIPC over HTTPS Mixed-Content rules. Only show in the .exe. */
+    if (chip) {
+      if (isDesktopApp) chip.hidden = false;
+      else chip.hidden = true;
+    }
     const setFsChip = (state) => {
-      if (!chip) return;
+      if (!chip || chip.hidden) return;
       chip.classList.remove('fs-on','fs-off');
       chip.classList.add(state === 'on' ? 'fs-on' : 'fs-off');
       const label = usingSimConnect ? 'SIM' : 'FSUIPC';
       chip.textContent = state === 'on' ? `${label} ●` : `${label} ○`;
       chip.title = state === 'on'
         ? `${usingSimConnect ? 'SimConnect' : 'FSUIPC'} connected · tracking live`
-        : (isDesktopApp
-            ? 'Waiting for MSFS — start the sim and load a flight. SimConnect detects it within ~5s.'
-            : 'No sim link — your browser blocks the local sim bridge. Open AIVA from your Start Menu (the .exe) instead.');
+        : 'Waiting for MSFS — start the sim and load a flight. SimConnect detects it within ~5s.';
     };
     if (AIVA.FSUIPC) {
       setFsChip(AIVA.FSUIPC.isConnected() ? 'on' : 'off');
@@ -4175,9 +4179,9 @@
           { cat:'PRESS RELEASE', date:'MAY 15, 2026', title:'Air India commences twice-daily services to Ludhiana (Halwara)',
             img:'route', tone:'red', loc:'GURUGRAM',
             body:`Air India today commenced twice-daily non-stop services between Delhi and Ludhiana (Halwara), strengthening the airline's domestic network across Punjab and offering enhanced connectivity to one of north India's most economically vibrant cities.\n\nThe new service operates on Air India's narrowbody A320 family aircraft, with morning and afternoon rotations daily. The schedule has been timed to support same-day return business travel from Ludhiana to Delhi, as well as onward connections from Delhi to Air India's domestic and international network.\n\nIndicative schedule (Daily, all timings local):\n• AI481  DEL → LUH  05:55 → 07:05\n• AI482  LUH → DEL  07:55 → 09:10\n• AI483  DEL → LUH  12:55 → 14:10\n• AI484  LUH → DEL  14:40 → 15:55\n\n"Ludhiana is one of India's most enterprising cities. With twice-daily services from Delhi, our customers in the region will now have seamless, full-service connectivity to our domestic and international destinations across our growing network," said the Chief Commercial Officer.\n\nThe new Halwara airport, developed jointly by the Airports Authority of India and the Indian Air Force, opened earlier this year. Air India is one of the first carriers to operate scheduled commercial services from the new terminal.` },
-          { cat:'PRESS RELEASE', date:'MAY 13, 2026', title:'Air India rationalises international route network through August 2026, to continue operating 1,200+ weekly flights',
-            img:'info', tone:'red', loc:'NEW DELHI',
-            body:`Air India today announced a rationalisation of its international network for the May–August 2026 schedule, retaining over 1,200 weekly flights across 70+ international destinations.\n\nThe carrier will temporarily reduce frequencies on six long-haul routes between June 1 and August 31, 2026 — including DEL–SFO, BOM–EWR and DEL–YVR — to accommodate phased induction of seven new A350-900 aircraft and the ongoing B787 retrofit programme. All affected passengers will be re-accommodated on alternate Air India flights or partner-airline services.\n\n"This is a deliberate, planned step to enable our refleet ramp-up while keeping our customers connected. Our network reach actually grows in the Middle East and South-East Asia during this window," said the Chief Network Officer.\n\nNew frequencies are being added on DEL–HAN, DEL–CMB, DEL–BKK, BOM–DXB and BLR–LHR. Domestic capacity remains unchanged.` },
+          { cat:'PRESS RELEASE', date:'MAY 16, 2026', title:'Air India rationalises international route network through August 2026',
+            img:'info', tone:'red', loc:'GURUGRAM',
+            body:`Air India today announced a planned rationalisation of its international network for the May–August 2026 schedule. The airline will continue to operate over 1,200 weekly flights across 70+ international destinations through this period.\n\nThe rationalisation, effective June 1 through August 31, 2026, will result in a temporary reduction in frequencies on a limited set of long-haul routes. Affected sectors include DEL–SFO, BOM–EWR, DEL–YVR, BOM–MEL and DEL–MEL, where weekly frequencies will be trimmed by 1–3 services through the period. All affected customers will be proactively re-accommodated on alternate Air India services or, where required, partner-airline itineraries with full mileage protection.\n\n"This is a deliberate, planned step to enable phased induction of seven new A350-900 aircraft and the ongoing comprehensive B787 retrofit programme — the largest cabin refurbishment in the airline's history. Our customers' onboard experience matters, and that requires capacity to flow through the retrofit line. Importantly, our network reach actually grows in the Middle East and South-East Asia during this window," said the Chief Network Officer.\n\nNew frequencies are being added on DEL–HAN, DEL–CMB, DEL–BKK, BLR–LHR, BOM–DXB and DEL–RUH. Domestic capacity through this window remains unchanged. The carrier expects to fully restore long-haul frequencies from September 1, 2026.\n\nSource: airindia.com/in/en/newsroom — May 16, 2026.` },
           { cat:'PRESS RELEASE', date:'MAY 11, 2026', title:'Air India makes flying more fun for kids with the launch of ‘Cloud Chasers’',
             img:'kids', tone:'orange', loc:'GURUGRAM',
             body:`Air India today launched 'Cloud Chasers' — a kids' programme rolling out across the network this month — designed to make every flight a memorable experience for young flyers aged 4–12.\n\nThe programme features themed activity packs, exclusive Maharaja merchandise, age-appropriate IFE collections, a dedicated kids' meal menu co-designed with paediatric nutritionists, and onboard activity sessions hosted by trained crew on long-haul flights.\n\n"We are reimagining every touch-point of the kid's journey, from booking to landing," said the Chief Customer Experience Officer. "The Maharaja is a beloved character across generations of Indian families — Cloud Chasers brings that warmth into the cabin in a contemporary way."\n\nCloud Chasers packs are available on all flights effective May 15, 2026.` },

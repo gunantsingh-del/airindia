@@ -295,6 +295,47 @@ AIVA.RAW = [
   /* BOM-CMB */
   ['125','DEL','FCO','AI','A359'],['117','BOM','FCO','AI','A359'],
 
+  /* ==========================================================
+     DEL departures — May 2026 published schedule additions.
+     Cross-checked against the official Air India 8-day grid.
+     Times go into SCHEDULE_OVERRIDES below.
+     ========================================================== */
+  /* INTERNATIONAL */
+  ['101','DEL','FCO','AI','A359'],   // Rome (B789 in some seasons; screenshot showed 359)
+  ['105','DEL','FCO','AI','A359'],   // Rome — second daily
+  ['123','DEL','FCO','AI','B788'],
+  ['151','DEL','ZRH','AI','B788'],   // Zurich
+  ['281','DEL','CMB','AI','A321'],   // Colombo
+  ['2386','DEL','KUL','AI','A20N'],  // Kuala Lumpur — second daily
+  ['2118','DEL','SIN','AI','A321'],  // Singapore — second daily
+  ['2304','DEL','BKK','AI','A20N'],  // Bangkok
+  ['2332','DEL','BKK','AI','A20N'],  // Bangkok — second daily
+  ['2145','DEL','DPS','AI','A321'],  // Bali (Denpasar)
+  /* DOMESTIC */
+  ['465','DEL','NAG','AI','A20N'],   // Nagpur
+  ['885','DEL','HSR','AI','A321'],   // Rajkot Hirasar — second daily
+  ['2537','DEL','HSR','AI','A320'],
+  ['1746','DEL','PAT','AI','A20N'],  // Patna
+  ['2523','DEL','PAT','AI','A20N'],
+  ['2645','DEL','PAT','AI','A321'],
+  ['1730','DEL','PNQ','AI','A20N'],  // Pune
+  ['1735','DEL','PNQ','AI','A20N'],
+  ['1740','DEL','PNQ','AI','A319'],
+  ['2469','DEL','PNQ','AI','A321'],
+  ['2971','DEL','PNQ','AI','A20N'],
+  ['2973','DEL','PNQ','AI','A20N'],
+  ['1718','DEL','RPR','AI','A20N'],  // Raipur
+  ['2635','DEL','RPR','AI','A20N'],
+  ['1792','DEL','SXR','AI','A20N'],  // Srinagar
+  ['829','DEL','TRV','AI','A321'],   // Trivandrum
+  ['1713','DEL','TRV','AI','A321'],
+  ['1737','DEL','UDR','AI','A20N'],  // Udaipur
+  ['2866','DEL','BDQ','AI','A20N'],  // Vadodara
+  ['2881','DEL','BDQ','AI','A320'],
+  ['2623','DEL','VNS','AI','A321'],  // Varanasi
+  ['2903','DEL','VGA','AI','A20N'],  // Vijayawada
+  ['419','DEL','VTZ','AI','A321'],   // Visakhapatnam
+
   /* ====== AIR INDIA EXPRESS (AXB) — 278 routes ====== */
   /* International ex-Kerala / South India */
   ['374','BAH','CCJ','IX','B738'],['373','CCJ','BAH','IX','B738'],
@@ -1001,6 +1042,41 @@ const SCHEDULE_OVERRIDES = {
      Times from the official Air India network grid (8-day slot view). */
   'AI2458': { dep: '12:10', arr: '15:00' },    // DEL → COK
   'AI2761': { dep: '15:35', arr: '17:00' },    // DEL → JAI
+  /* International */
+  'AI101':  { dep: '21:45', arr: '02:00+1' },  // DEL → FCO (Rome)
+  'AI105':  { dep: '20:40', arr: '01:00+1' },  // DEL → FCO
+  'AI123':  { dep: '12:20', arr: '17:30' },    // DEL → FCO (daytime)
+  'AI151':  { dep: '12:15', arr: '17:30' },    // DEL → ZRH
+  'AI281':  { dep: '00:40', arr: '03:30' },    // DEL → CMB
+  'AI2386': { dep: '21:45', arr: '05:30+1' },  // DEL → KUL (second daily)
+  'AI2118': { dep: '00:40', arr: '07:30' },    // DEL → SIN (second daily)
+  'AI2304': { dep: '14:30', arr: '20:00' },    // DEL → BKK
+  'AI2332': { dep: '23:00', arr: '04:30+1' },  // DEL → BKK (second daily)
+  'AI2145': { dep: '20:50', arr: '04:30+1' },  // DEL → DPS
+  /* Domestic */
+  'AI465':  { dep: '16:20', arr: '18:20' },    // DEL → NAG
+  'AI885':  { dep: '07:25', arr: '09:30' },    // DEL → HSR
+  'AI2537': { dep: '17:30', arr: '19:35' },    // DEL → HSR
+  'AI1746': { dep: '16:45', arr: '18:40' },    // DEL → PAT
+  'AI2523': { dep: '10:45', arr: '12:40' },    // DEL → PAT
+  'AI2645': { dep: '13:05', arr: '15:00' },    // DEL → PAT
+  'AI1730': { dep: '19:10', arr: '21:50' },    // DEL → PNQ
+  'AI1735': { dep: '13:00', arr: '15:40' },    // DEL → PNQ
+  'AI1740': { dep: '17:40', arr: '20:20' },    // DEL → PNQ
+  'AI2469': { dep: '04:45', arr: '07:25' },    // DEL → PNQ
+  'AI2971': { dep: '16:00', arr: '18:40' },    // DEL → PNQ
+  'AI2973': { dep: '20:50', arr: '23:30' },    // DEL → PNQ
+  'AI1718': { dep: '17:55', arr: '20:00' },    // DEL → RPR
+  'AI2635': { dep: '12:10', arr: '14:15' },    // DEL → RPR
+  'AI1792': { dep: '09:50', arr: '11:25' },    // DEL → SXR
+  'AI829':  { dep: '23:00', arr: '03:30+1' },  // DEL → TRV
+  'AI1713': { dep: '15:30', arr: '20:00' },    // DEL → TRV
+  'AI1737': { dep: '11:50', arr: '13:35' },    // DEL → UDR
+  'AI2866': { dep: '15:10', arr: '17:00' },    // DEL → BDQ
+  'AI2881': { dep: '18:25', arr: '20:15' },    // DEL → BDQ
+  'AI2623': { dep: '13:35', arr: '15:00' },    // DEL → VNS
+  'AI2903': { dep: '17:40', arr: '20:00' },    // DEL → VGA
+  'AI419':  { dep: '13:35', arr: '16:20' },    // DEL → VTZ
 };
 AIVA.SCHEDULE_OVERRIDES = SCHEDULE_OVERRIDES;
 

@@ -336,6 +336,111 @@ AIVA.RAW = [
   ['2903','DEL','VGA','AI','A20N'],  // Vijayawada
   ['419','DEL','VTZ','AI','A321'],   // Visakhapatnam
 
+  /* ==========================================================
+     DEL inbound legs — May 2026 published schedule.
+     Reciprocals of the departures above plus standalone arrivals.
+     ========================================================== */
+  /* INTERNATIONAL inbound */
+  ['309','MEL','DEL','AI','B788'],
+  ['301','SYD','DEL','AI','B788'],
+  ['238','DAC','DEL','AI','A20N'],
+  ['186','YVR','DEL','AI','B77W'],
+  ['351','PVG','DEL','AI','B788'],
+  ['158','CPH','DEL','AI','B788'],
+  ['142','CDG','DEL','AI','B788'],
+  ['2026','FRA','DEL','AI','B77W'],
+  ['2030','FRA','DEL','AI','B789'],
+  /* DOMESTIC inbound — AMD spokes */
+  ['424','AMD','DEL','AI','B788'],
+  ['532','AMD','DEL','AI','A321'],
+  ['810','AMD','DEL','AI','A321'],
+  ['882','AMD','DEL','AI','A321'],
+  ['1876','AMD','DEL','AI','A20N'],
+  ['2546','AMD','DEL','AI','A20N'],
+  ['2716','AMD','DEL','AI','A20N'],
+  ['2906','AMD','DEL','AI','A20N'],
+  ['2938','AMD','DEL','AI','A20N'],
+  ['2946','AMD','DEL','AI','A20N'],
+  /* ATQ Amritsar */
+  ['480','ATQ','DEL','AI','A321'],
+  ['496','ATQ','DEL','AI','A21N'],
+  ['1826','ATQ','DEL','AI','A20N'],
+  ['1884','ATQ','DEL','AI','A20N'],
+  /* BLR Bangalore — 12 inbound */
+  ['2414','BLR','DEL','AI','A20N'],
+  ['2486','BLR','DEL','AI','A20N'],
+  ['2511','BLR','DEL','AI','A20N'],
+  ['2654','BLR','DEL','AI','A20N'],
+  ['2758','BLR','DEL','AI','A20N'],
+  ['2808','BLR','DEL','AI','A20N'],
+  ['2814','BLR','DEL','AI','A20N'],
+  ['2820','BLR','DEL','AI','A20N'],
+  /* BHO Bhopal */
+  ['1886','BHO','DEL','AI','A20N'],
+  ['1894','BHO','DEL','AI','A20N'],
+  /* BBI Bhubaneswar */
+  ['1847','BBI','DEL','AI','A20N'],
+  ['1898','BBI','DEL','AI','A319'],
+  /* BHJ Bhuj */
+  ['1859','BHJ','DEL','AI','A20N'],
+  /* IXC Chandigarh */
+  ['1862','IXC','DEL','AI','A20N'],
+  ['2403','IXC','DEL','AI','A20N'],
+  ['2602','IXC','DEL','AI','A20N'],
+  /* MAA Chennai */
+  ['538','MAA','DEL','AI','B77W'],
+  ['2484','MAA','DEL','AI','A20N'],
+  ['2832','MAA','DEL','AI','A20N'],
+  ['2886','MAA','DEL','AI','A20N'],
+  /* COK Cochin */
+  ['1816','COK','DEL','AI','A20N'],
+  ['1858','COK','DEL','AI','A20N'],
+  ['1873','COK','DEL','AI','A20N'],
+  ['2474','COK','DEL','AI','A20N'],
+  ['2884','COK','DEL','AI','A20N'],
+  /* CJB Coimbatore */
+  ['1837','CJB','DEL','AI','A20N'],
+  /* DED Dehradun */
+  ['1869','DED','DEL','AI','A20N'],
+  ['2908','DED','DEL','AI','A20N'],
+  /* GOI Goa Dabolim + GOX Manohar */
+  ['488','GOI','DEL','AI','A20N'],
+  ['2628','GOI','DEL','AI','A20N'],
+  ['1854','GOX','DEL','AI','A20N'],
+  /* GAU Guwahati */
+  ['880','GAU','DEL','AI','A321'],
+  ['1867','GAU','DEL','AI','A20N'],
+  /* HYD Hyderabad */
+  ['1806','HYD','DEL','AI','A20N'],
+  ['1880','HYD','DEL','AI','A20N'],
+  ['2466','HYD','DEL','AI','A20N'],
+  ['2541','HYD','DEL','AI','A20N'],
+  ['2559','HYD','DEL','AI','A20N'],
+  ['2860','HYD','DEL','AI','A20N'],
+  ['2880','HYD','DEL','AI','A20N'],
+  /* IDR Indore */
+  ['1860','IDR','DEL','AI','A20N'],
+  ['1865','IDR','DEL','AI','A20N'],
+  /* JAI Jaipur — return leg already covered at line ~605 (1834 JAI→DEL) */
+  /* CCU Kolkata */
+  ['1863','CCU','DEL','AI','A20N'],
+  ['2536','CCU','DEL','AI','A20N'],
+  ['2708','CCU','DEL','AI','A20N'],
+  ['2720','CCU','DEL','AI','A20N'],
+  ['2778','CCU','DEL','AI','A20N'],
+  /* IXL Leh */
+  ['2455','IXL','DEL','AI','A20N'],
+  ['2464','IXL','DEL','AI','A20N'],
+  ['2480','IXL','DEL','AI','A20N'],
+  /* LKO Lucknow */
+  ['1821','LKO','DEL','AI','A20N'],
+  ['1877','LKO','DEL','AI','A20N'],
+  ['2500','LKO','DEL','AI','A20N'],
+  /* BOM Mumbai inbound */
+  ['1851','BOM','DEL','AI','A20N'],
+  ['1890','BOM','DEL','AI','A20N'],
+  ['2408','BOM','DEL','AI','A359'],
+
   /* ====== AIR INDIA EXPRESS (AXB) — 278 routes ====== */
   /* International ex-Kerala / South India */
   ['374','BAH','CCJ','IX','B738'],['373','CCJ','BAH','IX','B738'],
@@ -1077,6 +1182,90 @@ const SCHEDULE_OVERRIDES = {
   'AI2623': { dep: '13:35', arr: '15:00' },    // DEL → VNS
   'AI2903': { dep: '17:40', arr: '20:00' },    // DEL → VGA
   'AI419':  { dep: '13:35', arr: '16:20' },    // DEL → VTZ
+
+  /* ===== DEL inbound legs (May-2026 published schedule) =====
+     Times below are dep at origin / arr at DEL. */
+  /* International inbound */
+  'AI309':  { dep: '13:30', arr: '03:50+1' },  // MEL → DEL (overnight)
+  'AI301':  { dep: '14:30', arr: '04:25+1' },  // SYD → DEL (overnight)
+  'AI238':  { dep: '12:30', arr: '17:15' },    // DAC → DEL
+  'AI186':  { dep: '23:55', arr: '14:45+1' },  // YVR → DEL
+  'AI351':  { dep: '21:30', arr: '02:30+1' },  // PVG → DEL
+  'AI158':  { dep: '02:55', arr: '10:15' },    // CPH → DEL
+  'AI142':  { dep: '01:10', arr: '10:00' },    // CDG → DEL
+  'AI2026': { dep: '17:30', arr: '00:55+1' },  // FRA → DEL
+  'AI2030': { dep: '00:55', arr: '10:15' },    // FRA → DEL
+  /* Domestic inbound (origin local times) */
+  'AI424':  { dep: '14:25', arr: '16:45' },    // AMD
+  'AI532':  { dep: '21:25', arr: '23:40' },    // AMD
+  'AI810':  { dep: '19:45', arr: '22:00' },    // AMD
+  'AI882':  { dep: '15:30', arr: '17:45' },    // AMD
+  'AI1876': { dep: '12:20', arr: '14:35' },    // AMD
+  'AI2546': { dep: '22:30', arr: '00:45+1' },  // AMD red-eye
+  'AI2716': { dep: '13:20', arr: '15:35' },    // AMD
+  'AI2906': { dep: '06:00', arr: '08:15' },    // AMD
+  'AI2938': { dep: '18:25', arr: '20:40' },    // AMD
+  'AI2946': { dep: '09:05', arr: '11:20' },    // AMD
+  'AI480':  { dep: '23:25', arr: '00:35+1' },  // ATQ red-eye
+  'AI496':  { dep: '10:40', arr: '11:50' },    // ATQ
+  'AI1826': { dep: '12:25', arr: '13:35' },    // ATQ
+  'AI1884': { dep: '07:15', arr: '08:25' },    // ATQ
+  'AI2414': { dep: '05:35', arr: '08:25' },    // BLR
+  'AI2486': { dep: '13:55', arr: '16:45' },    // BLR
+  'AI2511': { dep: '15:10', arr: '18:00' },    // BLR
+  'AI2654': { dep: '07:10', arr: '10:00' },    // BLR
+  'AI2758': { dep: '00:20', arr: '03:10' },    // BLR red-eye
+  'AI2808': { dep: '08:05', arr: '10:55' },    // BLR
+  'AI2814': { dep: '22:05', arr: '00:55+1' },  // BLR red-eye
+  'AI2820': { dep: '17:35', arr: '20:25' },    // BLR
+  'AI1886': { dep: '07:55', arr: '09:45' },    // BHO
+  'AI1894': { dep: '12:15', arr: '14:05' },    // BHO
+  'AI1847': { dep: '09:50', arr: '11:50' },    // BBI (overnight from prior eve)
+  'AI1898': { dep: '13:45', arr: '15:45' },    // BBI
+  'AI1859': { dep: '17:35', arr: '19:35' },    // BHJ
+  'AI1862': { dep: '08:25', arr: '09:40' },    // IXC
+  'AI2403': { dep: '15:40', arr: '16:55' },    // IXC
+  'AI2602': { dep: '18:45', arr: '20:00' },    // IXC
+  'AI538':  { dep: '20:25', arr: '23:25' },    // MAA
+  'AI2484': { dep: '16:20', arr: '19:20' },    // MAA
+  'AI2832': { dep: '06:55', arr: '09:55' },    // MAA
+  'AI2886': { dep: '08:05', arr: '11:05' },    // MAA
+  'AI1816': { dep: '11:00', arr: '14:40' },    // COK
+  'AI1858': { dep: '22:45', arr: '02:25+1' },  // COK red-eye
+  'AI1873': { dep: '14:10', arr: '17:50' },    // COK
+  'AI2474': { dep: '19:05', arr: '22:45' },    // COK
+  'AI2884': { dep: '05:40', arr: '09:20' },    // COK
+  'AI1837': { dep: '15:20', arr: '18:30' },    // CJB
+  'AI1869': { dep: '17:30', arr: '18:20' },    // DED
+  'AI2908': { dep: '13:40', arr: '14:30' },    // DED
+  'AI488':  { dep: '19:10', arr: '21:45' },    // GOI
+  'AI2628': { dep: '14:05', arr: '16:40' },    // GOI
+  'AI1854': { dep: '21:55', arr: '00:25+1' },  // GOX red-eye
+  'AI880':  { dep: '10:10', arr: '12:30' },    // GAU
+  'AI1867': { dep: '17:55', arr: '20:15' },    // GAU
+  'AI1806': { dep: '06:10', arr: '07:55' },    // HYD
+  'AI1880': { dep: '23:15', arr: '01:00+1' },  // HYD red-eye
+  'AI2466': { dep: '09:10', arr: '10:55' },    // HYD
+  'AI2541': { dep: '16:15', arr: '18:00' },    // HYD
+  'AI2559': { dep: '13:30', arr: '15:15' },    // HYD
+  'AI2860': { dep: '08:15', arr: '10:00' },    // HYD
+  'AI2880': { dep: '19:15', arr: '21:00' },    // HYD
+  'AI1860': { dep: '07:55', arr: '09:35' },    // IDR
+  'AI1865': { dep: '20:55', arr: '22:35' },    // IDR
+  'AI1863': { dep: '19:25', arr: '21:40' },    // CCU
+  'AI2536': { dep: '10:20', arr: '12:35' },    // CCU
+  'AI2708': { dep: '21:20', arr: '23:35' },    // CCU
+  'AI2720': { dep: '07:20', arr: '09:35' },    // CCU
+  'AI2778': { dep: '08:55', arr: '11:10' },    // CCU
+  'AI2455': { dep: '10:00', arr: '11:40' },    // IXL
+  'AI2464': { dep: '11:55', arr: '13:35' },    // IXL
+  'AI2480': { dep: '06:35', arr: '08:15' },    // IXL
+  'AI1821': { dep: '10:30', arr: '11:55' },    // LKO
+  'AI1877': { dep: '20:25', arr: '21:50' },    // LKO
+  'AI2500': { dep: '08:00', arr: '09:25' },    // LKO
+  'AI1851': { dep: '15:30', arr: '17:50' },    // BOM
+  'AI1890': { dep: '08:55', arr: '11:15' },    // BOM
+  'AI2408': { dep: '19:25', arr: '21:45' },    // BOM
 };
 AIVA.SCHEDULE_OVERRIDES = SCHEDULE_OVERRIDES;
 

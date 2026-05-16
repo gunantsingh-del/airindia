@@ -84,6 +84,31 @@ function createWindow() {
   mainWin.webContents.session.clearCache().catch(() => {});
   mainWin.webContents.session.clearStorageData({ storages: ['shadercache', 'cachestorage'] }).catch(() => {});
 
+  /* Strip X-Frame-Options and Content-Security-Policy frame-ancestors
+     from Navigraph responses so we can embed the charts viewer directly
+     in the EFB iframe (instead of opening a separate Electron window).
+     This is exactly the technique Akasa Air's official EFB and a few
+     other VAs use — Electron lets us rewrite response headers per
+     session, which the browser can't do.
+     Limited to navigraph.com hosts so we don't accidentally relax
+     embedding rules for the rest of the web. */
+  mainWin.webContents.session.webRequest.onHeadersReceived(
+    { urls: ['*://*.navigraph.com/*', '*://navigraph.com/*'] },
+    (details, callback) => {
+      const headers = { ...details.responseHeaders };
+      for (const key of Object.keys(headers)) {
+        const k = key.toLowerCase();
+        if (k === 'x-frame-options') delete headers[key];
+        if (k === 'content-security-policy') {
+          /* Drop just the frame-ancestors directive; keep the rest of CSP. */
+          const v = Array.isArray(headers[key]) ? headers[key] : [headers[key]];
+          headers[key] = v.map(s => (s || '').replace(/frame-ancestors[^;]*;?/gi, '').trim());
+        }
+      }
+      callback({ responseHeaders: headers });
+    }
+  );
+
   mainWin.loadURL(APP_URL);
 
   /* Closing the window minimises to tray on Windows/Linux. On macOS the

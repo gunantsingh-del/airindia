@@ -195,7 +195,6 @@
         </div>
         <div class="row" style="gap:6px;">
           <button class="btn btn-primary btn-sm" id="openEfb" title="Open EFB" style="flex:1;">${I('plane', 14)} Open EFB</button>
-          <button class="btn btn-ghost btn-sm" id="hardReload" title="Force-refresh AIVA · pulls the latest site code" style="width:34px; padding:6px;">${I('refresh', 14)}</button>
           <button class="btn btn-ghost btn-sm" id="doLogout" title="Logout" style="width:34px; padding:6px;">${I('logout', 14)}</button>
         </div>
       </div>
@@ -218,6 +217,7 @@
           <div class="clock"><span class="lbl">Z</span><span id="zuluClock">—</span></div>
           <div class="clock"><span class="lbl">IST</span><span id="istClock">—</span></div>
           <button class="iconbtn tt theme-toggle" id="themeToggle" data-tt="Toggle light/dark">${I('moon', 16)}</button>
+          <button class="iconbtn tt" id="hardReload" data-tt="Force-refresh AIVA">${I('refresh', 16)}</button>
           <button class="iconbtn tt notif-bell" data-tt="Notifications">${I('bell', 14)}</button>
         </div>
       </header>

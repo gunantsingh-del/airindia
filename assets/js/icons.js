@@ -33,6 +33,9 @@ AIVA._ICONS = {
   wifi:     `<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1" fill="currentColor"/>`,
   upload:   `<path d="M12 4v12"/><path d="M6 10l6-6 6 6"/><path d="M4 18v2h16v-2"/>`,
   download: `<path d="M12 4v12"/><path d="M18 10l-6 6-6-6"/><path d="M4 20h16"/>`,
+  /* Circular arrow — classic "reload" glyph. Used by the topbar
+     hard-refresh button. */
+  refresh:  `<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>`,
   globe:    `<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/>`,
   graduation:`<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5a6 6 0 0 0 12 0v-5"/>`,
   shield:   `<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>`,

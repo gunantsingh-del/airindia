@@ -18,7 +18,7 @@ AIVA.FSUIPC = (() => {
   let arrivalArmed = true;        /* fire the 10k ft event once per sector */
   let landingArmed = true;        /* fire the landing event once per sector */
   let inFlight = false;
-  const listeners = { connect:[], disconnect:[], state:[], descent10k:[], landing:[], crash:[], phase:[] };
+  const listeners = { connect:[], disconnect:[], state:[], descent10k:[], landing:[], crash:[], phase:[], event:[] };
   /* Flight-phase state machine.
      States: GATE → PUSHBACK → TAXI_OUT → TAKEOFF → CLIMB → CRUISE →
              DESCENT → APPROACH → LANDED → TAXI_IN → PARKED
@@ -203,20 +203,51 @@ AIVA.FSUIPC = (() => {
       tas:          d.tas,
       vs:           d.vs,
       hdg:          d.hdg,
+      agl:          d.agl,
+      magvar:       d.magvar,
       fuel:         d.fuel,
+      gw:           d.gw,
       parkingBrake: d.parkingBrake,
       flapsIdx:     d.flapsIdx,
       flapsPct:     d.flapsPct,
+      spoilers:     d.spoilers,
+      spoilersArmed: d.spoilersArmed,
+      gearHandle:   d.gearHandle,
+      gearPct:      d.gearPct,
       throttle1:    d.throttle1,
+      n1_1:         d.n1_1,
+      n1_2:         d.n1_2,
       eng1:         d.eng1,
       eng2:         d.eng2,
+      eng3:         d.eng3,
+      eng4:         d.eng4,
+      engCount:     d.engCount,
       pushback:     d.pushback,
+      apMaster:     d.apMaster,
+      autoThrottle: d.autoThrottle,
+      apAlt:        d.apAlt,
+      apHdg:        d.apHdg,
+      lightBeacon:  d.lightBeacon,
+      lightNav:     d.lightNav,
+      lightStrobe:  d.lightStrobe,
+      lightLanding: d.lightLanding,
+      lightTaxi:    d.lightTaxi,
+      lightLogo:    d.lightLogo,
+      xpdrCode:     d.xpdrCode,
+      xpdrState:    d.xpdrState,
+      stallWarn:    d.stallWarn,
+      overspeedWarn:d.overspeedWarn,
+      indAlt:       d.indAlt,
+      baroInHg:     d.baroInHg,
       ts: Date.now(),
     };
     /* Hold the prior frame for delta-based detectors (descent10k, landing)
        BEFORE we overwrite lastState. */
     const prev = lastState;
     lastState = state;
+    /* Edge-detect significant state changes into the telemetry event log
+       so the Sim Bridge page can render a chronological feed. */
+    try { detectEvents(state, prev?.alt != null ? prev : null); } catch {}
     emit('state', state);
     maybePhaseChange(state);
     /* Bookkeeping */
@@ -237,10 +268,94 @@ AIVA.FSUIPC = (() => {
     }
   }
 
+  /* ============ Telemetry event log ============
+     Edge-detects significant binary state changes (engine start /
+     shutdown, beacon on/off, gear up/down, AP engage/disengage,
+     flaps detent change, transponder mode) and pushes one log row
+     per change. Sim Bridge page polls getEventLog() every second
+     for the chronological feed. Capped at 250 most-recent rows so
+     long sectors don't burn memory. */
+  const telemetryLog = [];
+  let prevSnap = null;
+  function pushEvt(label, severity = 'info', extra = '') {
+    telemetryLog.push({
+      ts: Date.now(),
+      label,
+      severity, /* info | ok | warn | bad */
+      extra,
+    });
+    if (telemetryLog.length > 250) telemetryLog.splice(0, telemetryLog.length - 250);
+    emit('event', telemetryLog[telemetryLog.length - 1]);
+  }
+  function detectEvents(s, p) {
+    if (!p) {
+      /* First frame — record initial state without firing events. */
+      return;
+    }
+    /* Engine combustion (1-4) */
+    for (let i = 1; i <= 4; i++) {
+      const k = 'eng' + i;
+      if (s[k] != null && p[k] != null && !!s[k] !== !!p[k]) {
+        pushEvt(`ENG ${i} ${s[k] ? 'START' : 'SHUTDOWN'}`, s[k] ? 'ok' : 'info');
+      }
+    }
+    /* Parking brake */
+    if (s.parkingBrake != null && p.parkingBrake != null && !!s.parkingBrake !== !!p.parkingBrake) {
+      pushEvt(`PARK BRAKE ${s.parkingBrake ? 'SET' : 'RELEASED'}`, 'info');
+    }
+    /* Pushback state — 0=stopped, 1=pushing back, 2=tug attached, 3=disconnect */
+    if (s.pushback != null && p.pushback != null && s.pushback !== p.pushback) {
+      const labels = ['STOPPED', 'IN PROGRESS', 'TUG ATTACHED', 'DISCONNECT'];
+      pushEvt(`PUSHBACK ${labels[s.pushback] || s.pushback}`, 'info');
+    }
+    /* Flaps handle index */
+    if (s.flapsIdx != null && p.flapsIdx != null && s.flapsIdx !== p.flapsIdx) {
+      pushEvt(`FLAPS ${s.flapsIdx} (${Math.round(s.flapsPct || 0)}%)`, 'info');
+    }
+    /* Gear handle */
+    if (s.gearHandle != null && p.gearHandle != null && !!s.gearHandle !== !!p.gearHandle) {
+      pushEvt(`GEAR ${s.gearHandle ? 'DOWN' : 'UP'}`, s.gearHandle ? 'ok' : 'info');
+    }
+    /* Spoilers armed */
+    if (s.spoilersArmed != null && p.spoilersArmed != null && !!s.spoilersArmed !== !!p.spoilersArmed) {
+      pushEvt(`SPOILERS ${s.spoilersArmed ? 'ARMED' : 'DISARMED'}`, 'info');
+    }
+    /* Lights */
+    [['lightBeacon','BEACON'],['lightNav','NAV LIGHTS'],['lightStrobe','STROBES'],
+     ['lightLanding','LANDING LIGHTS'],['lightTaxi','TAXI LIGHTS'],['lightLogo','LOGO LIGHT']
+    ].forEach(([k, name]) => {
+      if (s[k] != null && p[k] != null && !!s[k] !== !!p[k]) {
+        pushEvt(`${name} ${s[k] ? 'ON' : 'OFF'}`, 'info');
+      }
+    });
+    /* Autopilot master */
+    if (s.apMaster != null && p.apMaster != null && !!s.apMaster !== !!p.apMaster) {
+      pushEvt(`AP ${s.apMaster ? 'ENGAGED' : 'DISENGAGED'}`, s.apMaster ? 'ok' : 'warn');
+    }
+    /* Autothrottle */
+    if (s.autoThrottle != null && p.autoThrottle != null && !!s.autoThrottle !== !!p.autoThrottle) {
+      pushEvt(`A/THR ${s.autoThrottle ? 'ENGAGED' : 'DISENGAGED'}`, 'info');
+    }
+    /* Transponder mode change */
+    if (s.xpdrState != null && p.xpdrState != null && s.xpdrState !== p.xpdrState) {
+      const xpdrLabels = { 0:'OFF', 1:'STBY', 2:'TEST', 3:'ON', 4:'ALT', 5:'GROUND' };
+      pushEvt(`XPDR ${xpdrLabels[s.xpdrState] || s.xpdrState}` + (s.xpdrCode ? ` · ${String(s.xpdrCode).padStart(4,'0')}` : ''), 'info');
+    }
+    /* On-ground transition */
+    if (s.onGround !== p.onGround) {
+      pushEvt(s.onGround ? 'TOUCHDOWN' : 'WEIGHT OFF WHEELS', s.onGround ? 'ok' : 'ok');
+    }
+    /* Warnings */
+    if (s.stallWarn && !p.stallWarn)         pushEvt('STALL WARNING', 'bad');
+    if (s.overspeedWarn && !p.overspeedWarn) pushEvt('OVERSPEED', 'bad');
+  }
   function resetSector() {
     topAlt = 0; arrivalArmed = true; landingArmed = true; inFlight = false;
     phase = 'GATE';
     topAltSeen = 0;
+    /* Wipe the previous flight's event log so a new sector starts
+       with a clean slate. */
+    telemetryLog.length = 0;
   }
 
   /* ============ AUTO-DETECT loop ============
@@ -384,6 +499,11 @@ AIVA.FSUIPC = (() => {
     lastTelemetry: () => connected ? lastState : null,
     source: () => simSource,
     phase:  () => phase,
+    /* Recent telemetry events — engine start, flaps, gear, lights,
+       AP engage/disengage, transponder mode etc. Returns a copy so
+       callers can't mutate the internal buffer. */
+    getEventLog: () => telemetryLog.slice(),
+    clearEventLog: () => { telemetryLog.length = 0; },
     resetSector,
     startAutoDetect, stopAutoDetect,
     /* For UI debugging / manual triggers */

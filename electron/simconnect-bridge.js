@@ -32,24 +32,75 @@ const { EventEmitter } = require('events');
    simObjectData handler decode in the same order. Extended in May
    2026 to support the phase-detection state machine (parking brake,
    flaps, throttle, true airspeed, pushback state). */
+/* Deep telemetry set. Each frame the renderer receives every one of
+   these, so the Sim Bridge page can show a granular event log:
+   "ENG 1 START · NAV LIGHTS ON · FLAPS 1 · GEAR UP · AP ENGAGED · ..."
+   The phase machine + auto-dispatch already rely on the original 8;
+   the new fields drive the event-log + finer-grained phase detection
+   (autopilot disengage at landing, etc.). */
 const VARS = [
+  /* Position / motion */
   ['PLANE LATITUDE',                          'degrees',         'lat'],
   ['PLANE LONGITUDE',                         'degrees',         'lon'],
   ['PLANE ALTITUDE',                          'feet',            'alt'],
+  ['PLANE ALT ABOVE GROUND',                  'feet',            'agl'],
   ['AIRSPEED INDICATED',                      'knots',           'ias'],
   ['AIRSPEED TRUE',                           'knots',           'tas'],
   ['GROUND VELOCITY',                         'knots',           'gs'],
   ['VERTICAL SPEED',                          'feet per minute', 'vs'],
   ['PLANE HEADING DEGREES MAGNETIC',          'degrees',         'hdg'],
+  ['MAGVAR',                                  'degrees',         'magvar'],
+
+  /* Ground state */
   ['SIM ON GROUND',                           'bool',            'onGround',     'int32'],
   ['BRAKE PARKING POSITION',                  'bool',            'parkingBrake', 'int32'],
+  ['PUSHBACK STATE',                          'number',          'pushback',     'int32'],
+
+  /* Flight controls + surfaces */
   ['FLAPS HANDLE INDEX',                      'number',          'flapsIdx',     'int32'],
   ['FLAPS HANDLE PERCENT',                    'percent',         'flapsPct'],
-  ['GENERAL ENG THROTTLE LEVER POSITION:1',   'percent',         'throttle1'],
+  ['SPOILERS HANDLE POSITION',                'percent',         'spoilers'],
+  ['SPOILERS ARMED',                          'bool',            'spoilersArmed','int32'],
+  ['GEAR HANDLE POSITION',                    'bool',            'gearHandle',   'int32'],
+  ['GEAR TOTAL PCT EXTENDED',                 'percent',         'gearPct'],
+
+  /* Engines */
   ['ENG COMBUSTION:1',                        'bool',            'eng1',         'int32'],
   ['ENG COMBUSTION:2',                        'bool',            'eng2',         'int32'],
-  ['PUSHBACK STATE',                          'number',          'pushback',     'int32'],
+  ['ENG COMBUSTION:3',                        'bool',            'eng3',         'int32'],
+  ['ENG COMBUSTION:4',                        'bool',            'eng4',         'int32'],
+  ['NUMBER OF ENGINES',                       'number',          'engCount',     'int32'],
+  ['GENERAL ENG THROTTLE LEVER POSITION:1',   'percent',         'throttle1'],
+  ['TURB ENG N1:1',                           'percent',         'n1_1'],
+  ['TURB ENG N1:2',                           'percent',         'n1_2'],
+
+  /* Autopilot + autothrottle */
+  ['AUTOPILOT MASTER',                        'bool',            'apMaster',     'int32'],
+  ['AUTOTHROTTLE ACTIVE',                     'bool',            'autoThrottle', 'int32'],
+  ['AUTOPILOT ALTITUDE LOCK VAR',             'feet',            'apAlt'],
+  ['AUTOPILOT HEADING LOCK DIR',              'degrees',         'apHdg'],
+
+  /* Lights */
+  ['LIGHT BEACON',                            'bool',            'lightBeacon',  'int32'],
+  ['LIGHT NAV',                               'bool',            'lightNav',     'int32'],
+  ['LIGHT STROBE',                            'bool',            'lightStrobe',  'int32'],
+  ['LIGHT LANDING',                           'bool',            'lightLanding', 'int32'],
+  ['LIGHT TAXI',                              'bool',            'lightTaxi',    'int32'],
+  ['LIGHT LOGO',                              'bool',            'lightLogo',    'int32'],
+
+  /* Avionics + transponder */
+  ['TRANSPONDER CODE:1',                      'number',          'xpdrCode',     'int32'],
+  ['TRANSPONDER STATE:1',                     'number',          'xpdrState',    'int32'],
+
+  /* Fuel / weights */
   ['FUEL TOTAL QUANTITY WEIGHT',              'kilograms',       'fuel'],
+  ['TOTAL WEIGHT',                            'kilograms',       'gw'],
+
+  /* Misc */
+  ['STALL WARNING',                           'bool',            'stallWarn',    'int32'],
+  ['OVERSPEED WARNING',                       'bool',            'overspeedWarn','int32'],
+  ['INDICATED ALTITUDE',                      'feet',            'indAlt'],
+  ['BAROMETER PRESSURE',                      'inHg',            'baroInHg'],
 ];
 
 const DEF_ID = 0;     // single data definition for all of the above

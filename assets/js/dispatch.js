@@ -65,12 +65,44 @@ AIVA.Dispatch = (() => {
 
   /* ============================================================
      SimBrief — pull the latest OFP for a configured username.
+     Fetch order:
+       1. AIVA's own /api/simbrief (server-side fetch on Vercel —
+          fastest, no proxy, no CORS, ~300-800 ms typical).
+       2. Public CORS proxy chain as fallback if our function is
+          unreachable (Vercel cold start, deploy in progress, etc).
      Endpoint returns XML; we extract just what we need.
-     Falls through a chain of CORS proxies so a single one returning
-     403 (corsproxy.io rate-limit) doesn't break the briefing.
      ============================================================ */
   async function fetchSimbriefOFP(username) {
     if (!username) throw new Error('No SimBrief username set in Profile');
+
+    /* === Fast path: AIVA's Vercel function === */
+    try {
+      const aiva = await fetch(`/api/simbrief?username=${encodeURIComponent(username)}`, {
+        method: 'GET',
+        cache: 'no-store',
+      });
+      if (aiva.ok) {
+        const xml = await aiva.text();
+        if (xml && xml.length > 200 && !/<error>/i.test(xml)) {
+          return parseSimbriefXML(xml);
+        }
+      }
+      /* 404 from our function = user has no OFP — surface that
+         directly without falling through to public proxies (would
+         just return the same empty response). */
+      if (aiva.status === 404) {
+        throw new Error('SimBrief has no OFP for "' + username + '" — dispatch a flight plan at simbrief.com first');
+      }
+      /* Otherwise fall through to public-proxy chain below. */
+    } catch (e) {
+      /* If the error came from our own 404 handler, re-throw it now —
+         don't waste time hitting public proxies for the same result. */
+      if (/no OFP/i.test(e.message || '')) throw e;
+      /* Network-level failure (Vercel cold-start, function down) — try
+         the public-proxy chain as backup. */
+    }
+
+    /* === Backup path: public CORS proxies === */
     const url = `https://www.simbrief.com/api/xml.fetcher.php?username=${encodeURIComponent(username)}`;
     let r;
     try {

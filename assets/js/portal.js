@@ -2638,6 +2638,27 @@
 
           <!-- Help / next-step card, switches based on detected state -->
           <div class="card mt-4" style="padding:18px 22px;" id="sbHelp"></div>
+
+          <!-- Telemetry event log. Edge-detected SimConnect state
+               changes streamed live: engine start/shutdown, flaps
+               handle, gear, lights (beacon/nav/strobes/landing/taxi/
+               logo), autopilot, transponder, touchdown, warnings.
+               Bottom-anchored so newest events sit at the top. -->
+          <div class="card mt-4" style="padding:0;">
+            <div class="row between" style="padding:14px 20px;border-bottom:1px solid var(--border);align-items:center;">
+              <div>
+                <div class="eyebrow">Telemetry event log</div>
+                <div class="text-mute" style="font-size:11.5px;margin-top:2px;">Granular SimConnect events — engine start, flaps, gear, lights, AP, transponder, warnings. Newest at top.</div>
+              </div>
+              <div class="row gap-2">
+                <span class="pill" id="sbEvtCount" style="font-size:10px;">0</span>
+                <button class="btn btn-ghost btn-sm" id="sbEvtClear">${I('close',12)} Clear</button>
+              </div>
+            </div>
+            <div id="sbEvtList" style="max-height:360px;overflow-y:auto;padding:8px 0;font-family:var(--font-mono);font-size:12px;line-height:1.45;">
+              <div class="text-mute" style="padding:14px 20px;">Waiting for telemetry events — start MSFS and operate the aircraft (engine start, lights, flaps) to see them populate here.</div>
+            </div>
+          </div>
         ` }));
 
         const $$ = (sel) => c.querySelector(sel);
@@ -2721,8 +2742,45 @@
         AIVA.FSUIPC?.on?.('connect',    onState);
         AIVA.FSUIPC?.on?.('disconnect', onState);
         AIVA.FSUIPC?.on?.('state',      onState);
+
+        /* Telemetry event log render — pushes a row per edge-detected
+           SimConnect state change (engine, flaps, gear, lights, AP,
+           transponder, warnings, touchdown). Wired to the singleton's
+           'event' emission for instant updates, plus a 2s refresh in
+           case any events were missed. */
+        const SEV_COLOR = { info:'rgba(255,255,255,.78)', ok:'#7DD08F', warn:'#FCD34D', bad:'#FCA5A5' };
+        function renderEventLog() {
+          const log = AIVA.FSUIPC?.getEventLog?.() || [];
+          const listEl = $$('#sbEvtList');
+          const cntEl  = $$('#sbEvtCount');
+          if (cntEl) cntEl.textContent = log.length;
+          if (!listEl) return;
+          if (!log.length) {
+            listEl.innerHTML = '<div class="text-mute" style="padding:14px 20px;">Waiting for telemetry events — start MSFS and operate the aircraft (engine start, lights, flaps) to see them populate here.</div>';
+            return;
+          }
+          /* Newest first. Limit DOM to 120 rows for perf — log can hold 250. */
+          listEl.innerHTML = log.slice().reverse().slice(0, 120).map(ev => {
+            const t = new Date(ev.ts);
+            const z = String(t.getUTCHours()).padStart(2,'0') + ':' + String(t.getUTCMinutes()).padStart(2,'0') + ':' + String(t.getUTCSeconds()).padStart(2,'0');
+            return `<div style="display:flex;gap:14px;padding:5px 20px;border-bottom:1px solid rgba(255,255,255,.04);">
+              <span class="text-mute" style="color:rgba(255,225,89,.6);min-width:64px;">${z}z</span>
+              <span style="color:${SEV_COLOR[ev.severity] || SEV_COLOR.info};flex:1;">${ev.label.replace(/</g,'&lt;')}</span>
+              ${ev.extra ? `<span class="text-mute">${ev.extra}</span>` : ''}
+            </div>`;
+          }).join('');
+        }
+        AIVA.FSUIPC?.on?.('event', renderEventLog);
+
+        $$('#sbEvtClear')?.addEventListener('click', () => {
+          AIVA.FSUIPC?.clearEventLog?.();
+          renderEventLog();
+          toast('Event log cleared', 'ok', 2000);
+        });
+
         tick();
-        const iv = setInterval(tick, 1000);
+        renderEventLog();
+        const iv = setInterval(() => { tick(); renderEventLog(); }, 2000);
         const cleanup = () => { clearInterval(iv); window.removeEventListener('hashchange', cleanup); };
         window.addEventListener('hashchange', cleanup);
 
@@ -6885,18 +6943,37 @@
               if (!files.length) return;
               const cur = AIVA.Store.get('ann_lib', {});
               cur[stageId] = cur[stageId] || [];
+              /* Bumped from 5 MB to 20 MB so a full 4-minute safety
+                 demo at decent bitrate fits. localStorage caps the
+                 origin's total at ~5-10 MB on most engines though, so
+                 we catch QuotaExceededError below and surface a clean
+                 message instead of crashing the page. */
+              const MAX_MB = 20;
+              let added = 0;
               for (const f of files) {
-                if (f.size > 5 * 1024 * 1024) {
-                  toast(`${f.name} is over 5 MB — please use shorter clips.`, 'bad');
+                if (f.size > MAX_MB * 1024 * 1024) {
+                  toast(`${f.name} is over ${MAX_MB} MB — re-encode at lower bitrate (96 kbps for speech is fine).`, 'bad', 7000);
                   continue;
                 }
                 const dataURL = await new Promise(res => {
                   const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f);
                 });
                 cur[stageId].push({ name: f.name, dataURL });
+                added++;
               }
-              updateLib(cur);
-              toast(`${files.length} file${files.length===1?'':'s'} added.`, 'ok');
+              try {
+                updateLib(cur);
+                toast(`${added} file${added===1?'':'s'} added.`, 'ok');
+              } catch (err) {
+                /* QuotaExceededError — base64-encoded audio is ~33%
+                   larger than the binary file, and most browsers cap
+                   localStorage at 5-10 MB per origin. Roll back the
+                   in-memory cur ref to whatever's still on disk and
+                   tell the user what happened. */
+                toast('Storage full — your browser caps localStorage at ~10 MB. Delete old clips or use shorter audio. (Future: AIVA will move audio to IndexedDB so you can keep dozens.)', 'bad', 12000);
+                /* Re-read what actually saved to keep state consistent */
+                updateLib(AIVA.Store.get('ann_lib', {}));
+              }
             };
           });
 

@@ -295,23 +295,63 @@
       'PARKED':   'disarm',
     };
     const firedStages = new Set();
+    /* Shared playback handle so Stop / volume controls can reach it. */
+    AIVA._currentAnn = null;
+    AIVA.playAnn = async function(stageId, options = {}) {
+      const files = (AIVA.Store.get('ann_lib', {}) || {})[stageId] || [];
+      if (!files.length) { toast(`No clip for stage "${stageId}"`, 'warn', 4000); return null; }
+      const pick = options.file || files[Math.floor(Math.random() * files.length)];
+      const url = await (AIVA.AnnResolveURL?.(pick) || Promise.resolve(pick.dataURL));
+      if (!url) return null;
+      /* Stop any currently-playing clip before starting a new one. */
+      try { AIVA._currentAnn?.audio?.pause(); } catch {}
+      const a = new Audio(url);
+      a.volume = (AIVA.Store.get('ann_volume', 0.85));
+      a.loop = !!options.loop;
+      const ref = { audio: a, url, stageId, file: pick.name };
+      AIVA._currentAnn = ref;
+      a.onended = () => {
+        if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+        if (AIVA._currentAnn === ref) AIVA._currentAnn = null;
+        try { window.dispatchEvent(new CustomEvent('aiva-ann-ended', { detail: ref })); } catch {}
+      };
+      try {
+        await a.play();
+        toast(`Cabin announcement · ${stageId}`, 'ok', 3500);
+        try { window.dispatchEvent(new CustomEvent('aiva-ann-started', { detail: ref })); } catch {}
+      } catch (e) {
+        /* Browser blocked autoplay (no user gesture yet). Queue it so
+           the first click anywhere on the page triggers playback. */
+        AIVA._pendingAnn = ref;
+        toast('Tap anywhere to enable cabin audio', 'warn', 6000);
+      }
+      return ref;
+    };
+    AIVA.stopAnn = function() {
+      try { AIVA._currentAnn?.audio?.pause(); } catch {}
+      AIVA._currentAnn = null;
+    };
+    AIVA.setAnnVolume = function(v) {
+      const clamped = Math.max(0, Math.min(1, Number(v) || 0));
+      AIVA.Store.set('ann_volume', clamped);
+      if (AIVA._currentAnn?.audio) AIVA._currentAnn.audio.volume = clamped;
+    };
+    /* If a clip was queued because of autoplay-block, fire it on the
+       next click anywhere on the page. */
+    document.addEventListener('click', () => {
+      const q = AIVA._pendingAnn;
+      if (!q) return;
+      AIVA._pendingAnn = null;
+      q.audio.play().catch(() => {});
+    }, { capture: true });
+
     AIVA.FSUIPC?.on?.('phase', async ({ from, to, state }) => {
       const cfg = AIVA.Store.get('ann_cfg', { mode: 'manual' });
       if (cfg.mode !== 'auto') return;
       const stageId = PHASE_TO_STAGE[to];
       if (!stageId || firedStages.has(stageId)) return;
-      const files = (AIVA.Store.get('ann_lib', {}) || {})[stageId] || [];
-      if (!files.length) return;
       firedStages.add(stageId);
-      const pick = files[Math.floor(Math.random() * files.length)];
-      try {
-        const url = await (AIVA.AnnResolveURL?.(pick) || Promise.resolve(pick.dataURL));
-        if (!url) return;
-        const a = new Audio(url);
-        a.onended = () => { if (url.startsWith('blob:')) URL.revokeObjectURL(url); };
-        a.play().catch(() => {});
-      } catch {}
-      toast(`Cabin announcement · ${stageId}`, 'ok', 3500);
+      AIVA.playAnn(stageId);
     });
     /* Pass-10k climb announcement uses the alt threshold, separate
        from the phase machine because passing 10,000 ft happens
@@ -7133,11 +7173,20 @@
            library read-only and can play clips, but cannot upload or delete. */
         const isAdmin = pilot.role === 'admin';
 
+        const annVol = AIVA.Store.get('ann_volume', 0.85);
         c.appendChild(el('section', { html: `
           <div class="section-title">
             <div><h2>Cabin Announcements</h2><div class="sub">${STAGES.length} stages${isAdmin ? ' · upload audio (MP3/WAV)' : ' · play in flight'} · shuffled per leg</div></div>
-            <div class="actions row gap-2" style="flex-wrap:wrap;">
-              ${isAdmin ? `<button class="btn btn-ghost btn-sm" id="annExport" title="Copy a sync code containing every clip URL — share it on Discord/WhatsApp/email, paste into other devices to import">${I('upload',12)} Copy sync code</button>` : ''}
+            <div class="actions row gap-2" style="flex-wrap:wrap;align-items:center;">
+              <!-- Playback controls (always visible) -->
+              <div class="row gap-2" style="align-items:center;background:rgba(255,255,255,.04);padding:5px 10px;border-radius:99px;border:1px solid var(--border);">
+                <button class="btn btn-ghost btn-sm" id="annStop" title="Stop the current clip">${I('close',12)} Stop</button>
+                <label class="row gap-2" style="align-items:center;font-size:11px;color:rgba(255,255,255,.7);">VOL
+                  <input type="range" id="annVol" min="0" max="100" value="${Math.round(annVol*100)}" style="width:84px;">
+                  <span id="annVolPct" class="mono" style="font-size:11px;min-width:34px;">${Math.round(annVol*100)}%</span>
+                </label>
+              </div>
+              ${isAdmin ? `<button class="btn btn-ghost btn-sm" id="annExport" title="Copy a sync code containing every clip URL">${I('upload',12)} Copy sync code</button>` : ''}
               <button class="btn btn-ghost btn-sm" id="annImport" title="Paste a sync code from another device to load its library">${I('download',12)} Paste sync code</button>
               <div class="row gap-2" style="background:var(--surface);padding:4px;border-radius:99px;border:1px solid var(--border);">
                 <button class="btn btn-sm ${cfg.mode==='manual'?'btn-primary':'btn-ghost'}" data-mode="manual">Manual</button>
@@ -7197,6 +7246,7 @@
                     ${files.map((f, i) => `
                       <div class="ann-file-row">
                         <button class="ann-play" data-play="${stage.id}:${i}" title="Play">▶</button>
+                        <button class="ann-play" data-loop="${stage.id}:${i}" title="Play on repeat" style="margin-left:4px;">↻</button>
                         <span class="ann-file-name">${f.name}</span>
                         ${isAdmin ? `<button class="ann-del" data-del="${stage.id}:${i}" title="Delete">✕</button>` : ''}
                       </div>
@@ -7285,6 +7335,18 @@
           cfg.mode = b.dataset.mode;
           AIVA.Store.set('ann_cfg', cfg);
           route();
+        });
+
+        /* Playback controls. */
+        $('#annStop', c)?.addEventListener('click', () => {
+          AIVA.stopAnn?.();
+          toast('Cabin announcement stopped', 'ok', 2000);
+        });
+        $('#annVol', c)?.addEventListener('input', (e) => {
+          const v = Number(e.target.value) / 100;
+          AIVA.setAnnVolume?.(v);
+          const pct = $('#annVolPct', c);
+          if (pct) pct.textContent = Math.round(v * 100) + '%';
         });
 
         /* === Admin: "Add a clip by URL" — manual flow ===
@@ -7600,19 +7662,21 @@
           });
         }
 
-        /* Play buttons available to ALL pilots — that's the whole point.
-           Resolve through AnnResolveURL so IDB-backed clips get a fresh
-           blob URL each play (old inline-dataURL rows still work via
-           the same fallback). */
+        /* Play / loop buttons. Route through AIVA.playAnn so the page
+           header's Stop button + volume slider both reach the active
+           clip, and the autoplay-blocked-on-first-load gate runs. */
         c.querySelectorAll('[data-play]').forEach(b => b.onclick = async () => {
           const [stage, idx] = b.dataset.play.split(':');
           const f = AIVA.Store.get('ann_lib', {})[stage]?.[+idx];
           if (!f) return;
-          const url = await annResolveURL(f);
-          if (!url) { toast('Clip not found in storage — re-upload it.', 'bad'); return; }
-          const a = new Audio(url);
-          a.onended = () => { if (url.startsWith('blob:')) URL.revokeObjectURL(url); };
-          a.play().catch(e => toast('Playback blocked: ' + e.message, 'bad'));
+          AIVA.playAnn?.(stage, { file: f, loop: false });
+        });
+        c.querySelectorAll('[data-loop]').forEach(b => b.onclick = async () => {
+          const [stage, idx] = b.dataset.loop.split(':');
+          const f = AIVA.Store.get('ann_lib', {})[stage]?.[+idx];
+          if (!f) return;
+          AIVA.playAnn?.(stage, { file: f, loop: true });
+          toast(`Looping "${f.name}" — hit Stop to end`, 'ok', 4000);
         });
       }
     },

@@ -53,8 +53,15 @@ const VARS = [
 
   /* Ground state */
   ['SIM ON GROUND',                           'bool',            'onGround',     'int32'],
+  /* Two parking brake SimVars: 'POSITION' returns float 0-1 (some
+     payware uses this for the animation arc), 'INDICATOR' returns
+     a clean boolean. We expose both and the renderer prefers whichever
+     reports as set. */
   ['BRAKE PARKING POSITION',                  'bool',            'parkingBrake', 'int32'],
+  ['BRAKE PARKING INDICATOR',                 'bool',            'parkingBrakeInd', 'int32'],
   ['PUSHBACK STATE',                          'number',          'pushback',     'int32'],
+  /* G-force for landing rate measurement. Y axis = vertical. */
+  ['G FORCE',                                 'gforce',          'gForce'],
 
   /* Flight controls + surfaces */
   ['FLAPS HANDLE INDEX',                      'number',          'flapsIdx',     'int32'],

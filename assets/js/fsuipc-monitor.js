@@ -207,7 +207,10 @@ AIVA.FSUIPC = (() => {
       magvar:       d.magvar,
       fuel:         d.fuel,
       gw:           d.gw,
-      parkingBrake: d.parkingBrake,
+      gForce:       d.gForce,
+      /* Prefer the indicator (boolean) over position (0-1 float). Some
+         payware aircraft only set one of the two. */
+      parkingBrake: !!(d.parkingBrakeInd ?? d.parkingBrake),
       flapsIdx:     d.flapsIdx,
       flapsPct:     d.flapsPct,
       spoilers:     d.spoilers,

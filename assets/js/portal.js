@@ -1038,79 +1038,130 @@
     toast('SimBrief dispatch opened.', 'ok');
   }
   /* ============================================================
-     Flight summary modal — opens from My Flights when the row has
-     telemetry captured. Renders:
-       • Sector header (route, A/C, block, distance)
-       • Stat grid (peak ALT/IAS/TAS/GS, max bank, landing rate)
-       • Speed + altitude chart (inline SVG, no chart library)
-       • Phase / event log (engine start, flaps, gear, lights, AP)
-       • PSR findings + remarks
-     All data lives on the flight record itself — survives across
-     psr_log resets and admin queue prunes. */
+     Flight summary modal — ElevateX-style detail view.
+     Three tabs:
+       GENERAL    — plane photo, from/to, flight plan, route,
+                    DEP+ARR METAR, landing performance
+       STATISTICS — speed & altitude graph, environmental impact
+       NOTES      — PSR findings, pilot remarks, telemetry event log
+     Photo is fetched lazily from /api/plane-photo by reg.
+     ============================================================ */
+  async function fetchPlanePhoto(reg) {
+    if (!reg) return null;
+    try {
+      const r = await fetch(`/api/plane-photo?reg=${encodeURIComponent(reg)}`, { cache: 'force-cache' });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch { return null; }
+  }
   function openFlightSummary(f) {
     const fromA = AIVA.airport(f.from), toA = AIVA.airport(f.to);
     const s = f.summary || {};
     const telem = f.telemetry || [];
     const events = f.events || [];
+    const operator = f.op === 'IX' ? 'Air India Express' : 'Air India';
 
-    /* Build the speed+altitude chart inline. SVG so it's printable +
-       no chart-library dependency. */
-    const chartW = 760, chartH = 220, padL = 38, padR = 40, padT = 12, padB = 22;
+    /* === Speed & altitude chart === */
+    const chartW = 820, chartH = 220, padL = 44, padR = 50, padT = 16, padB = 26;
     const innerW = chartW - padL - padR;
     const innerH = chartH - padT - padB;
-    const tMin = telem.length ? telem[0].t : 0;
-    const tMax = telem.length ? telem[telem.length-1].t : 1;
+    const tMin  = telem.length ? telem[0].t : 0;
+    const tMax  = telem.length ? telem[telem.length-1].t : 1;
     const tSpan = Math.max(1, tMax - tMin);
     const altMax = Math.max(100, ...telem.map(t => t.alt || 0));
     const iasMax = Math.max(50,  ...telem.map(t => t.ias || 0));
-    const xAt = (t) => padL + ((t - tMin) / tSpan) * innerW;
-    const yAlt = (a) => padT + innerH - ((a / altMax) * innerH * 0.95);
-    const yIas = (v) => padT + innerH - ((v / iasMax) * innerH * 0.95);
+    const xAt   = (t) => padL + ((t - tMin) / tSpan) * innerW;
+    const yAlt  = (a) => padT + innerH - ((a / altMax) * innerH * 0.95);
+    const yIas  = (v) => padT + innerH - ((v / iasMax) * innerH * 0.95);
     const altPath = telem.map((p, i) => `${i===0?'M':'L'}${xAt(p.t).toFixed(1)},${yAlt(p.alt || 0).toFixed(1)}`).join('');
     const iasPath = telem.map((p, i) => `${i===0?'M':'L'}${xAt(p.t).toFixed(1)},${yIas(p.ias || 0).toFixed(1)}`).join('');
-
-    /* Ground / airborne shading. */
-    const groundSegs = [];
-    let segStart = null;
-    telem.forEach((p, i) => {
-      if (p.onGround && segStart == null) segStart = p.t;
-      else if (!p.onGround && segStart != null) { groundSegs.push([segStart, telem[i-1]?.t || p.t]); segStart = null; }
-    });
-    if (segStart != null) groundSegs.push([segStart, telem[telem.length-1].t]);
+    /* Time labels at 6 even intervals along the X axis */
+    const tickPositions = telem.length ? [0,0.2,0.4,0.6,0.8,1].map(f => tMin + tSpan * f) : [];
+    const fmtTime = (ts) => { const d = new Date(ts); return String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0'); };
+    const altTicks = [altMax, altMax*0.75, altMax*0.5, altMax*0.25, 0].map(v => Math.round(v));
+    const iasTicks = [iasMax, iasMax*0.75, iasMax*0.5, iasMax*0.25, 0].map(v => Math.round(v));
 
     const chartHtml = telem.length ? `
       <svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%;height:auto;display:block;">
-        ${groundSegs.map(([a,b]) => `<rect x="${xAt(a)}" y="${padT}" width="${xAt(b)-xAt(a)}" height="${innerH}" fill="rgba(255,225,89,.06)"/>`).join('')}
-        <!-- gridlines -->
-        ${[0.25,0.5,0.75].map(f => `<line x1="${padL}" y1="${padT+innerH*f}" x2="${padL+innerW}" y2="${padT+innerH*f}" stroke="rgba(255,255,255,.08)" stroke-width="1"/>`).join('')}
-        <!-- ALT line (gold) -->
-        <path d="${altPath}" stroke="#FFE159" stroke-width="2" fill="none"/>
-        <!-- IAS line (red) -->
-        <path d="${iasPath}" stroke="#E61926" stroke-width="2" fill="none"/>
-        <!-- Y-axis labels -->
-        <text x="${padL-6}" y="${padT+10}" fill="rgba(255,225,89,.7)" font-size="10" font-family="ui-monospace,monospace" text-anchor="end">${Math.round(altMax).toLocaleString()} ft</text>
-        <text x="${padL-6}" y="${padT+innerH}" fill="rgba(255,225,89,.7)" font-size="10" font-family="ui-monospace,monospace" text-anchor="end">0</text>
-        <text x="${padL+innerW+6}" y="${padT+10}" fill="rgba(230,25,38,.85)" font-size="10" font-family="ui-monospace,monospace">${Math.round(iasMax)} kt</text>
-        <text x="${padL+innerW+6}" y="${padT+innerH}" fill="rgba(230,25,38,.85)" font-size="10" font-family="ui-monospace,monospace">0</text>
-        <!-- legend -->
-        <g transform="translate(${padL+10},${padT+8})">
-          <line x1="0" y1="0" x2="14" y2="0" stroke="#FFE159" stroke-width="2"/>
-          <text x="18" y="3" fill="rgba(255,225,89,.85)" font-size="10" font-family="ui-monospace,monospace">ALTITUDE</text>
-          <line x1="80" y1="0" x2="94" y2="0" stroke="#E61926" stroke-width="2"/>
-          <text x="98" y="3" fill="rgba(230,25,38,.95)" font-size="10" font-family="ui-monospace,monospace">IAS</text>
-        </g>
-      </svg>` : `<div class="text-mute" style="padding:30px;text-align:center;">No telemetry samples for this sector — chart unavailable.</div>`;
+        <defs>
+          <linearGradient id="altGrad-${f._id}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#7DD08F" stop-opacity=".25"/>
+            <stop offset="100%" stop-color="#7DD08F" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="iasGrad-${f._id}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#E0712F" stop-opacity=".35"/>
+            <stop offset="100%" stop-color="#E0712F" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        ${[0.25,0.5,0.75].map(g => `<line x1="${padL}" y1="${padT+innerH*g}" x2="${padL+innerW}" y2="${padT+innerH*g}" stroke="rgba(255,255,255,.05)" stroke-width="1"/>`).join('')}
+        <!-- IAS fill (orange, like ElevateX) -->
+        <path d="${iasPath} L${xAt(tMax).toFixed(1)},${padT+innerH} L${xAt(tMin).toFixed(1)},${padT+innerH} Z" fill="url(#iasGrad-${f._id})"/>
+        <!-- ALT fill (teal) -->
+        <path d="${altPath} L${xAt(tMax).toFixed(1)},${padT+innerH} L${xAt(tMin).toFixed(1)},${padT+innerH} Z" fill="url(#altGrad-${f._id})"/>
+        <path d="${iasPath}" stroke="#E0712F" stroke-width="2" fill="none"/>
+        <path d="${altPath}" stroke="#7DD08F" stroke-width="2" fill="none"/>
+        <!-- Left axis (altitude) -->
+        ${altTicks.map((v, i) => `<text x="${padL-8}" y="${(padT + innerH*i*0.25 + 4).toFixed(1)}" fill="rgba(125,208,143,.85)" font-size="10" font-family="ui-monospace,monospace" text-anchor="end">${v.toLocaleString()}</text>`).join('')}
+        <!-- Right axis (ias) -->
+        ${iasTicks.map((v, i) => `<text x="${padL+innerW+8}" y="${(padT + innerH*i*0.25 + 4).toFixed(1)}" fill="rgba(224,113,47,.85)" font-size="10" font-family="ui-monospace,monospace">${v}</text>`).join('')}
+        <!-- X axis time labels -->
+        ${tickPositions.map(ts => `<text x="${xAt(ts).toFixed(1)}" y="${chartH-6}" fill="rgba(255,255,255,.55)" font-size="10" font-family="ui-monospace,monospace" text-anchor="middle">${fmtTime(ts)}</text>`).join('')}
+      </svg>` : `<div class="text-mute" style="padding:30px;text-align:center;">No telemetry samples — chart unavailable.</div>`;
 
+    /* === Flight-track mini-map (SVG, Mercator projection) ===
+       Plots actual lat/lon trace from telemetry, plus FROM and TO
+       airport markers. Bounding-box auto-fit with 10% padding. No
+       basemap — flat dark with grid lines so the route is the focus. */
+    const allPts = telem.filter(p => p.lat && p.lon).map(p => [p.lon, p.lat]);
+    if (fromA) allPts.unshift([fromA.lon, fromA.lat]);
+    if (toA)   allPts.push([toA.lon, toA.lat]);
+    let mapHtml = '<div class="text-mute" style="padding:30px;text-align:center;">No position data captured.</div>';
+    if (allPts.length >= 2) {
+      const lons = allPts.map(p => p[0]);
+      const lats = allPts.map(p => p[1]);
+      const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+      const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+      const padLon = (maxLon - minLon) * 0.12 + 0.1;
+      const padLat = (maxLat - minLat) * 0.12 + 0.1;
+      const bL = minLon - padLon, bR = maxLon + padLon;
+      const bB = minLat - padLat, bT = maxLat + padLat;
+      const mW = 820, mH = 280;
+      const projX = (lon) => ((lon - bL) / (bR - bL)) * mW;
+      const projY = (lat) => mH - ((lat - bB) / (bT - bB)) * mH;
+      const trackPts = telem.filter(p => p.lat && p.lon).map(p => `${projX(p.lon).toFixed(1)},${projY(p.lat).toFixed(1)}`).join(' ');
+      mapHtml = `<svg viewBox="0 0 ${mW} ${mH}" style="width:100%;height:auto;display:block;background:#0c1014;">
+        <!-- Latitude grid every 5° -->
+        ${(() => { const lines = []; for (let lat = Math.ceil(bB/5)*5; lat <= bT; lat += 5) lines.push(`<line x1="0" y1="${projY(lat).toFixed(1)}" x2="${mW}" y2="${projY(lat).toFixed(1)}" stroke="rgba(255,255,255,.04)" stroke-width="1"/>`); return lines.join(''); })()}
+        ${(() => { const lines = []; for (let lon = Math.ceil(bL/5)*5; lon <= bR; lon += 5) lines.push(`<line x1="${projX(lon).toFixed(1)}" y1="0" x2="${projX(lon).toFixed(1)}" y2="${mH}" stroke="rgba(255,255,255,.04)" stroke-width="1"/>`); return lines.join(''); })()}
+        <!-- Great-circle reference between FROM and TO (gold dashed) -->
+        ${fromA && toA ? `<line x1="${projX(fromA.lon).toFixed(1)}" y1="${projY(fromA.lat).toFixed(1)}" x2="${projX(toA.lon).toFixed(1)}" y2="${projY(toA.lat).toFixed(1)}" stroke="rgba(255,225,89,.4)" stroke-width="1.5" stroke-dasharray="4 4"/>` : ''}
+        <!-- Actual flight track (red) -->
+        ${trackPts ? `<polyline points="${trackPts}" stroke="#E61926" stroke-width="2.5" fill="none" stroke-linejoin="round"/>` : ''}
+        <!-- Endpoint markers -->
+        ${fromA ? `<g transform="translate(${projX(fromA.lon).toFixed(1)},${projY(fromA.lat).toFixed(1)})"><circle r="6" fill="#0c1014" stroke="#FFE159" stroke-width="2"/><circle r="2" fill="#FFE159"/><text x="10" y="4" fill="#FFE159" font-size="11" font-family="ui-monospace,monospace" font-weight="600">${fromA.iata || f.from}</text></g>` : ''}
+        ${toA ? `<g transform="translate(${projX(toA.lon).toFixed(1)},${projY(toA.lat).toFixed(1)})"><circle r="6" fill="#0c1014" stroke="#FFE159" stroke-width="2"/><circle r="2" fill="#FFE159"/><text x="10" y="4" fill="#FFE159" font-size="11" font-family="ui-monospace,monospace" font-weight="600">${toA.iata || f.to}</text></g>` : ''}
+      </svg>`;
+    }
+
+    /* === Environmental impact === */
+    const fuelKg     = (s.startFuel != null && s.endFuel != null) ? Math.round(s.startFuel - s.endFuel) : null;
+    const co2Kg      = fuelKg ? Math.round(fuelKg * 3.16) : null;   // jet-A ≈ 3.16 kg CO₂ per kg fuel
+    const optBlock   = f.dist ? Math.round(f.dist / 460 * 60) : null;
+    const fuelSavedKg = (fuelKg && optBlock && f.durMins && f.durMins <= optBlock) ? Math.round(fuelKg * (optBlock - f.durMins) / optBlock * 0.04) : 0;
+    const co2SavedKg  = fuelSavedKg ? Math.round(fuelSavedKg * 3.16) : 0;
+
+    /* === Event log === */
     const sevColor = { info:'rgba(255,255,255,.78)', ok:'#7DD08F', warn:'#FCD34D', bad:'#FCA5A5' };
     const evtHtml = events.length ? events.map(e => {
       const t = new Date(e.ts);
       const z = String(t.getUTCHours()).padStart(2,'0')+':'+String(t.getUTCMinutes()).padStart(2,'0')+':'+String(t.getUTCSeconds()).padStart(2,'0');
-      return `<div style="display:flex;gap:14px;padding:4px 14px;border-bottom:1px solid rgba(255,255,255,.04);font-family:var(--font-mono);font-size:11.5px;">
+      return `<div style="display:flex;gap:14px;padding:5px 16px;border-bottom:1px solid rgba(255,255,255,.04);font-family:var(--font-mono);font-size:11.5px;">
         <span style="color:rgba(255,225,89,.6);min-width:60px;">${z}z</span>
         <span style="color:${sevColor[e.severity] || sevColor.info};">${(e.label||'').replace(/</g,'&lt;')}</span>
       </div>`;
-    }).join('') : '<div class="text-mute" style="padding:14px;">No telemetry events recorded.</div>';
+    }).join('') : '<div class="text-mute" style="padding:14px;text-align:center;">No telemetry events recorded.</div>';
 
+    /* === Findings === */
     const findingsHtml = (f.findingDetails || []).map(x => `
       <div style="padding:8px 0;border-top:1px solid rgba(255,255,255,.06);">
         <div class="row gap-2"><span class="pill pill-${x.sev === 'red' ? 'red' : 'warn'}" style="font-size:9px;">${(x.sev||'').toUpperCase()}</span><b>${x.title}</b></div>
@@ -1119,64 +1170,232 @@
       </div>
     `).join('');
 
-    modal({
-      title: `${f.fno} · ${f.from} → ${f.to}`,
-      width: '880px',
-      body: `
-        <div style="padding:6px 4px;">
-          <div class="grid grid-4 mono" style="font-size:11.5px;line-height:1.55;gap:14px;margin-bottom:14px;">
-            <div><span class="text-mute">DATE</span><br><b>${f.date || '—'}</b></div>
-            <div><span class="text-mute">AIRCRAFT</span><br><b>${f.ac || '—'}</b></div>
-            <div><span class="text-mute">BLOCK</span><br><b>${fmtMins(f.durMins)}</b></div>
-            <div><span class="text-mute">DISTANCE</span><br><b>${f.dist?.toLocaleString() || '—'} nm</b></div>
-            <div><span class="text-mute">FROM</span><br><b>${fromA?.iata || f.from}</b> <span class="text-mute">${fromA?.city || ''}</span></div>
-            <div><span class="text-mute">TO</span><br><b>${toA?.iata || f.to}</b> <span class="text-mute">${toA?.city || ''}</span></div>
-            <div><span class="text-mute">NETWORK</span><br><b>${f.network || 'OFFLINE'}</b></div>
-            <div><span class="text-mute">PSR</span><br><b style="color:${f.psrStatus==='accepted'?'#7DD08F':f.psrStatus==='rejected'?'#FCA5A5':'#FCD34D'};">${(f.psrStatus||'—').toUpperCase()}</b></div>
-          </div>
+    /* === DEP / ARR METAR — fetched lazily after modal opens === */
+    const acAge = ''; // placeholder; AIVA fleet doesn't track per-tail delivery dates yet
 
-          <div class="card" style="padding:14px 16px;background:rgba(255,225,89,.04);border-color:rgba(255,225,89,.22);">
-            <div class="eyebrow" style="color:var(--ai-gold-bright);">Performance peaks</div>
-            <div class="grid grid-4 mono mt-3" style="font-size:12px;line-height:1.6;gap:14px;">
-              <div><span class="text-mute">MAX ALT</span><br><b>${(s.peakAlt||0).toLocaleString()} ft</b></div>
-              <div><span class="text-mute">PEAK IAS</span><br><b>${s.peakIas||0} kt</b></div>
-              <div><span class="text-mute">PEAK TAS</span><br><b>${s.peakTas||0} kt</b></div>
-              <div><span class="text-mute">PEAK GS</span><br><b>${s.peakGs||0} kt</b></div>
-              <div><span class="text-mute">MAX BANK</span><br><b>${s.maxBank||0}°</b></div>
-              <div><span class="text-mute">LANDING RATE</span><br><b style="color:${landingRateColor(s.landingRate)};">${s.landingRate ?? '—'}${s.landingRate?' fpm':''}</b></div>
-              <div><span class="text-mute">FUEL USED</span><br><b>${s.startFuel != null && s.endFuel != null ? Math.round(s.startFuel - s.endFuel).toLocaleString() + ' kg' : '—'}</b></div>
-              <div><span class="text-mute">SAMPLES</span><br><b>${telem.length}</b></div>
+    const body = `
+      <!-- Plane photo (lazily filled) -->
+      <div id="fs-photo" style="position:relative;height:160px;border-radius:14px;overflow:hidden;background:linear-gradient(135deg,#1a1014 0%,#0c0709 100%);margin:-6px -4px 12px;">
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.32);font-family:var(--font-mono);font-size:10.5px;letter-spacing:.18em;" id="fs-photo-placeholder">${f.reg ? 'Loading photo…' : 'No registration on file'}</div>
+        <a id="fs-photo-link" href="#" target="_blank" rel="noopener" style="position:absolute;bottom:6px;right:8px;background:rgba(0,0,0,.55);color:rgba(255,255,255,.85);font-size:9.5px;padding:3px 8px;border-radius:99px;text-decoration:none;font-family:var(--font-mono);display:none;">📷 <span id="fs-photo-by">photographer</span> · planespotters.net</a>
+      </div>
+
+      <!-- Tab toggle -->
+      <div class="row" id="fs-tabs" style="background:rgba(255,255,255,.04);padding:4px;border-radius:99px;border:1px solid var(--border);width:fit-content;margin:0 auto 14px;gap:0;">
+        <button class="btn btn-sm btn-primary" data-tab="general">${I('alert',12)} General</button>
+        <button class="btn btn-sm btn-ghost"   data-tab="stats">${I('gauge',12)} Statistics</button>
+        <button class="btn btn-sm btn-ghost"   data-tab="notes">${I('book',12)} Notes</button>
+      </div>
+
+      <!-- GENERAL TAB -->
+      <div data-pane="general">
+        <div class="card" style="padding:14px 16px;">
+          <div class="eyebrow"><span style="color:var(--ai-gold-bright);">|</span> Flight</div>
+          <div class="row mt-3" style="align-items:center;gap:14px;">
+            <div style="flex:1;">
+              <div class="text-mute mono" style="font-size:10px;letter-spacing:.18em;">FROM</div>
+              <div class="display" style="font-size:24px;font-weight:600;letter-spacing:.02em;">${fromA?.icao || f.from || '—'}</div>
+              <div class="text-mute" style="font-size:12px;">${fromA?.city || ''}</div>
+            </div>
+            <div style="text-align:center;">
+              <div style="color:rgba(255,255,255,.45);">${I('plane', 24)}</div>
+              <div class="text-mute mono" style="font-size:11px;margin-top:6px;">${f.dist?.toLocaleString() || '—'} NM</div>
+            </div>
+            <div style="flex:1;text-align:right;">
+              <div class="text-mute mono" style="font-size:10px;letter-spacing:.18em;">TO</div>
+              <div class="display" style="font-size:24px;font-weight:600;letter-spacing:.02em;">${toA?.icao || f.to || '—'}</div>
+              <div class="text-mute" style="font-size:12px;">${toA?.city || ''}</div>
             </div>
           </div>
-
-          <div class="card mt-3" style="padding:14px 16px;">
-            <div class="eyebrow">Altitude + speed profile</div>
-            <div class="text-mute" style="font-size:11px;margin-top:4px;">Gold = altitude (ft) · Red = indicated airspeed (kt) · Gold-tinted bands = on-ground segments</div>
-            <div class="mt-3" style="background:rgba(8,5,7,.7);border-radius:8px;padding:6px;">${chartHtml}</div>
-          </div>
-
-          ${(f.findingDetails || []).length ? `
-          <div class="card mt-3" style="padding:14px 16px;background:rgba(252,165,165,.04);border-color:rgba(252,165,165,.25);">
-            <div class="eyebrow" style="color:#FCA5A5;">PSR findings (${(f.findingDetails||[]).length})</div>
-            ${findingsHtml}
-          </div>` : ''}
-
-          ${f.remarks ? `
-          <div class="card mt-3" style="padding:14px 16px;">
-            <div class="eyebrow">Pilot remarks</div>
-            <div class="mt-2" style="font-size:13px;line-height:1.55;color:rgba(255,255,255,.85);white-space:pre-wrap;">${(f.remarks||'').replace(/</g,'&lt;')}</div>
-          </div>` : ''}
-
-          <div class="card mt-3" style="padding:0;">
-            <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
-              <div class="eyebrow">Telemetry event log (${events.length} events)</div>
-              <div class="text-mute" style="font-size:11px;margin-top:3px;">Engine start, flaps, gear, lights, autopilot, transponder, warnings, touchdown</div>
+          <div class="row mt-4" style="justify-content:space-between;gap:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.06);font-size:12px;">
+            <div>
+              <div class="mono"><b>${f.cs || f.fno || '—'}</b> <span class="text-mute">/ ${f.fno || '—'}</span></div>
+              <div class="text-mute" style="font-size:11px;">Operated by ${operator}</div>
             </div>
-            <div style="max-height:280px;overflow-y:auto;padding:6px 0;">${evtHtml}</div>
+            <div style="text-align:right;">
+              <div class="mono"><b>${f.reg || '—'}</b></div>
+              <div class="text-mute" style="font-size:11px;">${f.ac || '—'}${acAge ? ' · ' + acAge : ''}</div>
+            </div>
           </div>
         </div>
-      `,
+
+        <!-- Flight track map -->
+        <div class="card mt-3" style="padding:0;overflow:hidden;">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--border);">
+            <div class="eyebrow"><span style="color:var(--ai-gold-bright);">|</span> Route flown</div>
+            <div class="text-mute" style="font-size:11px;margin-top:2px;">Red line = actual GPS track · Gold dashed = great-circle reference</div>
+          </div>
+          ${mapHtml}
+        </div>
+
+        <!-- Plan card -->
+        <div class="card mt-3" style="padding:14px 16px;">
+          <div class="eyebrow"><span style="color:var(--ai-gold-bright);">|</span> Plan</div>
+          <div class="mt-3">
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.18em;">DEPARTURE</div>
+            <div class="row gap-2 mt-1" style="align-items:center;">
+              <span class="pill" id="fs-dep-pill" style="font-size:10px;background:rgba(224,113,47,.25);border-color:rgba(224,113,47,.6);color:#FFA66B;">—</span>
+              <b style="font-size:13px;">${fromA?.name || f.from || '—'}</b>
+            </div>
+            <pre id="fs-dep-metar" class="mono mt-2" style="font-size:11px;color:rgba(255,255,255,.7);background:rgba(0,0,0,.3);padding:8px 10px;border-radius:6px;white-space:pre-wrap;line-height:1.5;margin:0;">Loading METAR…</pre>
+          </div>
+          <div class="mt-3">
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.18em;">ARRIVAL</div>
+            <div class="row gap-2 mt-1" style="align-items:center;">
+              <span class="pill" id="fs-arr-pill" style="font-size:10px;background:rgba(224,113,47,.25);border-color:rgba(224,113,47,.6);color:#FFA66B;">—</span>
+              <b style="font-size:13px;">${toA?.name || f.to || '—'}</b>
+            </div>
+            <pre id="fs-arr-metar" class="mono mt-2" style="font-size:11px;color:rgba(255,255,255,.7);background:rgba(0,0,0,.3);padding:8px 10px;border-radius:6px;white-space:pre-wrap;line-height:1.5;margin:0;">Loading METAR…</pre>
+          </div>
+        </div>
+
+        <!-- Landing performance -->
+        <div class="card mt-3" style="padding:14px 16px;">
+          <div class="eyebrow"><span style="color:var(--ai-gold-bright);">|</span> Landing Performance</div>
+          <div class="grid grid-3 mt-3 mono" style="gap:14px;font-size:11.5px;">
+            <div>
+              <div class="text-mute" style="font-size:10px;letter-spacing:.18em;">LANDING RATE</div>
+              <div style="font-size:18px;font-weight:600;color:${landingRateColor(s.landingRate)};margin-top:3px;">${s.landingRate != null ? s.landingRate + ' ft/min' : '—'}</div>
+            </div>
+            <div>
+              <div class="text-mute" style="font-size:10px;letter-spacing:.18em;">GROUND SPEED</div>
+              <div style="font-size:18px;font-weight:600;margin-top:3px;">${s.peakGs ? s.peakGs + ' kt' : '—'}</div>
+            </div>
+            <div>
+              <div class="text-mute" style="font-size:10px;letter-spacing:.18em;">G-FORCE</div>
+              <div style="font-size:18px;font-weight:600;margin-top:3px;">${s.touchdownG ? Number(s.touchdownG).toFixed(2) + ' G' : (f.gRate ? Number(f.gRate).toFixed(2) + ' G' : '—')}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STATISTICS TAB -->
+      <div data-pane="stats" style="display:none;">
+        <div class="card" style="padding:14px 16px;">
+          <div class="eyebrow"><span style="color:var(--ai-gold-bright);">|</span> Speed &amp; Altitude Graph</div>
+          <div class="text-mute" style="font-size:11px;margin-top:4px;">Green = altitude (ft, left axis) · Orange = indicated airspeed (kt, right axis)</div>
+          <div class="mt-3" style="background:rgba(8,5,7,.7);border-radius:8px;padding:6px;">${chartHtml}</div>
+        </div>
+
+        <div class="card mt-3" style="padding:14px 16px;background:rgba(255,225,89,.04);border-color:rgba(255,225,89,.22);">
+          <div class="eyebrow" style="color:var(--ai-gold-bright);"><span style="color:var(--ai-gold-bright);">|</span> Performance peaks</div>
+          <div class="grid grid-4 mono mt-3" style="font-size:12px;line-height:1.6;gap:14px;">
+            <div><span class="text-mute">MAX ALT</span><br><b>${(s.peakAlt||0).toLocaleString()} ft</b></div>
+            <div><span class="text-mute">PEAK IAS</span><br><b>${s.peakIas||0} kt</b></div>
+            <div><span class="text-mute">PEAK TAS</span><br><b>${s.peakTas||0} kt</b></div>
+            <div><span class="text-mute">PEAK GS</span><br><b>${s.peakGs||0} kt</b></div>
+            <div><span class="text-mute">MAX BANK</span><br><b>${s.maxBank||0}°</b></div>
+            <div><span class="text-mute">BLOCK</span><br><b>${fmtMins(f.durMins)}</b></div>
+            <div><span class="text-mute">SAMPLES</span><br><b>${telem.length}</b></div>
+            <div><span class="text-mute">PSR</span><br><b style="color:${f.psrStatus==='accepted'?'#7DD08F':f.psrStatus==='rejected'?'#FCA5A5':'#FCD34D'};">${(f.psrStatus||'—').toUpperCase()}</b></div>
+          </div>
+        </div>
+
+        <div class="card mt-3" style="padding:14px 16px;">
+          <div class="eyebrow"><span style="color:var(--ai-gold-bright);">|</span> Environmental Impact</div>
+          <div class="grid grid-2 mt-3 mono" style="font-size:12px;line-height:1.6;gap:14px;">
+            <div>
+              <div class="text-mute" style="font-size:10px;letter-spacing:.18em;">FUEL BURNED</div>
+              <div style="font-size:18px;font-weight:600;margin-top:3px;">${fuelKg != null ? fuelKg.toLocaleString() + ' kg' : '—'}</div>
+            </div>
+            <div>
+              <div class="text-mute" style="font-size:10px;letter-spacing:.18em;">FUEL SAVED</div>
+              <div style="font-size:18px;font-weight:600;margin-top:3px;color:${fuelSavedKg ? '#7DD08F' : 'rgba(255,255,255,.6)'};">${fuelSavedKg ? fuelSavedKg.toLocaleString() + ' kg' : '—'}</div>
+            </div>
+            <div>
+              <div class="text-mute" style="font-size:10px;letter-spacing:.18em;">CO₂ EMISSIONS</div>
+              <div style="font-size:18px;font-weight:600;margin-top:3px;">${co2Kg != null ? co2Kg.toLocaleString() + ' kg' : '—'}</div>
+            </div>
+            <div>
+              <div class="text-mute" style="font-size:10px;letter-spacing:.18em;">CO₂ REDUCTIONS</div>
+              <div style="font-size:18px;font-weight:600;margin-top:3px;color:${co2SavedKg ? '#7DD08F' : 'rgba(255,255,255,.6)'};">${co2SavedKg ? co2SavedKg.toLocaleString() + ' kg' : '—'}</div>
+            </div>
+          </div>
+          <div class="text-mute" style="font-size:10.5px;margin-top:10px;">CO₂ estimate uses jet-A burn factor of 3.16 kg CO₂ per kg fuel. Savings calc compares actual block time to great-circle optimum.</div>
+        </div>
+      </div>
+
+      <!-- NOTES TAB -->
+      <div data-pane="notes" style="display:none;">
+        ${(f.findingDetails || []).length ? `
+        <div class="card" style="padding:14px 16px;background:rgba(252,165,165,.04);border-color:rgba(252,165,165,.25);">
+          <div class="eyebrow" style="color:#FCA5A5;"><span style="color:#FCA5A5;">|</span> PSR findings (${(f.findingDetails||[]).length})</div>
+          ${findingsHtml}
+        </div>` : ''}
+
+        ${f.remarks ? `
+        <div class="card ${(f.findingDetails || []).length ? 'mt-3' : ''}" style="padding:14px 16px;">
+          <div class="eyebrow"><span style="color:var(--ai-gold-bright);">|</span> Pilot remarks</div>
+          <div class="mt-2" style="font-size:13px;line-height:1.55;color:rgba(255,255,255,.85);white-space:pre-wrap;">${(f.remarks||'').replace(/</g,'&lt;')}</div>
+        </div>` : ''}
+
+        <div class="card ${((f.findingDetails || []).length || f.remarks) ? 'mt-3' : ''}" style="padding:0;">
+          <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+            <div class="eyebrow"><span style="color:var(--ai-gold-bright);">|</span> Telemetry event log (${events.length} events)</div>
+            <div class="text-mute" style="font-size:11px;margin-top:3px;">Engine start, flaps, gear, lights, autopilot, transponder, warnings, touchdown</div>
+          </div>
+          <div style="max-height:380px;overflow-y:auto;padding:6px 0;">${evtHtml}</div>
+        </div>
+      </div>
+    `;
+
+    const ref = modal({
+      title: `${f.fno} · ${f.from} → ${f.to}`,
+      width: '880px',
+      body,
     });
+
+    /* Tab switching */
+    const root = document.querySelector('.aiva-modal-overlay');
+    if (root) {
+      const tabBtns = root.querySelectorAll('#fs-tabs [data-tab]');
+      const panes   = root.querySelectorAll('[data-pane]');
+      tabBtns.forEach(b => b.onclick = () => {
+        tabBtns.forEach(x => { x.classList.remove('btn-primary'); x.classList.add('btn-ghost'); });
+        b.classList.remove('btn-ghost'); b.classList.add('btn-primary');
+        const want = b.dataset.tab;
+        panes.forEach(p => { p.style.display = (p.dataset.pane === want) ? '' : 'none'; });
+      });
+
+      /* Lazy-fetch the plane photo by registration. */
+      if (f.reg) {
+        fetchPlanePhoto(f.reg).then(j => {
+          if (!j?.url) return;
+          const ph = root.querySelector('#fs-photo');
+          const plc = root.querySelector('#fs-photo-placeholder');
+          if (plc) plc.remove();
+          if (ph) ph.style.background = `url(${j.url}) center/cover, #0c0709`;
+          const link = root.querySelector('#fs-photo-link');
+          const by   = root.querySelector('#fs-photo-by');
+          if (link && j.link) { link.href = j.link; link.style.display = ''; }
+          if (by && j.photographer) by.textContent = j.photographer;
+        }).catch(() => {});
+      }
+
+      /* Lazy-fetch DEP + ARR METAR via /api/wx. */
+      const depIcao = fromA?.icao || f.from;
+      const arrIcao = toA?.icao   || f.to;
+      const wxIds = [depIcao, arrIcao].filter(Boolean).join(',');
+      if (wxIds) {
+        fetch(`/api/wx?ids=${encodeURIComponent(wxIds)}`, { cache: 'no-store' })
+          .then(r => r.ok ? r.json() : null)
+          .then(arr => {
+            if (!Array.isArray(arr)) return;
+            const dep = arr.find(x => x.icaoId === depIcao);
+            const arr2 = arr.find(x => x.icaoId === arrIcao);
+            const setMetar = (preId, pillId, m) => {
+              const pre = root.querySelector('#' + preId);
+              const pill = root.querySelector('#' + pillId);
+              if (pre) pre.textContent = m?.rawOb || m?.raw_text || 'METAR unavailable';
+              if (pill && m?.fltCat) pill.textContent = m.fltCat;
+              else if (pill) pill.textContent = m ? 'OK' : '—';
+            };
+            setMetar('fs-dep-metar', 'fs-dep-pill', dep);
+            setMetar('fs-arr-metar', 'fs-arr-pill', arr2);
+          })
+          .catch(() => {});
+      }
+    }
   }
 
   function landingRateColor(v) {
@@ -1761,7 +1980,12 @@
           .filter(Boolean);
         /* Keep the persistent store in sync whenever we mutate the in-memory list */
         const persistBasket = () => AIVA.Store.set('book_basket',
-          selectedSectors.map(f => ({ fno: f.fno, ac: f.ac, from: f.from, to: f.to, op: f.op, ts: Date.now() }))
+          selectedSectors.map(f => ({
+            fno: f.fno, ac: f.ac, from: f.from, to: f.to, op: f.op, ts: Date.now(),
+            /* Persist pilot's per-sector aircraft + reg picks across reload */
+            _chosenAc:  f._chosenAc  || null,
+            _chosenReg: f._chosenReg || null,
+          }))
         );
 
         const refreshAll = () => {
@@ -2145,18 +2369,52 @@
             if (connectivity) $('#fdtlBox', c).textContent += connectivity;
 
             selectedSectors.forEach((f, i) => {
-              const row = el('div', { class:'row between', style:'padding:10px 12px;background:rgba(255,225,89,.05);border-radius:10px;border:1px solid rgba(255,225,89,.18);' });
+              const row = el('div', { style:'padding:10px 12px;background:rgba(255,225,89,.05);border-radius:10px;border:1px solid rgba(255,225,89,.18);' });
+              /* Aircraft type picker — the operator's whole fleet for
+                 this op (AI or IX). Falls back to the schedule's default. */
+              const typeOptions = (AIVA.fleetTypesForOp?.(f.op) || AIVA.fleetTypes?.() || [f.ac]);
+              if (!typeOptions.includes(f.ac)) typeOptions.unshift(f.ac);
+              const currentType = f._chosenAc || f.ac;
+              /* Registration picker — every tail of the chosen type
+                 for this operator. */
+              const tails = (AIVA.fleetByType?.(currentType) || [])
+                .filter(a => !f.op || a.operator === f.op || (a.op || a.operator) === f.op);
+              const currentReg = f._chosenReg || tails[0]?.reg || '';
               row.innerHTML = `
-                <div class="row gap-2">
-                  <span class="mono" style="font-size:11px;color:var(--ai-gold);">#${i+1}</span>
-                  <span class="mono"><b>${f.fno}</b></span>
-                  <span class="text-mute" style="font-size:12px;">${AIVA.airport(f.from)?.city} (${f.from}) → ${AIVA.airport(f.to)?.city} (${f.to})</span>
-                  <span class="mono text-mute" style="font-size:11px;">${f.dep}–${f.arr} · ${f.dur}</span>
-                  <span class="pill pill-gold" style="font-size:9.5px;">${f.ac}</span>
+                <div class="row between" style="align-items:center;gap:10px;flex-wrap:wrap;">
+                  <div class="row gap-2" style="flex-wrap:wrap;align-items:center;">
+                    <span class="mono" style="font-size:11px;color:var(--ai-gold);">#${i+1}</span>
+                    <span class="mono"><b>${f.fno}</b></span>
+                    <span class="text-mute" style="font-size:12px;">${AIVA.airport(f.from)?.city} (${f.from}) → ${AIVA.airport(f.to)?.city} (${f.to})</span>
+                    <span class="mono text-mute" style="font-size:11px;">${f.dep}–${f.arr} · ${f.dur}</span>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" data-rm="${i}">Remove</button>
                 </div>
-                <button class="btn btn-ghost btn-sm" data-rm="${i}">Remove</button>
+                <div class="row gap-2 mt-2" style="align-items:center;flex-wrap:wrap;font-size:11.5px;">
+                  <label class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">A/C TYPE</label>
+                  <select class="input mono" data-actype="${i}" style="padding:5px 8px;font-size:11.5px;width:auto;">
+                    ${typeOptions.map(t => `<option value="${t}"${t===currentType?' selected':''}>${t}${AIVA.acTypeName?.(t) ? ' · ' + AIVA.acTypeName(t) : ''}</option>`).join('')}
+                  </select>
+                  <label class="text-mute mono" style="font-size:10px;letter-spacing:.14em;margin-left:8px;">REG</label>
+                  <select class="input mono" data-reg="${i}" style="padding:5px 8px;font-size:11.5px;width:auto;" ${tails.length?'':'disabled'}>
+                    ${tails.length
+                      ? tails.map(a => `<option value="${a.reg}"${a.reg===currentReg?' selected':''}>${a.reg}${a.name?' · '+a.name:''}</option>`).join('')
+                      : '<option>— no fleet record —</option>'}
+                  </select>
+                </div>
               `;
               row.querySelector('[data-rm]').onclick = () => removeSector(i);
+              row.querySelector('[data-actype]').onchange = (e) => {
+                selectedSectors[i]._chosenAc = e.target.value;
+                /* Reset chosen reg — old reg may not exist on the new type. */
+                selectedSectors[i]._chosenReg = null;
+                renderBasket();
+                persistBasket();
+              };
+              row.querySelector('[data-reg]').onchange = (e) => {
+                selectedSectors[i]._chosenReg = e.target.value;
+                persistBasket();
+              };
               list.appendChild(row);
             });
           }
@@ -2180,7 +2438,10 @@
               const newOnes = selectedSectors.map(f => ({
                 date: targetDate, fno: f.fno,
                 from: f.from, to: f.to,
-                ac: f.ac, op: f.op,
+                /* Honor the pilot's per-sector aircraft + reg picks. */
+                ac:  f._chosenAc  || f.ac,
+                reg: f._chosenReg || null,
+                op:  f.op,
                 ts: Date.now(),
               }));
               setBookings([...bookings, ...newOnes]);

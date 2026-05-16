@@ -1568,57 +1568,27 @@ The SimBrief OFP — what's on each page:
       `}));
     },
 
-    /* ==================== ANNOUNCE (PA / Audio) ==================== */
+    /* ==================== ANNOUNCE (PA / Audio) ====================
+       The full Announcements page (Stop / Volume / Loop / Manual ↔ Auto
+       toggle / per-clip play / upload / sync code) is implemented in
+       portal.js. Mirror the Hoppie pattern: iframe portal.html?embed=1
+       #announce so the EFB tile gets the complete feature set without
+       duplicating 600+ lines here. Shared localStorage + IndexedDB
+       means clips uploaded from either context show up everywhere. */
     announce: (c) => {
-      const STAGES = [
-        { id:'pre_dep',    label:'Pre-departure',         when:'on ground, doors closed' },
-        { id:'safety',     label:'Safety demo',           when:'after pushback' },
-        { id:'pass_10k',   label:'Passing 10,000 ft',     when:'climb through FL100' },
-        { id:'service',    label:'Service announcement',  when:'top of climb' },
-        { id:'belts_on',   label:'Seatbelts on',          when:'turbulence / descent' },
-        { id:'belts_off',  label:'Seatbelts off',         when:'smooth air' },
-        { id:'descending', label:'Descending',            when:'top of descent' },
-        { id:'landed',     label:'Landed',                when:'after touchdown' },
-        { id:'disarm',     label:'Cabin crew disarm',     when:'approaching gate' },
-      ];
-      const lib = AIVA.Store.get('ann_lib', {});
-      const cfg = AIVA.Store.get('ann_cfg', { mode: 'manual' });
-
-      c.appendChild(el('div', { class:'embed-bar', html:`
-        <span class="dot"></span> Cabin PA · ${cfg.mode === 'auto' ? 'AUTO' : 'MANUAL'} mode
+      c.appendChild(el('div', { class:'embed-bar', html: `
+        <span class="dot"></span> Cabin PA · controls + library
         <span class="right">
-          <button class="btn btn-ghost btn-sm" id="annMode">${I('refresh',12)} Switch to ${cfg.mode === 'auto' ? 'MANUAL' : 'AUTO'}</button>
-          ${pilot.role === 'admin' ? `<a class="btn btn-ghost btn-sm" href="portal.html#announce">${I('upload',12)} Manage library</a>` : ''}
+          <a class="btn btn-ghost btn-sm" href="portal.html#announce" target="_blank" rel="noopener">${I('external',14)} Open standalone</a>
         </span>
       `}));
-
-      const grid = el('div', { class:'grid grid-3 mt-3' });
-      STAGES.forEach(stage => {
-        const files = lib[stage.id] || [];
-        const card = el('div', { class:'efb-card', style:{padding:'14px 16px'} });
-        card.innerHTML = `
-          <div class="eyebrow">${stage.when}</div>
-          <h4 style="margin:6px 0 4px;font-size:14px;font-weight:600;">${stage.label}</h4>
-          <div class="text-mute mono" style="font-size:10.5px;">${files.length} clip${files.length===1?'':'s'} on file</div>
-          <button class="btn ${files.length ? 'btn-primary' : 'btn-ghost'} btn-sm mt-3" data-play="${stage.id}" ${files.length?'':'disabled'}>
-            ${I('send',12)} Play random
-          </button>
-        `;
-        card.querySelector('[data-play]').onclick = () => {
-          const f = files[Math.floor(Math.random() * files.length)];
-          if (!f) return;
-          new Audio(f.dataURL).play().catch(e => toast('Playback blocked: ' + e.message, 'bad'));
-          toast(`▶ ${stage.label} — ${f.name}`, 'ok');
-        };
-        grid.appendChild(card);
-      });
-      c.appendChild(grid);
-
-      $('#annMode', c).onclick = () => {
-        cfg.mode = cfg.mode === 'auto' ? 'manual' : 'auto';
-        AIVA.Store.set('ann_cfg', cfg);
-        location.reload();
-      };
+      const wrap = el('div', { class:'efb-card', style:{ padding:0, overflow:'hidden', minHeight:'720px', display:'flex' }});
+      const frame = document.createElement('iframe');
+      frame.src = 'portal.html?embed=1#announce';
+      frame.style.cssText = 'flex:1;border:0;width:100%;min-height:720px;background:transparent;';
+      frame.title = 'Cabin Announcements';
+      wrap.appendChild(frame);
+      c.appendChild(wrap);
     },
 
     /* ==================== FILE PSR ==================== */

@@ -215,7 +215,7 @@
       'PARKED':   'disarm',
     };
     const firedStages = new Set();
-    AIVA.FSUIPC?.on?.('phase', ({ from, to, state }) => {
+    AIVA.FSUIPC?.on?.('phase', async ({ from, to, state }) => {
       const cfg = AIVA.Store.get('ann_cfg', { mode: 'manual' });
       if (cfg.mode !== 'auto') return;
       const stageId = PHASE_TO_STAGE[to];
@@ -224,7 +224,13 @@
       if (!files.length) return;
       firedStages.add(stageId);
       const pick = files[Math.floor(Math.random() * files.length)];
-      try { new Audio(pick.dataURL).play().catch(() => {}); } catch {}
+      try {
+        const url = await (AIVA.AnnResolveURL?.(pick) || Promise.resolve(pick.dataURL));
+        if (!url) return;
+        const a = new Audio(url);
+        a.onended = () => { if (url.startsWith('blob:')) URL.revokeObjectURL(url); };
+        a.play().catch(() => {});
+      } catch {}
       toast(`Cabin announcement · ${stageId}`, 'ok', 3500);
     });
     /* Pass-10k climb announcement uses the alt threshold, separate
@@ -241,7 +247,15 @@
         if (!files.length) return;
         firedStages.add('pass_10k');
         const pick = files[Math.floor(Math.random() * files.length)];
-        try { new Audio(pick.dataURL).play().catch(() => {}); } catch {}
+        (async () => {
+          try {
+            const url = await (AIVA.AnnResolveURL?.(pick) || Promise.resolve(pick.dataURL));
+            if (!url) return;
+            const a = new Audio(url);
+            a.onended = () => { if (url.startsWith('blob:')) URL.revokeObjectURL(url); };
+            a.play().catch(() => {});
+          } catch {}
+        })();
         toast('Cabin announcement · passing 10,000 ft', 'ok', 3500);
       }
     });
@@ -6929,6 +6943,64 @@
 
         const updateLib = (l) => { AIVA.Store.set('ann_lib', l); route(); };
 
+        /* === IndexedDB-backed audio store ===
+           localStorage caps at ~5-10 MB per origin so even a single
+           8 MB MP3 (base64-encoded → ~11 MB) blows the quota. Store
+           the audio bytes in IDB (50+ MB quota typical) and keep just
+           the metadata in localStorage so the existing ann_lib API
+           stays intact. */
+        const ANN_DB = 'aiva-ann-audio';
+        const ANN_STORE = 'clips';
+        function annDB() {
+          return new Promise((resolve, reject) => {
+            const req = indexedDB.open(ANN_DB, 1);
+            req.onupgradeneeded = () => req.result.createObjectStore(ANN_STORE);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror   = () => reject(req.error);
+          });
+        }
+        async function annPut(key, blob) {
+          const db = await annDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction(ANN_STORE, 'readwrite');
+            tx.objectStore(ANN_STORE).put(blob, key);
+            tx.oncomplete = () => resolve();
+            tx.onerror    = () => reject(tx.error);
+          });
+        }
+        async function annGetBlob(key) {
+          const db = await annDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction(ANN_STORE, 'readonly');
+            const req = tx.objectStore(ANN_STORE).get(key);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror   = () => reject(req.error);
+          });
+        }
+        async function annDel(key) {
+          const db = await annDB();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction(ANN_STORE, 'readwrite');
+            tx.objectStore(ANN_STORE).delete(key);
+            tx.oncomplete = () => resolve();
+            tx.onerror    = () => reject(tx.error);
+          });
+        }
+        /* Expose so other modules / future consumers can resolve clips. */
+        AIVA.AnnStorage = { put: annPut, getBlob: annGetBlob, del: annDel };
+        /* Helper: take a file metadata row { name, idbKey?, dataURL? }
+           and return a playable URL. For new clips (idbKey set) we
+           generate a fresh blob URL each play; for legacy rows with an
+           inline dataURL, just hand that back. */
+        async function annResolveURL(row) {
+          if (row?.idbKey) {
+            const blob = await annGetBlob(row.idbKey);
+            if (blob) return URL.createObjectURL(blob);
+          }
+          return row?.dataURL || null;
+        }
+        AIVA.AnnResolveURL = annResolveURL;
+
         c.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
           cfg.mode = b.dataset.mode;
           AIVA.Store.set('ann_cfg', cfg);
@@ -6943,54 +7015,66 @@
               if (!files.length) return;
               const cur = AIVA.Store.get('ann_lib', {});
               cur[stageId] = cur[stageId] || [];
-              /* Bumped from 5 MB to 20 MB so a full 4-minute safety
-                 demo at decent bitrate fits. localStorage caps the
-                 origin's total at ~5-10 MB on most engines though, so
-                 we catch QuotaExceededError below and surface a clean
-                 message instead of crashing the page. */
-              const MAX_MB = 20;
-              let added = 0;
+              /* 8 MB hard limit on the input side. Audio bytes go to
+                 IndexedDB (typically 50+ MB quota), so a single 8 MB
+                 clip fits with room for a full safety-demo library
+                 across all stages. localStorage only carries metadata
+                 (name + IDB key) so the per-origin cap doesn't bite. */
+              const MAX_MB = 8;
+              let added = 0, failed = 0;
               for (const f of files) {
                 if (f.size > MAX_MB * 1024 * 1024) {
-                  toast(`${f.name} is over ${MAX_MB} MB — re-encode at lower bitrate (96 kbps for speech is fine).`, 'bad', 7000);
+                  toast(`${f.name} is over ${MAX_MB} MB — re-encode at lower bitrate (96 kbps for speech keeps a 4-min demo well under 5 MB).`, 'bad', 8000);
                   continue;
                 }
-                const dataURL = await new Promise(res => {
-                  const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f);
-                });
-                cur[stageId].push({ name: f.name, dataURL });
-                added++;
+                try {
+                  const idbKey = `ann_${stageId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                  await annPut(idbKey, f);
+                  cur[stageId].push({ name: f.name, idbKey, size: f.size, type: f.type });
+                  added++;
+                } catch (err) {
+                  failed++;
+                  console.warn('[AIVA Ann] IDB put failed for', f.name, err);
+                }
               }
               try {
                 updateLib(cur);
-                toast(`${added} file${added===1?'':'s'} added.`, 'ok');
+                if (added)  toast(`${added} clip${added===1?'':'s'} saved to IndexedDB.`, 'ok');
+                if (failed) toast(`${failed} clip${failed===1?'':'s'} failed to save — IDB quota or permission denied. Check DevTools.`, 'bad', 8000);
               } catch (err) {
-                /* QuotaExceededError — base64-encoded audio is ~33%
-                   larger than the binary file, and most browsers cap
-                   localStorage at 5-10 MB per origin. Roll back the
-                   in-memory cur ref to whatever's still on disk and
-                   tell the user what happened. */
-                toast('Storage full — your browser caps localStorage at ~10 MB. Delete old clips or use shorter audio. (Future: AIVA will move audio to IndexedDB so you can keep dozens.)', 'bad', 12000);
-                /* Re-read what actually saved to keep state consistent */
+                toast('Metadata save failed: ' + err.message, 'bad', 8000);
                 updateLib(AIVA.Store.get('ann_lib', {}));
               }
             };
           });
 
-          c.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+          c.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
             const [stage, idx] = b.dataset.del.split(':');
             const cur = AIVA.Store.get('ann_lib', {});
+            const row = cur[stage]?.[+idx];
+            /* Wipe the IDB blob too — otherwise removing a clip from
+               the visible list leaves orphan bytes in storage. */
+            if (row?.idbKey) {
+              try { await annDel(row.idbKey); } catch {}
+            }
             cur[stage]?.splice(+idx, 1);
             updateLib(cur);
           });
         }
 
-        /* Play buttons available to ALL pilots — that's the whole point. */
-        c.querySelectorAll('[data-play]').forEach(b => b.onclick = () => {
+        /* Play buttons available to ALL pilots — that's the whole point.
+           Resolve through AnnResolveURL so IDB-backed clips get a fresh
+           blob URL each play (old inline-dataURL rows still work via
+           the same fallback). */
+        c.querySelectorAll('[data-play]').forEach(b => b.onclick = async () => {
           const [stage, idx] = b.dataset.play.split(':');
           const f = AIVA.Store.get('ann_lib', {})[stage]?.[+idx];
           if (!f) return;
-          const a = new Audio(f.dataURL); a.play().catch(e => toast('Playback blocked: ' + e.message, 'bad'));
+          const url = await annResolveURL(f);
+          if (!url) { toast('Clip not found in storage — re-upload it.', 'bad'); return; }
+          const a = new Audio(url);
+          a.onended = () => { if (url.startsWith('blob:')) URL.revokeObjectURL(url); };
+          a.play().catch(e => toast('Playback blocked: ' + e.message, 'bad'));
         });
       }
     },

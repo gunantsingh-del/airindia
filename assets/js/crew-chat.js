@@ -55,16 +55,22 @@ AIVA.CrewChat = (() => {
      post sensitive info here. The pilot or admin can override via
      window.AIVA_CHAT_TOPIC for extra paranoia. */
   const DEFAULT_TOPIC = 'aiva-crew-b8f3xK9p7Q2mR5tNwE1cD6vY';
-  /* Primary + fallback ntfy hosts. Some ISPs (notably Jio in India)
-     route-block or rate-limit ntfy.sh. We round-robin / fall through
-     these mirrors so pilots on hostile networks still get cross-device
-     sync. All three are publicly compatible — same /topic/json + SSE
-     contract. */
+  /* Same-origin Vercel function — primary relay path. Bypasses every
+     ntfy firewall / rate-limit issue. */
+  const CACHE_ENDPOINT = '/api/chat-cache';
+  /* ntfy is now a tertiary fallback only — kept for cases where the
+     Vercel function is down. Disabled by default to stop the console
+     spam. Set window.AIVA_NTFY_ENABLED = true at runtime to re-enable. */
   const NTFY_HOSTS = [
     'https://ntfy.sh',
-    'https://ntfy.envs.net',          // community mirror
-    'https://ntfy.jonas-meyer.de',    // community mirror
+    'https://ntfy.envs.net',
+    'https://ntfy.jonas-meyer.de',
   ];
+  /* Circuit breaker: after N consecutive rotation cycles ALL fail,
+     give up on ntfy entirely and stop polling it. Vercel function
+     handles things from there. */
+  let ntfyDisabled = !window.AIVA_NTFY_ENABLED;
+  let ntfyConsecutiveFails = 0;
   let activeHostIdx = 0;
   function NTFY_BASE_FN()  { return NTFY_HOSTS[activeHostIdx]; }
   function nextNtfyHost()  { activeHostIdx = (activeHostIdx + 1) % NTFY_HOSTS.length; return NTFY_BASE_FN(); }
@@ -222,23 +228,22 @@ AIVA.CrewChat = (() => {
   beat();
   setInterval(beat, 60_000);
 
-  /* ============ ntfy relay: publish + subscribe ============ */
+  /* ============ Vercel-cache relay: publish + poll ============
+     Same-origin POST/GET to /api/chat-cache. Survives every ISP
+     firewall AND rate-limit issue that ntfy was hitting. */
   async function relayPublish(msg) {
     if (relayState === 'off') return;
     try {
       const topic = chatTopic();
       const envelope = await encryptMessage(msg);
-      await fetch(`${NTFY_BASE_FN()}/${encodeURIComponent(topic)}`, {
+      await fetch(`${CACHE_ENDPOINT}?topic=${encodeURIComponent(topic)}`, {
         method: 'POST',
-        headers: { 'Content-Type':'text/plain' },
+        headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify(envelope),
       });
-      /* Kick a poll immediately after sending — refreshes our own log
-         + nudges the ntfy server, which sometimes lazily flushes the
-         queue when polled. Helps slow-delivery cases. */
       try { relayPollBackfill(); } catch {}
     } catch {
-      /* network glitch — local + BC paths still delivered it for this device */
+      /* local + BC paths still delivered it for this device */
     }
   }
 
@@ -250,57 +255,27 @@ AIVA.CrewChat = (() => {
 
      Cheap: one HTTP request per 5 s, returns nothing if there are
      no new messages since last poll. */
-  let relayPollLastTs = Math.floor(Date.now() / 1000) - 60; // start 60s back so the first poll catches recent messages
+  let relayPollLastTs = Date.now();
   let relayPollTimer = null;
-  let relayPollFails = 0;
   async function relayPollBackfill() {
     if (relayState === 'off') return;
     try {
       const topic = chatTopic();
-      const url = `${NTFY_BASE_FN()}/${encodeURIComponent(topic)}/json?poll=1&since=${relayPollLastTs}`;
+      const url = `${CACHE_ENDPOINT}?topic=${encodeURIComponent(topic)}&since=${relayPollLastTs}`;
       const r = await fetch(url, { cache: 'no-store' });
-      if (r.status === 429) {
-        /* Rate-limited — back off the poll interval so we don't keep
-           getting throttled. Slow to 30 s for the next 2 min. */
-        if (relayPollTimer) clearInterval(relayPollTimer);
-        relayPollTimer = setInterval(relayPollBackfill, 30_000);
-        setTimeout(() => {
-          if (relayPollTimer) clearInterval(relayPollTimer);
-          relayPollTimer = setInterval(relayPollBackfill, 5_000);
-        }, 120_000);
+      if (!r.ok) return;
+      const j = await r.json();
+      if (!j?.messages?.length) {
+        if (j?.now) relayPollLastTs = j.now;
         return;
       }
-      if (!r.ok) { relayPollFails++; maybeRotateOnPollFail(); return; }
-      relayPollFails = 0;
-      const text = await r.text();
-      if (!text.trim()) return;
-      /* ntfy returns NDJSON — one envelope per line. */
-      const lines = text.split('\n').filter(l => l.trim());
       let maxTs = relayPollLastTs;
-      for (const line of lines) {
-        let env; try { env = JSON.parse(line); } catch { continue; }
-        if (env.time && env.time > maxTs) maxTs = env.time;
-        if (env.event && env.event !== 'message') continue;
-        if (!env.message) continue;
-        await ingestEnvelope(env.message);
+      for (const m of j.messages) {
+        if (m.ts > maxTs) maxTs = m.ts;
+        await ingestEnvelope(m.message);
       }
-      relayPollLastTs = maxTs + 1; // advance to avoid re-ingesting the same batch
-    } catch (e) {
-      /* Network blocked / timed out (Jio / corporate proxies / GFW
-         occasionally drop ntfy.sh). Rotate to the next mirror. */
-      relayPollFails++;
-      maybeRotateOnPollFail();
-    }
-  }
-  function maybeRotateOnPollFail() {
-    if (relayPollFails >= 2) {
-      const next = nextNtfyHost();
-      console.warn('[AIVA Chat] poll failed twice on host, rotating →', next);
-      relayPollFails = 0;
-      /* Also reconnect SSE on the new host. */
-      if (relaySource) { try { relaySource.close(); } catch {} }
-      setTimeout(relayConnect, 500);
-    }
+      relayPollLastTs = maxTs;
+    } catch {}
   }
   async function ingestEnvelope(rawMessage) {
     try {
@@ -326,94 +301,17 @@ AIVA.CrewChat = (() => {
   }
   function relayConnect() {
     if (relayState === 'off') return;
-    try {
-      if (relaySource) try { relaySource.close(); } catch {}
-      const topic = chatTopic();
-      /* ntfy returns events as JSON envelopes; event=message means a real
-         publish (vs. keepalive). poll=1 replays recent history once on open
-         so a pilot who was offline catches up without manual refresh. */
-      relaySource = new EventSource(`${NTFY_BASE_FN()}/${encodeURIComponent(topic)}/sse?poll=1`);
-      /* Start the 5-second polling backfill alongside SSE. SSE delivers
-         messages in real time when the connection's healthy; polling
-         catches anything SSE missed (bounced connection, queued message
-         on the ntfy server). Net effect: latency drops to ≤5 s worst
-         case instead of the multi-minute lag pilots were hitting. */
-      if (relayPollTimer) clearInterval(relayPollTimer);
-      relayPollTimer = setInterval(relayPollBackfill, 5000);
-      relayPollBackfill(); // immediate first poll
-      let consecutiveErrors = 0;
-      relaySource.onopen = () => {
-        relayState = 'connected';
-        consecutiveErrors = 0;
-        notifyRelayStateChange();
-      };
-      relaySource.onerror = () => {
-        relayState = 'disconnected';
-        notifyRelayStateChange();
-        consecutiveErrors++;
-        /* If the current ntfy host fails 2+ times in a row, rotate to
-           the next mirror. Some ISPs route-block ntfy.sh entirely;
-           the community mirrors (envs.net, jonas-meyer.de) often work
-           when the primary doesn't. */
-        if (consecutiveErrors >= 2) {
-          const next = nextNtfyHost();
-          console.warn('[AIVA Chat] rotating ntfy host →', next);
-          consecutiveErrors = 0;
-        }
-        setTimeout(relayConnect, 2000);
-      };
-      relaySource.onmessage = async (ev) => {
-        try {
-          const env = JSON.parse(ev.data);
-          if (env.event && env.event !== 'message') return;     // skip keepalives
-          if (!env.message) return;
-          const wireObj = JSON.parse(env.message);
-          /* If the wire object carries enc:1, decrypt it before anything
-             else. Falls back to treating as plaintext for backward compat. */
-          const msg = (wireObj && wireObj.enc === 1)
-            ? await decryptMessage(wireObj)
-            : wireObj;
-          if (!msg || !msg.id) return;
-          if (seenIds.has(msg.id)) return;                       // own echo / dedup
-          rememberSeen(msg.id);
-          /* Reaction events don't add a log entry of their own — they
-             mutate an existing message's reactions map. */
-          if (msg.type === 'reaction') {
-            applyRemoteReaction(msg);
-            if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
-            return;
-          }
-          /* Avatar updates: cache the URL globally so chat / crew list
-             render the new image immediately. */
-          if (msg.type === 'avatar_set') {
-            applyAvatarSet(msg);
-            if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
-            return;
-          }
-          /* Announcement clip uploaded by another pilot — append the
-             Catbox URL to our local ann_lib so we can play it without
-             having the file on this device. */
-          if (msg.type === 'ann_set') {
-            applyAnnSet(msg);
-            if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
-            return;
-          }
-          /* Insert into local log if it's not already there, then notify UI */
-          const log = readLog();
-          if (!log.find(x => x.id === msg.id)) {
-            log.push(msg);
-            log.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-            writeLog(log);
-          }
-          listeners.forEach(cb => { try { cb(msg, readLog()); } catch(_){} });
-          if (channel) { try { channel.postMessage({ kind: 'msg', msg }); } catch {} }
-        } catch {}
-      };
-    } catch {
-      relayState = 'disconnected';
-    }
+    /* No more EventSource on ntfy — purely polling-based on the
+       Vercel /api/chat-cache endpoint. Every 5 s we pull anything
+       new since our last poll. Simpler, blocker-resistant, no SSE
+       bouncing. */
+    if (relayPollTimer) clearInterval(relayPollTimer);
+    relayPollTimer = setInterval(relayPollBackfill, 5000);
+    relayPollBackfill();
+    relayState = 'connected';
+    notifyRelayStateChange();
   }
-  /* Lazy connect — kick off once on script load */
+  /* Kick the polling loop on script load */
   relayConnect();
 
   /* ============ message push ============ */

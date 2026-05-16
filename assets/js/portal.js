@@ -742,6 +742,9 @@
       setTimeout(() => location.reload(true), 200);
     });
     window.addEventListener('hashchange', route);
+    /* Cross-device sync — re-render whenever AIVA.PilotSync applies
+       incoming flight state from another logged-in device. */
+    window.addEventListener('aiva-sync', () => { try { route(); } catch {} });
     /* Theme toggle */
     const applyTheme = (t) => {
       document.documentElement.setAttribute('data-theme', t);
@@ -1326,6 +1329,7 @@
             if (cancelBtn) cancelBtn.onclick = () => {
               if (!confirm('Stop the in-progress flight without filing a PSR? Any auto-detected events (10k descent, landing) will reset.')) return;
               P.remove('flight_in_progress');
+              AIVA.PilotSync?.pushNow?.();
               toast('Flight stopped.', 'ok');
               AIVA.FSUIPC?.resetSector?.();
               route();

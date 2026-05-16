@@ -203,6 +203,10 @@
     $('#popOut').onclick    = () => window.open(location.href, '_blank', 'width=1400,height=900');
     $('#goPortal').onclick  = () => location.href = 'portal.html';
     window.addEventListener('hashchange', route);
+    /* Cross-device sync — when AIVA.PilotSync receives new flight state
+       from another device (the pilot's PC AIVA pushing to their FSLabs
+       iPad EFB, or vice versa), re-render so the new state shows up. */
+    window.addEventListener('aiva-sync', () => { try { route(); } catch {} });
     setInterval(() => {
       const now = new Date();
       $('#zuluClock').textContent = String(now.getUTCHours()).padStart(2,'0') + ':' + String(now.getUTCMinutes()).padStart(2,'0');
@@ -517,6 +521,7 @@
         return;
       }
       P.set('flight_in_progress', { fno: f.fno, startedAt: Date.now() });
+      AIVA.PilotSync?.pushNow?.();   // broadcast to other devices immediately
       toast(`Flight ${f.fno} started.`, 'ok');
       AIVA.CrewChat?.event(`pushed back on ${f.fno} ${f.from} → ${f.to}`, { fno: f.fno });
       location.hash = '#fsuipc';
@@ -2295,6 +2300,7 @@ The SimBrief OFP — what's on each page:
         const f = activeFlight();
         if (!f) return toast('No active flight — book one first.', 'warn');
         P.set('flight_in_progress', { fno: f.fno, startedAt: Date.now() });
+        AIVA.PilotSync?.pushNow?.();
         toast(`Flight ${f.fno} started.`, 'ok');
         route();
       };
@@ -2302,6 +2308,7 @@ The SimBrief OFP — what's on each page:
         const fpi = P.get('flight_in_progress');
         if (!fpi) return;
         P.remove('flight_in_progress');
+        AIVA.PilotSync?.pushNow?.();
         const cur = P.get('flights_logged', []);
         const f2 = AIVA.findFlight(fpi.fno);
         cur.push({

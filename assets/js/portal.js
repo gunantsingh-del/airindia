@@ -7108,10 +7108,13 @@
               /* Same default as crew-chat.js — derived from logon if
                  nothing's stored. We just need to read whatever the
                  chat module is using. */
-              window.AIVA_CHAT_DEFAULT_TOPIC || 'aiva-crew-default'
+              window.AIVA_CHAT_DEFAULT_TOPIC || 'aiva-crew-b8f3xK9p7Q2mR5tNwE1cD6vY'
             );
-            /* Pull last 24h of ntfy history as NDJSON. */
-            const url = `https://ntfy.sh/${encodeURIComponent(topic)}/json?poll=1&since=24h`;
+            /* Pull last 24h of ntfy history as NDJSON from whichever
+               mirror is currently active (crew-chat may have rotated
+               off ntfy.sh if it was blocked). */
+            const host = (AIVA._ntfyHost && AIVA._ntfyHost()) || 'https://ntfy.sh';
+            const url = `${host}/${encodeURIComponent(topic)}/json?poll=1&since=24h`;
             const r = await fetch(url, { cache: 'no-store' });
             if (!r.ok) throw new Error('ntfy returned HTTP ' + r.status);
             const text = await r.text();

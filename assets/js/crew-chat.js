@@ -55,7 +55,21 @@ AIVA.CrewChat = (() => {
      post sensitive info here. The pilot or admin can override via
      window.AIVA_CHAT_TOPIC for extra paranoia. */
   const DEFAULT_TOPIC = 'aiva-crew-b8f3xK9p7Q2mR5tNwE1cD6vY';
-  const NTFY_BASE     = 'https://ntfy.sh';
+  /* Primary + fallback ntfy hosts. Some ISPs (notably Jio in India)
+     route-block or rate-limit ntfy.sh. We round-robin / fall through
+     these mirrors so pilots on hostile networks still get cross-device
+     sync. All three are publicly compatible — same /topic/json + SSE
+     contract. */
+  const NTFY_HOSTS = [
+    'https://ntfy.sh',
+    'https://ntfy.envs.net',          // community mirror
+    'https://ntfy.jonas-meyer.de',    // community mirror
+  ];
+  let activeHostIdx = 0;
+  function NTFY_BASE_FN()  { return NTFY_HOSTS[activeHostIdx]; }
+  function nextNtfyHost()  { activeHostIdx = (activeHostIdx + 1) % NTFY_HOSTS.length; return NTFY_BASE_FN(); }
+  /* Expose so other modules / debug surfaces can read the current host. */
+  AIVA._ntfyHost = NTFY_BASE_FN;
   function chatTopic() {
     if (typeof window.AIVA_CHAT_TOPIC === 'string' && window.AIVA_CHAT_TOPIC) return window.AIVA_CHAT_TOPIC;
     try {
@@ -214,7 +228,7 @@ AIVA.CrewChat = (() => {
     try {
       const topic = chatTopic();
       const envelope = await encryptMessage(msg);
-      await fetch(`${NTFY_BASE}/${encodeURIComponent(topic)}`, {
+      await fetch(`${NTFY_BASE_FN()}/${encodeURIComponent(topic)}`, {
         method: 'POST',
         headers: { 'Content-Type':'text/plain' },
         body: JSON.stringify(envelope),
@@ -238,13 +252,15 @@ AIVA.CrewChat = (() => {
      no new messages since last poll. */
   let relayPollLastTs = Math.floor(Date.now() / 1000) - 60; // start 60s back so the first poll catches recent messages
   let relayPollTimer = null;
+  let relayPollFails = 0;
   async function relayPollBackfill() {
     if (relayState === 'off') return;
     try {
       const topic = chatTopic();
-      const url = `${NTFY_BASE}/${encodeURIComponent(topic)}/json?poll=1&since=${relayPollLastTs}`;
+      const url = `${NTFY_BASE_FN()}/${encodeURIComponent(topic)}/json?poll=1&since=${relayPollLastTs}`;
       const r = await fetch(url, { cache: 'no-store' });
-      if (!r.ok) return;
+      if (!r.ok) { relayPollFails++; maybeRotateOnPollFail(); return; }
+      relayPollFails = 0;
       const text = await r.text();
       if (!text.trim()) return;
       /* ntfy returns NDJSON — one envelope per line. */
@@ -258,7 +274,22 @@ AIVA.CrewChat = (() => {
         await ingestEnvelope(env.message);
       }
       relayPollLastTs = maxTs + 1; // advance to avoid re-ingesting the same batch
-    } catch {}
+    } catch (e) {
+      /* Network blocked / timed out (Jio / corporate proxies / GFW
+         occasionally drop ntfy.sh). Rotate to the next mirror. */
+      relayPollFails++;
+      maybeRotateOnPollFail();
+    }
+  }
+  function maybeRotateOnPollFail() {
+    if (relayPollFails >= 2) {
+      const next = nextNtfyHost();
+      console.warn('[AIVA Chat] poll failed twice on host, rotating →', next);
+      relayPollFails = 0;
+      /* Also reconnect SSE on the new host. */
+      if (relaySource) { try { relaySource.close(); } catch {} }
+      setTimeout(relayConnect, 500);
+    }
   }
   async function ingestEnvelope(rawMessage) {
     try {
@@ -290,7 +321,7 @@ AIVA.CrewChat = (() => {
       /* ntfy returns events as JSON envelopes; event=message means a real
          publish (vs. keepalive). poll=1 replays recent history once on open
          so a pilot who was offline catches up without manual refresh. */
-      relaySource = new EventSource(`${NTFY_BASE}/${encodeURIComponent(topic)}/sse?poll=1`);
+      relaySource = new EventSource(`${NTFY_BASE_FN()}/${encodeURIComponent(topic)}/sse?poll=1`);
       /* Start the 5-second polling backfill alongside SSE. SSE delivers
          messages in real time when the connection's healthy; polling
          catches anything SSE missed (bounced connection, queued message
@@ -299,12 +330,25 @@ AIVA.CrewChat = (() => {
       if (relayPollTimer) clearInterval(relayPollTimer);
       relayPollTimer = setInterval(relayPollBackfill, 5000);
       relayPollBackfill(); // immediate first poll
-      relaySource.onopen = () => { relayState = 'connected'; notifyRelayStateChange(); };
+      let consecutiveErrors = 0;
+      relaySource.onopen = () => {
+        relayState = 'connected';
+        consecutiveErrors = 0;
+        notifyRelayStateChange();
+      };
       relaySource.onerror = () => {
         relayState = 'disconnected';
         notifyRelayStateChange();
-        /* Faster reconnect — 2 s. ntfy.sh bounces connections sometimes
-           but they come right back, so we shouldn't sit silent for 8 s. */
+        consecutiveErrors++;
+        /* If the current ntfy host fails 2+ times in a row, rotate to
+           the next mirror. Some ISPs route-block ntfy.sh entirely;
+           the community mirrors (envs.net, jonas-meyer.de) often work
+           when the primary doesn't. */
+        if (consecutiveErrors >= 2) {
+          const next = nextNtfyHost();
+          console.warn('[AIVA Chat] rotating ntfy host →', next);
+          consecutiveErrors = 0;
+        }
         setTimeout(relayConnect, 2000);
       };
       relaySource.onmessage = async (ev) => {

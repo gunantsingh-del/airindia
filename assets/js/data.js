@@ -1599,10 +1599,12 @@ AIVA.GATES = {
     medium: ['T2 10','T2 12'],
     large:  ['T2 4','T2 5','T2 6','T2 7','T2 8'],
   },
+  /* HYD has ONE integrated terminal — no T1/T2 split. Gates are plain
+     numbered stands. Domestic/intl operate from the same building. */
   HYD: {
-    small:  ['T1 35','T1 37','T1 39','T1 41','T1 43','T1 45','T1 47'],
-    medium: ['T1 27','T1 29','T1 31','T1 33'],
-    large:  ['T1 13','T1 15','T1 17','T1 19','T1 21','T1 23','T1 25'],
+    small:  ['Gate 35','Gate 37','Gate 39','Gate 41','Gate 43','Gate 45','Gate 47'],
+    medium: ['Gate 27','Gate 29','Gate 31','Gate 33'],
+    large:  ['Gate 13','Gate 15','Gate 17','Gate 19','Gate 21','Gate 23','Gate 25'],
   },
   MAA: {
     small:  ['T1 21','T1 23','T1 25','T1 27','T1 29'],

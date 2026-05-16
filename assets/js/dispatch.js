@@ -171,15 +171,24 @@ AIVA.Dispatch = (() => {
      ============================================================ */
   async function fetchMETAR(icao) {
     if (!icao) throw new Error('Need ICAO');
-    const url = `https://aviationweather.gov/api/data/metar?ids=${icao}&format=json&taf=false`;
-    const r = await fetch(proxy(url));
+    /* Go through our /api/wx Vercel proxy (server-side, no CORS, with
+       AWC → VATSIM → NOAA-TGFTP fallback chain). The old client-side
+       corsproxy.io path was hitting rate limits + aviationweather.gov
+       blocked the proxy IP — leaving pilots with "unable to fetch
+       METAR" toasts. The Vercel function caches for 60 s. */
+    let r;
+    try {
+      r = await fetch(`/api/wx?ids=${encodeURIComponent(icao)}`, { cache: 'no-store' });
+    } catch (e) {
+      throw new Error('METAR fetch network error: ' + (e.message || 'unknown'));
+    }
     if (!r.ok) throw new Error('METAR fetch HTTP ' + r.status);
     const arr = await r.json();
-    if (!arr.length) return null;
+    if (!Array.isArray(arr) || !arr.length) return null;
     const m = arr[0];
     return {
       icao,
-      raw: m.rawOb || m.raw_text || '',
+      raw: m.rawOb || m.raw_text || m.metar || '',
       temp: m.temp, dewp: m.dewp,
       wind: { dir: m.wdir, speed: m.wspd, gust: m.wgst },
       visibility: m.visib,

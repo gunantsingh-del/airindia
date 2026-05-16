@@ -92,7 +92,10 @@
     const fno = P.get('active_flight');
     if (!fno) {
       const today = ymd();
-      const bk = (P.get('roster_bookings', []) || []).find(b => b.date === today);
+      /* Skip completed sectors — the next un-flown booking is the
+         active one. Otherwise the EFB keeps showing the leg you just
+         filed a PSR for. */
+      const bk = (P.get('roster_bookings', []) || []).find(b => b.date === today && !b.completed);
       if (bk) return AIVA.findFlight(bk.fno);
       return null;
     }
@@ -1779,6 +1782,20 @@ The SimBrief OFP — what's on each page:
         });
         P.set('flights_logged', cur);
         P.set('psr_log', psrLog);
+        /* Mark today's roster booking for this fno as completed so
+           the dashboard "next flight" widget moves to the next sector
+           and the roster shows a ✓ on this leg. */
+        const today = ymd();
+        const bookings = P.get('roster_bookings', []) || [];
+        const bIdx = bookings.findIndex(b => b.date === today && b.fno === fp.fno && !b.completed);
+        if (bIdx >= 0) {
+          bookings[bIdx].completed = true;
+          bookings[bIdx].completedAt = Date.now();
+          P.set('roster_bookings', bookings);
+        }
+        /* Also clear active_flight pointer (the dashboard's "selected
+           sector" tile) so the next render advances to the next leg. */
+        if (P.get('active_flight') === fp.fno) P.remove('active_flight');
         /* Also mirror to a global queue so admin sees it */
         const adminQueue = AIVA.Store.get('admin_psr_queue', []);
         adminQueue.push({

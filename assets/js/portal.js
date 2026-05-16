@@ -607,7 +607,7 @@
       const myCall = P.pref('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
       /* Find this pilot's active sector from today's bookings */
       const today = ymd();
-      const bks = AIVA.Store.pilot(pilot.id).get('roster_bookings', []).filter(b => b.date === today);
+      const bks = AIVA.Store.pilot(pilot.id).get('roster_bookings', []).filter(b => b.date === today && !b.completed);
       const active = bks[0] ? AIVA.findFlight(bks[0].fno) : null;
       const dest = active ? (AIVA.airport(active.to)?.icao || active.to) : (info.dest || 'XXXX');
       const body = `PROGRESS · ${myCall}\nDESCENDING THROUGH FL100 INTO ${dest}\nGS ${info.gs||'?'} kt · ${info.lat?.toFixed?.(2) || '?'}, ${info.lon?.toFixed?.(2) || '?'}`;
@@ -619,7 +619,7 @@
     AIVA.FSUIPC?.on('landing', async (info) => {
       const myCall = P.pref('my_callsign','AIC' + (pilot.id || '001').replace(/[^0-9]/g,'').slice(-3));
       const today = ymd();
-      const bks = AIVA.Store.pilot(pilot.id).get('roster_bookings', []).filter(b => b.date === today);
+      const bks = AIVA.Store.pilot(pilot.id).get('roster_bookings', []).filter(b => b.date === today && !b.completed);
       const active = bks[0] ? AIVA.findFlight(bks[0].fno) : null;
       const destCity = active ? (AIVA.airport(active.to)?.city || active.to) : '';
       const body = `ON BLOCKS · ${myCall}${destCity ? ' at ' + destCity : ''}\nBlock complete · awaiting AOC confirmation`;
@@ -1081,8 +1081,8 @@
 
     modal({
       title: `${f.fno} · ${f.from} → ${f.to}`,
-      width: 880,
-      html: `
+      width: '880px',
+      body: `
         <div style="padding:6px 4px;">
           <div class="grid grid-4 mono" style="font-size:11.5px;line-height:1.55;gap:14px;margin-bottom:14px;">
             <div><span class="text-mute">DATE</span><br><b>${f.date || '—'}</b></div>
@@ -3093,7 +3093,7 @@
                 ${sorted.map(f => {
                   const lr = f.lndRate ?? f.summary?.landingRate;
                   return `
-                  <tr ${f.telemetry?.length ? `class="row-clickable" data-summary="${f._id}" style="cursor:pointer;"` : ''}>
+                  <tr class="row-clickable" data-summary="${f._id}" style="cursor:pointer;">
                     <td class="mono">${f.date || '—'}</td>
                     <td class="mono">${f.fno || '—'}</td>
                     <td>${f.from || ''} → ${f.to || ''}</td>
@@ -3103,7 +3103,7 @@
                     <td class="mono" style="color:${landingRateColor(lr)}">${lr ? Math.round(lr) + ' fpm' : '—'}</td>
                     <td class="mono">${f.gRate ? Number(f.gRate).toFixed(2) + 'g' : '—'}</td>
                     <td class="mono"><span class="pill pill-gold" style="font-size:9px;padding:2px 6px;">${f.network || 'OFFLINE'}</span></td>
-                    <td>${f.telemetry?.length ? `<button class="btn btn-ghost btn-sm" data-summary="${f._id}" title="Open flight summary">${I('search', 12)}</button>` : ''}<button class="btn btn-ghost btn-sm" data-del="${f._id}">${I('close', 12)}</button></td>
+                    <td><button class="btn btn-ghost btn-sm" data-summary="${f._id}" title="Open flight summary">${I('search', 12)}</button><button class="btn btn-ghost btn-sm" data-del="${f._id}">${I('close', 12)}</button></td>
                   </tr>`;
                 }).join('')}
               </tbody>
@@ -3370,7 +3370,7 @@
         $('#hubPreset', c).onclick = () => { $('#metarInput', c).value = AIVA.HUBS.map(h => AIVA.airport(h)?.icao || h).join(' '); $('#fetchMet', c).click(); };
         $('#metRt', c).onclick = () => {
           const today = ymd();
-          const bk = (P.get('roster_bookings',[]) || []).find(b => b.date === today);
+          const bk = (P.get('roster_bookings',[]) || []).find(b => b.date === today && !b.completed);
           if (!bk) return toast('No flight on today\'s roster', 'warn');
           const f = AIVA.findFlight(bk.fno);
           if (!f) return;
@@ -3623,7 +3623,7 @@
         $('#ntAll', c).onclick = () => { $('#ntInp', c).value = AIVA.HUBS.map(h => AIVA.airport(h)?.icao || h).join(' '); go(); };
         $('#ntRt',  c).onclick = () => {
           const today = ymd();
-          const bk = (P.get('roster_bookings',[]) || []).find(b => b.date === today);
+          const bk = (P.get('roster_bookings',[]) || []).find(b => b.date === today && !b.completed);
           if (!bk) return toast('No flight on today\'s roster', 'warn');
           const f = AIVA.findFlight(bk.fno);
           if (!f) return;

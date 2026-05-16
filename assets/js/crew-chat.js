@@ -219,9 +219,67 @@ AIVA.CrewChat = (() => {
         headers: { 'Content-Type':'text/plain' },
         body: JSON.stringify(envelope),
       });
+      /* Kick a poll immediately after sending — refreshes our own log
+         + nudges the ntfy server, which sometimes lazily flushes the
+         queue when polled. Helps slow-delivery cases. */
+      try { relayPollBackfill(); } catch {}
     } catch {
       /* network glitch — local + BC paths still delivered it for this device */
     }
+  }
+
+  /* Polling backfill for messages SSE missed (connection bounced,
+     keepalive timed out, network blip). Every 5 s we hit the JSON
+     endpoint with `since=<lastTs>` and ingest anything new. Belt-
+     and-suspenders next to SSE — covers the "I sent a message but
+     it took minutes to arrive" case the Chief Pilot kept hitting.
+
+     Cheap: one HTTP request per 5 s, returns nothing if there are
+     no new messages since last poll. */
+  let relayPollLastTs = Math.floor(Date.now() / 1000) - 60; // start 60s back so the first poll catches recent messages
+  let relayPollTimer = null;
+  async function relayPollBackfill() {
+    if (relayState === 'off') return;
+    try {
+      const topic = chatTopic();
+      const url = `${NTFY_BASE}/${encodeURIComponent(topic)}/json?poll=1&since=${relayPollLastTs}`;
+      const r = await fetch(url, { cache: 'no-store' });
+      if (!r.ok) return;
+      const text = await r.text();
+      if (!text.trim()) return;
+      /* ntfy returns NDJSON — one envelope per line. */
+      const lines = text.split('\n').filter(l => l.trim());
+      let maxTs = relayPollLastTs;
+      for (const line of lines) {
+        let env; try { env = JSON.parse(line); } catch { continue; }
+        if (env.time && env.time > maxTs) maxTs = env.time;
+        if (env.event && env.event !== 'message') continue;
+        if (!env.message) continue;
+        await ingestEnvelope(env.message);
+      }
+      relayPollLastTs = maxTs + 1; // advance to avoid re-ingesting the same batch
+    } catch {}
+  }
+  async function ingestEnvelope(rawMessage) {
+    try {
+      const wireObj = JSON.parse(rawMessage);
+      const msg = (wireObj && wireObj.enc === 1)
+        ? await decryptMessage(wireObj)
+        : wireObj;
+      if (!msg || !msg.id) return;
+      if (seenIds.has(msg.id)) return;
+      rememberSeen(msg.id);
+      if (msg.type === 'reaction') { applyRemoteReaction(msg); if (channel) try { channel.postMessage({ kind:'msg', msg }); } catch {} return; }
+      if (msg.type === 'avatar_set') { applyAvatarSet(msg); if (channel) try { channel.postMessage({ kind:'msg', msg }); } catch {} return; }
+      const log = readLog();
+      if (!log.find(x => x.id === msg.id)) {
+        log.push(msg);
+        log.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        writeLog(log);
+      }
+      listeners.forEach(cb => { try { cb(msg, readLog()); } catch(_){} });
+      if (channel) { try { channel.postMessage({ kind:'msg', msg }); } catch {} }
+    } catch {}
   }
   function relayConnect() {
     if (relayState === 'off') return;
@@ -232,6 +290,14 @@ AIVA.CrewChat = (() => {
          publish (vs. keepalive). poll=1 replays recent history once on open
          so a pilot who was offline catches up without manual refresh. */
       relaySource = new EventSource(`${NTFY_BASE}/${encodeURIComponent(topic)}/sse?poll=1`);
+      /* Start the 5-second polling backfill alongside SSE. SSE delivers
+         messages in real time when the connection's healthy; polling
+         catches anything SSE missed (bounced connection, queued message
+         on the ntfy server). Net effect: latency drops to ≤5 s worst
+         case instead of the multi-minute lag pilots were hitting. */
+      if (relayPollTimer) clearInterval(relayPollTimer);
+      relayPollTimer = setInterval(relayPollBackfill, 5000);
+      relayPollBackfill(); // immediate first poll
       relaySource.onopen = () => { relayState = 'connected'; notifyRelayStateChange(); };
       relaySource.onerror = () => {
         relayState = 'disconnected';
@@ -779,12 +845,18 @@ AIVA.CrewChat = (() => {
   (function injectCSS() {
     if (document.getElementById('cc-styles')) return;
     const css = `
-      /* Bottom-LEFT cluster so we don't collide with the EFB right tile
-         rail (which has the Pax Manifest tile at the bottom). Maharaja
-         and crew-chat are now horizontally adjacent on the LEFT edge of
-         the viewport, well away from the EFB's right-side tools. */
-      .cc-root { position: fixed; bottom: 22px; left: 96px; z-index: 92; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
-      .cc-root.cc-compact { bottom: 14px; left: 22px; }
+      /* Context-aware positioning:
+         • PORTAL (default): bottom-RIGHT of viewport — sidebar lives
+           on the LEFT, content fills the rest, no Pax Manifest tile,
+           so bottom-right corner is empty.
+         • EFB (body.efb-body): also bottom-right, but pulled in by ~90px
+           so we sit to the LEFT of the right tile rail (W&B / Perf /
+           ACARS / Journey / Pax M) instead of on top of it.
+         Maharaja launcher sits to our LEFT (right: 96px on portal /
+         right: 186px on EFB) per the spacing in chatbot.js. */
+      .cc-root { position: fixed; bottom: 22px; right: 22px; z-index: 92; font-family: var(--font-sans, Inter, system-ui, sans-serif); }
+      body.efb-body .cc-root { right: 112px; }   /* clear the tile rail */
+      .cc-root.cc-compact { bottom: 14px; right: 22px; }
       .cc-launch {
         /* Size-match Maharaja (64×64) so the two launchers visually
            belong together — same proportions, no asymmetric clustering. */
@@ -819,7 +891,7 @@ AIVA.CrewChat = (() => {
          Re-assert display:none for the hidden state. */
       .cc-badge[hidden] { display: none !important; }
       .cc-drawer {
-        position: fixed; bottom: 100px; left: 22px;
+        position: fixed; bottom: 100px; right: 22px;
         width: 380px; max-width: calc(100vw - 44px);
         height: 520px; max-height: calc(100vh - 140px);
         background: rgba(14, 9, 12, .96);

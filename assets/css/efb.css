@@ -290,26 +290,24 @@ body.efb-body:not(:has(.efb-home-v2)) {
    ==================================================================== */
 .app-grid { display: flex; flex-direction: column; gap: 22px; }
 .app-folder {
-  background: rgba(10,7,9,.32);
-  border: 1px solid rgba(255,225,89,.16);
-  border-radius: 18px;
+  background: rgba(20, 14, 17, .55);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
   padding: 14px 14px 16px;
-  backdrop-filter: blur(8px);
 }
 .folder-label {
   display: flex; align-items: center; gap: 8px;
   font-family: var(--font-mono);
-  font-size: 10.5px; letter-spacing: .22em;
+  font-size: 10px; letter-spacing: .16em;
   text-transform: uppercase;
-  color: rgba(255,225,89,.78);
-  padding: 4px 4px 12px;
-  border-bottom: 1px dashed rgba(255,225,89,.18);
-  margin-bottom: 14px;
+  color: rgba(255,255,255,.55);
+  padding: 2px 4px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  margin-bottom: 12px;
 }
 .folder-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: linear-gradient(135deg, #FFE9A8, #C7A56C);
-  box-shadow: 0 0 8px rgba(255,225,89,.6);
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #C7A56C;
 }
 .folder-count {
   margin-left: auto;
@@ -349,10 +347,11 @@ body.efb-body:not(:has(.efb-home-v2)) {
 .efb-home.efb-home-v2 {
   width: 100vw; height: 100vh; height: 100dvh;
   padding: 0; margin: 0; overflow: hidden;
-  background:
-    radial-gradient(ellipse at 50% 0%, rgba(255,255,255,.04) 0%, transparent 50%),
-    radial-gradient(ellipse at top, #C8102E 0%, #8B1A2B 45%, #5A0815 100%);
-  color: #FFFFFF;
+  /* Flat deep-aubergine background — no bright red wallpaper. Conservative,
+     less "look at me" presentation; the content is the focus, not the
+     chrome. Brand red still shows up on accent strips + the brand logo. */
+  background: #14080C;
+  color: #F0E8D6;
 }
 .efb-home.efb-home-v2::before,
 .efb-home.efb-home-v2::after { display: none; }
@@ -416,57 +415,56 @@ body.efb-body:not(:has(.efb-home-v2)) {
    small gold label above, no seconds. The thin gold divider in
    between is the Vista "window frame" motif used as a hairline.
    ============================================================ */
-.efb2-clocks { justify-self: start; display: flex; flex-direction: column; gap: 8px; }
+/* Subtle clocks — flat, small, no glow, no chunky background pill. */
+.efb2-clocks { justify-self: start; display: flex; flex-direction: column; gap: 4px; }
 .efb2-clocks .clock-row {
-  display: inline-flex; align-items: stretch; gap: 18px;
-  padding: 6px 14px;
-  background: rgba(20,8,12,.4);
-  border: 1px solid rgba(255,225,89,.18);
-  border-radius: 14px;
-  box-shadow: 0 4px 18px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.04);
+  display: inline-flex; align-items: baseline; gap: 14px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 .efb2-clocks .clock-cell {
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  min-width: 68px;
+  display: inline-flex; align-items: baseline; gap: 6px;
+  min-width: 0;
 }
 .efb2-clocks .clock-lbl {
-  font-family: var(--font-display);
-  font-size: 9.5px; letter-spacing: .28em; text-transform: uppercase;
-  color: #FFE9A8;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 9px; letter-spacing: .14em; text-transform: uppercase;
+  color: rgba(255,255,255,.5);
+  font-weight: 500;
 }
 .efb2-clocks .clock-val {
   font-family: var(--font-mono);
-  font-size: clamp(22px, 2.6vw, 30px);
-  font-weight: 600;
-  letter-spacing: .04em;
-  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .02em;
+  color: rgba(255,255,255,.9);
   font-variant-numeric: tabular-nums;
   line-height: 1;
-  text-shadow: 0 2px 10px rgba(0,0,0,.35);
+  text-shadow: none;
 }
 .efb2-clocks .clock-divider {
-  width: 1px;
-  background: linear-gradient(180deg, transparent, rgba(255,225,89,.4), transparent);
-  align-self: stretch;
+  display: none; /* no decorative divider in subtle mode */
 }
 .efb2-clocks .clock-date {
-  font-family: var(--font-display);
-  font-size: 11px; letter-spacing: .22em; text-transform: uppercase;
-  color: rgba(255,255,255,.6);
-  font-weight: 500;
-  margin-left: 2px;
+  font-family: var(--font-mono);
+  font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase;
+  color: rgba(255,255,255,.42);
+  font-weight: 400;
+  margin-left: 0;
 }
 
-/* Welcome strip — "Good morning, Captain Gunant" under the clocks */
+/* Welcome strip — quieter weight, conservative. */
 .efb-welcome {
-  margin-top: 6px;
-  display: flex; align-items: baseline; gap: 8px;
-  font-family: var(--font-display);
+  margin-top: 4px;
+  display: flex; align-items: baseline; gap: 6px;
+  font-family: var(--font-sans);
 }
-.efb-welcome .ew-greet { font-size: 13px; color: rgba(255,255,255,.6); }
+.efb-welcome .ew-greet { font-size: 11.5px; color: rgba(255,255,255,.5); font-weight: 400; }
 .efb-welcome .ew-name  {
-  font-size: 14.5px; font-weight: 600; color: #FFE9A8;
+  font-size: 12.5px; font-weight: 500; color: rgba(255,233,168,.85);
   letter-spacing: .01em;
 }
 
@@ -582,79 +580,57 @@ body.efb-body:not(:has(.efb-home-v2)) {
      • Air India Sans for tile labels (sentence case, no shouty
        ALL-CAPS mono)
    ============================================================ */
+/* === Flat conservative pass ===
+   • One solid surface, no backdrop-filter
+   • One hairline border, no inset highlights
+   • No outer glow, no corner-accent gimmicks
+   • Hover = subtle border + background bump only, no lift / no shadow */
 .efb2-rail {
-  display: flex; flex-direction: column; gap: 10px;
-  background:
-    linear-gradient(180deg, rgba(168,16,31,.12) 0%, rgba(74,27,65,.10) 100%),
-    rgba(0,0,0,.28);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  border: 1px solid rgba(255,225,89,.16);
-  border-radius: 18px;
-  padding: 12px 10px;
+  display: flex; flex-direction: column; gap: 8px;
+  background: rgba(14, 9, 11, .78);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 10px 8px;
   overflow: hidden;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.05),
-    0 16px 36px rgba(0,0,0,.36);
 }
 .efb2-tile {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 6px;
-  padding: 12px 4px;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.08) 0%, rgba(255,255,255,.03) 100%);
-  border: 1px solid rgba(255,255,255,.10);
-  border-radius: 13px;
-  text-decoration: none; color: #F8F1E4;
+  padding: 10px 4px;
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px;
+  text-decoration: none; color: #E8DEC8;
   flex: 1 1 0;
   min-height: 0;
   position: relative;
-  overflow: hidden;
-  transition: background .18s var(--ease, ease), transform .18s var(--ease, ease), border-color .18s ease, box-shadow .18s ease;
+  transition: background .14s ease, border-color .14s ease, color .14s ease;
 }
-/* "Vista" window-frame gold corner accents — quietly suggest the
-   shape on hover only, so the resting state stays clean. */
-.efb2-tile::before, .efb2-tile::after {
-  content: '';
-  position: absolute;
-  width: 12px; height: 12px;
-  border: 1px solid transparent;
-  transition: border-color .18s ease;
-}
-.efb2-tile::before { top: 5px; left: 5px; border-top-color: transparent; border-left-color: transparent; border-radius: 6px 0 0 0; }
-.efb2-tile::after  { bottom: 5px; right: 5px; border-bottom-color: transparent; border-right-color: transparent; border-radius: 0 0 6px 0; }
 .efb2-tile:hover {
-  background:
-    linear-gradient(180deg, rgba(255,225,89,.10) 0%, rgba(168,16,31,.12) 100%);
-  border-color: rgba(255,225,89,.45);
-  transform: translateY(-2px);
-  box-shadow: 0 14px 28px rgba(0,0,0,.42), 0 0 0 1px rgba(255,225,89,.18);
+  background: rgba(255,255,255,.05);
+  border-color: rgba(255,225,89,.22);
 }
-.efb2-tile:hover::before { border-top-color: rgba(255,225,89,.7); border-left-color: rgba(255,225,89,.7); }
-.efb2-tile:hover::after  { border-bottom-color: rgba(255,225,89,.7); border-right-color: rgba(255,225,89,.7); }
-.efb2-tile:active { transform: translateY(0) scale(.97); }
+.efb2-tile:active { background: rgba(255,255,255,.07); }
 .efb2-tile .ico {
-  width: 38px; height: 38px;
-  border-radius: 11px;
+  width: 30px; height: 30px;
+  border-radius: 8px;
   display: grid; place-items: center;
-  background:
-    radial-gradient(circle at 30% 25%, rgba(255,225,89,.18), rgba(255,255,255,.05) 70%);
-  color: #FFE9A8;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+  background: transparent;
+  color: rgba(255,225,89,.78);
 }
-.efb2-tile:hover .ico { color: #FFFFFF; }
+.efb2-tile:hover .ico { color: #FFE9A8; }
 .efb2-tile .nm {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: 10.5px;
-  letter-spacing: .04em;
-  font-weight: 600;
-  color: rgba(248,241,228,.82);
+  letter-spacing: .02em;
+  font-weight: 500;
+  color: rgba(248,241,228,.78);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.efb2-tile:hover .nm { color: #FFFFFF; }
+.efb2-tile:hover .nm { color: rgba(255,255,255,.95); }
 .efb2-tile .live-dot {
-  position:absolute; top:6px; right:6px; width:7px; height:7px; border-radius:50%;
-  background: #4ADE80; box-shadow: 0 0 6px rgba(74,222,128,.7);
+  position:absolute; top:6px; right:6px; width:6px; height:6px; border-radius:50%;
+  background: #4ADE80;
 }
 
 /* ----- Centre map area ----- */
@@ -742,24 +718,23 @@ body.efb-body:not(:has(.efb-home-v2)) {
 }
 .efb-map-prompt { display: grid; place-items: center; background: #0A0709; }
 
-/* Stats overlay — clean white text on translucent black, NO gold */
+/* Stats overlay — minimal: solid surface, hairline border, no blur */
 .efb2-stats {
   position: absolute; top: 14px; left: 14px; z-index: 5;
-  display: flex; gap: 16px;
-  background: rgba(8,5,7,.78);
-  backdrop-filter: blur(14px) saturate(140%);
-  border: 1px solid rgba(255,255,255,.12);
-  border-radius: 12px;
-  padding: 12px 16px;
+  display: flex; gap: 14px;
+  background: rgba(8,5,7,.82);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 8px;
+  padding: 10px 14px;
 }
-.ms-stat { text-align: center; min-width: 56px; }
+.ms-stat { text-align: center; min-width: 52px; }
 .ms-stat .lbl {
-  font-family: var(--font-mono); font-size: 9px; letter-spacing: .22em;
-  color: rgba(255,255,255,.55); text-transform: uppercase;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: .14em;
+  color: rgba(255,255,255,.5); text-transform: uppercase;
 }
 .ms-stat .val {
-  font-family: var(--font-mono); font-weight: 700;
-  font-size: 22px; line-height: 1; color: #FFFFFF;
+  font-family: var(--font-mono); font-weight: 500;
+  font-size: 18px; line-height: 1; color: rgba(255,255,255,.95);
   margin-top: 4px;
 }
 .ms-stat .unit {
@@ -769,18 +744,17 @@ body.efb-body:not(:has(.efb-home-v2)) {
 
 .efb2-livepill {
   position: absolute; top: 14px; right: 14px; z-index: 5;
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 7px 14px;
-  background: rgba(8,5,7,.78);
-  backdrop-filter: blur(14px);
-  border: 1px solid rgba(255,255,255,.12);
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 12px;
+  background: rgba(8,5,7,.82);
+  border: 1px solid rgba(255,255,255,.06);
   border-radius: 99px;
-  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em;
-  color: #FFFFFF;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em;
+  color: rgba(255,255,255,.85);
 }
-.efb2-livepill .dot { width: 7px; height: 7px; border-radius: 50%; background: #F87171; box-shadow: 0 0 6px #F87171; }
-.efb2-livepill.on { border-color: rgba(74,222,128,.4); }
-.efb2-livepill.on .dot { background: #4ADE80; box-shadow: 0 0 6px #4ADE80; animation: pulse 1.5s infinite; }
+.efb2-livepill .dot { width: 6px; height: 6px; border-radius: 50%; background: #F87171; }
+.efb2-livepill.on { border-color: rgba(74,222,128,.3); }
+.efb2-livepill.on .dot { background: #4ADE80; }
 
 .efb2-nearby {
   position: absolute; bottom: 14px; left: 14px; z-index: 5;

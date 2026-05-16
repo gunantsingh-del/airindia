@@ -312,10 +312,11 @@ AIVA.Chatbot = (() => {
   if (document.getElementById('mh-style')) return;
   const css = `
     .mh-launcher {
-      /* Moved from bottom-RIGHT to bottom-LEFT so we don't sit on top
-         of the EFB right tile rail (Pax Manifest etc.). Crew-chat
-         launcher sits to the RIGHT of us at left: 96px. */
-      position: fixed; left: 22px; bottom: 22px;
+      /* Bottom-RIGHT cluster — sits to the LEFT of the crew-chat
+         launcher. On portal that's right: 96px (clear of viewport edge).
+         On EFB, both icons shift inward by 90px so we clear the right
+         tile rail. */
+      position: fixed; right: 96px; bottom: 22px;
       width: 64px; height: 64px;
       border-radius: 50%;
       background: linear-gradient(135deg, #FFE9A8 0%, #E0B65F 60%, #876C28 100%);
@@ -326,12 +327,13 @@ AIVA.Chatbot = (() => {
       overflow: hidden;
       border: 2px solid rgba(255,255,255,.4);
     }
+    body.efb-body .mh-launcher { right: 186px; }   /* EFB: clear the right tile rail */
     .mh-launcher img { display: block; }
     .mh-head-art img { display:block; border-radius: 50%; background:rgba(255,255,255,.06); }
     .mh-launcher.hidden { display: none; }
     .mh-launcher:hover { transform: scale(1.05); }
     .mh-panel {
-      position: fixed; left: 22px; bottom: 22px;
+      position: fixed; right: 96px; bottom: 22px;
       width: 380px; max-width: 92vw;
       height: 580px; max-height: 80vh;
       background: var(--surface-glass);

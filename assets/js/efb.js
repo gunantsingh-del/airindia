@@ -405,9 +405,11 @@
     setupLiveMap(home);
 
     /* ============ Telemetry sampler ============
-       While a flight is in progress, capture FSUIPC telemetry every 10s.
-       Used at end-of-sector for PSR discrepancy detection (overspeed below FL100,
-       sharp turns, sustained altitude drops, hard landing). */
+       While a flight is in progress, capture telemetry every 10 s with
+       the FULL field set (position, speeds, attitude, flaps, gear,
+       lights, AP state, engines, fuel). Drives the PSR discrepancy
+       detector AND the post-flight summary charts. Cap at 2,000
+       samples (~5 hours @ 10 s) so localStorage stays sane on long-haul. */
     {
       const fp_t = P.get('flight_in_progress');
       if (fp_t) {
@@ -419,15 +421,46 @@
           const series = P.get(sampleKey, []);
           series.push({
             t: Date.now(),
-            lat: live.lat, lon: live.lon,
-            alt: live.alt, ias: live.ias, gs: live.gs, vs: live.vs,
+            /* Position + motion */
+            lat: live.lat, lon: live.lon, alt: live.alt, agl: live.agl,
+            ias: live.ias, tas: live.tas, gs: live.gs, vs: live.vs,
             hdg: live.hdg, bank: live.bank || 0,
+            /* Configuration */
             onGround: live.onGround,
+            parkingBrake: live.parkingBrake,
+            flapsIdx: live.flapsIdx, flapsPct: live.flapsPct,
+            gearHandle: live.gearHandle, gearPct: live.gearPct,
+            spoilers: live.spoilers, spoilersArmed: live.spoilersArmed,
+            /* Power */
+            n1_1: live.n1_1, n1_2: live.n1_2,
+            eng1: live.eng1, eng2: live.eng2, eng3: live.eng3, eng4: live.eng4,
+            throttle1: live.throttle1,
+            /* AP / autothrottle */
+            apMaster: live.apMaster, autoThrottle: live.autoThrottle,
+            apAlt: live.apAlt, apHdg: live.apHdg,
+            /* Lights */
+            lightBeacon: live.lightBeacon, lightNav: live.lightNav,
+            lightStrobe: live.lightStrobe, lightLanding: live.lightLanding,
+            lightTaxi: live.lightTaxi, lightLogo: live.lightLogo,
+            /* Avionics + warnings */
+            xpdrCode: live.xpdrCode, xpdrState: live.xpdrState,
+            stallWarn: live.stallWarn, overspeedWarn: live.overspeedWarn,
+            /* Fuel + weight */
+            fuel: live.fuel, gw: live.gw, baroInHg: live.baroInHg,
           });
-          /* Cap at 2,000 samples (~5 hours of 10s sampling) to keep localStorage sane */
           if (series.length > 2000) series.shift();
           P.set(sampleKey, series);
         }, 10_000);
+        /* Mirror the event log too — flap changes, engine starts,
+           AP engage/disengage, light toggles. Captured continuously
+           by AIVA.FSUIPC; we snapshot every 30 s into the flight's
+           own copy so the post-flight summary has a permanent record. */
+        const eventKey = 'events_' + fp_t.fno;
+        const evtSampler = setInterval(() => {
+          if (!P.get('flight_in_progress')) { clearInterval(evtSampler); return; }
+          const evts = AIVA.FSUIPC?.getEventLog?.() || [];
+          P.set(eventKey, evts);
+        }, 30_000);
       }
     }
 
@@ -1689,10 +1722,33 @@ The SimBrief OFP — what's on each page:
           toast('Reasoning required for all findings before filing.', 'warn');
           return;
         }
-        /* File the sector + PSR */
+        /* File the sector + PSR. Bundle the full telemetry trace +
+           event log INTO the flight record so the post-flight summary
+           survives even after psr_log gets pruned. Sub-sampled to ~120
+           rows (every Nth sample) so we don't blow localStorage on a
+           5h sector. */
         const cur = P.get('flights_logged', []);
         const psrLog = P.get('psr_log', []);
         const psrId = AIVA.U.uid();
+        const eventLog = P.get('events_' + fp.fno, []);
+        /* Touchdown sample = last on-ground frame after airborne. */
+        const tdSample = telemetry.findLast?.(t => t.onGround && (telemetry.find(x => !x.onGround && x.t < t.t))) || null;
+        /* Sub-sample telemetry to keep flight record < 60 KB. Keep
+           every Nth sample so the chart still shows the full profile. */
+        const sub = telemetry.length > 120
+          ? telemetry.filter((_, i) => i % Math.ceil(telemetry.length / 120) === 0)
+          : telemetry.slice();
+        const summary = {
+          /* Top-level stats */
+          peakAlt:  Math.round(Math.max(0, ...telemetry.map(t => t.alt || 0))),
+          peakIas:  Math.round(Math.max(0, ...telemetry.map(t => t.ias || 0))),
+          peakTas:  Math.round(Math.max(0, ...telemetry.map(t => t.tas || 0))),
+          peakGs:   Math.round(Math.max(0, ...telemetry.map(t => t.gs  || 0))),
+          maxBank:  Math.round(Math.max(0, ...telemetry.map(t => Math.abs(t.bank || 0)))),
+          landingRate: tdSample?.vs ? Math.round(tdSample.vs) : null,
+          startFuel:   telemetry[0]?.fuel || null,
+          endFuel:     telemetry[telemetry.length-1]?.fuel || null,
+        };
         cur.push({
           _id: AIVA.U.uid(),
           date: ymd(new Date(fp.startedAt)),
@@ -1703,6 +1759,13 @@ The SimBrief OFP — what's on each page:
           psrId,
           psrStatus: 'pending',
           findings: reasons.length,
+          summary,
+          telemetry: sub,          // sub-sampled trace for charts
+          events: eventLog,        // ENG START / FLAPS / AP / LIGHTS / WoW / TD
+          startedAt: fp.startedAt,
+          endedAt: Date.now(),
+          findingDetails: reasons,
+          remarks: $('#psrRemarks', c).value.trim(),
         });
         psrLog.push({
           id: psrId,
@@ -1727,6 +1790,7 @@ The SimBrief OFP — what's on each page:
         AIVA.Store.set('admin_psr_queue', adminQueue);
         P.remove('flight_in_progress');
         P.remove('telemetry_' + fp.fno);
+        P.remove('events_' + fp.fno);
         AIVA.CrewChat?.event(`closed sector ${f.fno} ${f.from} → ${f.to} · PSR filed${reasons.length ? ` with ${reasons.length} finding${reasons.length===1?'':'s'}` : ''}`, { fno: f.fno, psrId });
         toast(`PSR filed — sector logged. Admin review pending.`, 'ok');
         location.hash = '';

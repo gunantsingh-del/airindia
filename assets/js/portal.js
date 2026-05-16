@@ -997,6 +997,148 @@
     window.open(u, '_blank', 'noopener');
     toast('SimBrief dispatch opened.', 'ok');
   }
+  /* ============================================================
+     Flight summary modal — opens from My Flights when the row has
+     telemetry captured. Renders:
+       • Sector header (route, A/C, block, distance)
+       • Stat grid (peak ALT/IAS/TAS/GS, max bank, landing rate)
+       • Speed + altitude chart (inline SVG, no chart library)
+       • Phase / event log (engine start, flaps, gear, lights, AP)
+       • PSR findings + remarks
+     All data lives on the flight record itself — survives across
+     psr_log resets and admin queue prunes. */
+  function openFlightSummary(f) {
+    const fromA = AIVA.airport(f.from), toA = AIVA.airport(f.to);
+    const s = f.summary || {};
+    const telem = f.telemetry || [];
+    const events = f.events || [];
+
+    /* Build the speed+altitude chart inline. SVG so it's printable +
+       no chart-library dependency. */
+    const chartW = 760, chartH = 220, padL = 38, padR = 40, padT = 12, padB = 22;
+    const innerW = chartW - padL - padR;
+    const innerH = chartH - padT - padB;
+    const tMin = telem.length ? telem[0].t : 0;
+    const tMax = telem.length ? telem[telem.length-1].t : 1;
+    const tSpan = Math.max(1, tMax - tMin);
+    const altMax = Math.max(100, ...telem.map(t => t.alt || 0));
+    const iasMax = Math.max(50,  ...telem.map(t => t.ias || 0));
+    const xAt = (t) => padL + ((t - tMin) / tSpan) * innerW;
+    const yAlt = (a) => padT + innerH - ((a / altMax) * innerH * 0.95);
+    const yIas = (v) => padT + innerH - ((v / iasMax) * innerH * 0.95);
+    const altPath = telem.map((p, i) => `${i===0?'M':'L'}${xAt(p.t).toFixed(1)},${yAlt(p.alt || 0).toFixed(1)}`).join('');
+    const iasPath = telem.map((p, i) => `${i===0?'M':'L'}${xAt(p.t).toFixed(1)},${yIas(p.ias || 0).toFixed(1)}`).join('');
+
+    /* Ground / airborne shading. */
+    const groundSegs = [];
+    let segStart = null;
+    telem.forEach((p, i) => {
+      if (p.onGround && segStart == null) segStart = p.t;
+      else if (!p.onGround && segStart != null) { groundSegs.push([segStart, telem[i-1]?.t || p.t]); segStart = null; }
+    });
+    if (segStart != null) groundSegs.push([segStart, telem[telem.length-1].t]);
+
+    const chartHtml = telem.length ? `
+      <svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%;height:auto;display:block;">
+        ${groundSegs.map(([a,b]) => `<rect x="${xAt(a)}" y="${padT}" width="${xAt(b)-xAt(a)}" height="${innerH}" fill="rgba(255,225,89,.06)"/>`).join('')}
+        <!-- gridlines -->
+        ${[0.25,0.5,0.75].map(f => `<line x1="${padL}" y1="${padT+innerH*f}" x2="${padL+innerW}" y2="${padT+innerH*f}" stroke="rgba(255,255,255,.08)" stroke-width="1"/>`).join('')}
+        <!-- ALT line (gold) -->
+        <path d="${altPath}" stroke="#FFE159" stroke-width="2" fill="none"/>
+        <!-- IAS line (red) -->
+        <path d="${iasPath}" stroke="#E61926" stroke-width="2" fill="none"/>
+        <!-- Y-axis labels -->
+        <text x="${padL-6}" y="${padT+10}" fill="rgba(255,225,89,.7)" font-size="10" font-family="ui-monospace,monospace" text-anchor="end">${Math.round(altMax).toLocaleString()} ft</text>
+        <text x="${padL-6}" y="${padT+innerH}" fill="rgba(255,225,89,.7)" font-size="10" font-family="ui-monospace,monospace" text-anchor="end">0</text>
+        <text x="${padL+innerW+6}" y="${padT+10}" fill="rgba(230,25,38,.85)" font-size="10" font-family="ui-monospace,monospace">${Math.round(iasMax)} kt</text>
+        <text x="${padL+innerW+6}" y="${padT+innerH}" fill="rgba(230,25,38,.85)" font-size="10" font-family="ui-monospace,monospace">0</text>
+        <!-- legend -->
+        <g transform="translate(${padL+10},${padT+8})">
+          <line x1="0" y1="0" x2="14" y2="0" stroke="#FFE159" stroke-width="2"/>
+          <text x="18" y="3" fill="rgba(255,225,89,.85)" font-size="10" font-family="ui-monospace,monospace">ALTITUDE</text>
+          <line x1="80" y1="0" x2="94" y2="0" stroke="#E61926" stroke-width="2"/>
+          <text x="98" y="3" fill="rgba(230,25,38,.95)" font-size="10" font-family="ui-monospace,monospace">IAS</text>
+        </g>
+      </svg>` : `<div class="text-mute" style="padding:30px;text-align:center;">No telemetry samples for this sector — chart unavailable.</div>`;
+
+    const sevColor = { info:'rgba(255,255,255,.78)', ok:'#7DD08F', warn:'#FCD34D', bad:'#FCA5A5' };
+    const evtHtml = events.length ? events.map(e => {
+      const t = new Date(e.ts);
+      const z = String(t.getUTCHours()).padStart(2,'0')+':'+String(t.getUTCMinutes()).padStart(2,'0')+':'+String(t.getUTCSeconds()).padStart(2,'0');
+      return `<div style="display:flex;gap:14px;padding:4px 14px;border-bottom:1px solid rgba(255,255,255,.04);font-family:var(--font-mono);font-size:11.5px;">
+        <span style="color:rgba(255,225,89,.6);min-width:60px;">${z}z</span>
+        <span style="color:${sevColor[e.severity] || sevColor.info};">${(e.label||'').replace(/</g,'&lt;')}</span>
+      </div>`;
+    }).join('') : '<div class="text-mute" style="padding:14px;">No telemetry events recorded.</div>';
+
+    const findingsHtml = (f.findingDetails || []).map(x => `
+      <div style="padding:8px 0;border-top:1px solid rgba(255,255,255,.06);">
+        <div class="row gap-2"><span class="pill pill-${x.sev === 'red' ? 'red' : 'warn'}" style="font-size:9px;">${(x.sev||'').toUpperCase()}</span><b>${x.title}</b></div>
+        <div class="text-mute" style="font-size:11.5px;margin-top:3px;">${x.detail}</div>
+        ${x.reasoning ? `<div class="mono" style="font-size:11.5px;color:#FFE9A8;margin-top:3px;">"${x.reasoning}"</div>` : ''}
+      </div>
+    `).join('');
+
+    modal({
+      title: `${f.fno} · ${f.from} → ${f.to}`,
+      width: 880,
+      html: `
+        <div style="padding:6px 4px;">
+          <div class="grid grid-4 mono" style="font-size:11.5px;line-height:1.55;gap:14px;margin-bottom:14px;">
+            <div><span class="text-mute">DATE</span><br><b>${f.date || '—'}</b></div>
+            <div><span class="text-mute">AIRCRAFT</span><br><b>${f.ac || '—'}</b></div>
+            <div><span class="text-mute">BLOCK</span><br><b>${fmtMins(f.durMins)}</b></div>
+            <div><span class="text-mute">DISTANCE</span><br><b>${f.dist?.toLocaleString() || '—'} nm</b></div>
+            <div><span class="text-mute">FROM</span><br><b>${fromA?.iata || f.from}</b> <span class="text-mute">${fromA?.city || ''}</span></div>
+            <div><span class="text-mute">TO</span><br><b>${toA?.iata || f.to}</b> <span class="text-mute">${toA?.city || ''}</span></div>
+            <div><span class="text-mute">NETWORK</span><br><b>${f.network || 'OFFLINE'}</b></div>
+            <div><span class="text-mute">PSR</span><br><b style="color:${f.psrStatus==='accepted'?'#7DD08F':f.psrStatus==='rejected'?'#FCA5A5':'#FCD34D'};">${(f.psrStatus||'—').toUpperCase()}</b></div>
+          </div>
+
+          <div class="card" style="padding:14px 16px;background:rgba(255,225,89,.04);border-color:rgba(255,225,89,.22);">
+            <div class="eyebrow" style="color:var(--ai-gold-bright);">Performance peaks</div>
+            <div class="grid grid-4 mono mt-3" style="font-size:12px;line-height:1.6;gap:14px;">
+              <div><span class="text-mute">MAX ALT</span><br><b>${(s.peakAlt||0).toLocaleString()} ft</b></div>
+              <div><span class="text-mute">PEAK IAS</span><br><b>${s.peakIas||0} kt</b></div>
+              <div><span class="text-mute">PEAK TAS</span><br><b>${s.peakTas||0} kt</b></div>
+              <div><span class="text-mute">PEAK GS</span><br><b>${s.peakGs||0} kt</b></div>
+              <div><span class="text-mute">MAX BANK</span><br><b>${s.maxBank||0}°</b></div>
+              <div><span class="text-mute">LANDING RATE</span><br><b style="color:${landingRateColor(s.landingRate)};">${s.landingRate ?? '—'}${s.landingRate?' fpm':''}</b></div>
+              <div><span class="text-mute">FUEL USED</span><br><b>${s.startFuel != null && s.endFuel != null ? Math.round(s.startFuel - s.endFuel).toLocaleString() + ' kg' : '—'}</b></div>
+              <div><span class="text-mute">SAMPLES</span><br><b>${telem.length}</b></div>
+            </div>
+          </div>
+
+          <div class="card mt-3" style="padding:14px 16px;">
+            <div class="eyebrow">Altitude + speed profile</div>
+            <div class="text-mute" style="font-size:11px;margin-top:4px;">Gold = altitude (ft) · Red = indicated airspeed (kt) · Gold-tinted bands = on-ground segments</div>
+            <div class="mt-3" style="background:rgba(8,5,7,.7);border-radius:8px;padding:6px;">${chartHtml}</div>
+          </div>
+
+          ${(f.findingDetails || []).length ? `
+          <div class="card mt-3" style="padding:14px 16px;background:rgba(252,165,165,.04);border-color:rgba(252,165,165,.25);">
+            <div class="eyebrow" style="color:#FCA5A5;">PSR findings (${(f.findingDetails||[]).length})</div>
+            ${findingsHtml}
+          </div>` : ''}
+
+          ${f.remarks ? `
+          <div class="card mt-3" style="padding:14px 16px;">
+            <div class="eyebrow">Pilot remarks</div>
+            <div class="mt-2" style="font-size:13px;line-height:1.55;color:rgba(255,255,255,.85);white-space:pre-wrap;">${(f.remarks||'').replace(/</g,'&lt;')}</div>
+          </div>` : ''}
+
+          <div class="card mt-3" style="padding:0;">
+            <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+              <div class="eyebrow">Telemetry event log (${events.length} events)</div>
+              <div class="text-mute" style="font-size:11px;margin-top:3px;">Engine start, flaps, gear, lights, autopilot, transponder, warnings, touchdown</div>
+            </div>
+            <div style="max-height:280px;overflow-y:auto;padding:6px 0;">${evtHtml}</div>
+          </div>
+        </div>
+      `,
+    });
+  }
+
   function landingRateColor(v) {
     if (v == null) return 'var(--text-mute)';
     const abs = Math.abs(v);
@@ -2948,26 +3090,37 @@
                 <th>Block</th><th>LND</th><th>G</th><th>Network</th><th></th>
               </tr></thead>
               <tbody>
-                ${sorted.map(f => `
-                  <tr>
+                ${sorted.map(f => {
+                  const lr = f.lndRate ?? f.summary?.landingRate;
+                  return `
+                  <tr ${f.telemetry?.length ? `class="row-clickable" data-summary="${f._id}" style="cursor:pointer;"` : ''}>
                     <td class="mono">${f.date || '—'}</td>
                     <td class="mono">${f.fno || '—'}</td>
                     <td>${f.from || ''} → ${f.to || ''}</td>
                     <td>${f.ac || '—'}</td>
                     <td class="mono">${f.reg || '—'}</td>
                     <td class="mono">${fmtMins(f.durMins)}</td>
-                    <td class="mono" style="color:${landingRateColor(f.lndRate)}">${f.lndRate ? Math.round(f.lndRate) + ' fpm' : '—'}</td>
+                    <td class="mono" style="color:${landingRateColor(lr)}">${lr ? Math.round(lr) + ' fpm' : '—'}</td>
                     <td class="mono">${f.gRate ? Number(f.gRate).toFixed(2) + 'g' : '—'}</td>
                     <td class="mono"><span class="pill pill-gold" style="font-size:9px;padding:2px 6px;">${f.network || 'OFFLINE'}</span></td>
-                    <td><button class="btn btn-ghost btn-sm" data-del="${f._id}">${I('close', 12)}</button></td>
-                  </tr>
-                `).join('')}
+                    <td>${f.telemetry?.length ? `<button class="btn btn-ghost btn-sm" data-summary="${f._id}" title="Open flight summary">${I('search', 12)}</button>` : ''}<button class="btn btn-ghost btn-sm" data-del="${f._id}">${I('close', 12)}</button></td>
+                  </tr>`;
+                }).join('')}
               </tbody>
             </table>
           `}));
-          c.querySelectorAll('[data-del]').forEach(btn => btn.onclick = () => {
+          c.querySelectorAll('[data-del]').forEach(btn => btn.onclick = (e) => {
+            e.stopPropagation();
+            if (!confirm('Delete this flight from your log?')) return;
             const arr = P.get('flights_logged', []).filter(f => f._id !== btn.dataset.del);
             P.set('flights_logged', arr); route();
+          });
+          /* Open detailed flight summary on row click or summary button. */
+          c.querySelectorAll('[data-summary]').forEach(el => el.onclick = (e) => {
+            e.stopPropagation();
+            const id = el.dataset.summary;
+            const flight = P.get('flights_logged', []).find(f => f._id === id);
+            if (flight) openFlightSummary(flight);
           });
         }
         c.querySelector('#addManual')?.addEventListener('click', () => openManualClaimModal());

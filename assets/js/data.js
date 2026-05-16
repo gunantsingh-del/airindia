@@ -362,7 +362,10 @@ AIVA.RAW = [
   ['1249','PNQ','IXB','IX','A20N'],
   ['1098','PNQ','BBI','IX','A20N'],['2717','BBI','PNQ','IX','A20N'],
   ['1258','PNQ','DEL','IX','A20N'],['1230','DEL','PNQ','IX','A20N'],
-  ['2458','PNQ','JAI','IX','A20N'],['2712','JAI','PNQ','IX','A20N'],
+  /* PNQ-JAI no longer carried by Express — fno 2458 reassigned to AI
+     mainline DEL→COK in the 2026 schedule. Removed to avoid duplicate-
+     fno lookups in AIVA.findFlight. */
+  ['2712','JAI','PNQ','IX','A20N'],
   ['1618','PNQ','LKO','IX','A20N'],['1617','LKO','PNQ','IX','A20N'],
   ['2681','PNQ','BLR','IX','A20N'],['2680','BLR','PNQ','IX','A20N'],
   ['2739','PNQ','COK','IX','A20N'],['2720','COK','PNQ','IX','A20N'],
@@ -560,6 +563,7 @@ AIVA.RAW = [
   /* DEL → COK Cochin */
   ['1724','DEL','COK','AI','A20N'],['1738','DEL','COK','AI','A20N'],
   ['1763','DEL','COK','AI','A20N'],['2473','DEL','COK','AI','A20N'],
+  ['2458','DEL','COK','AI','A20N'],
   ['2883','DEL','COK','AI','A20N'],['1816','COK','DEL','AI','A20N'],
   ['1828','COK','DEL','AI','A20N'],['1858','COK','DEL','AI','A20N'],
   ['2459','COK','DEL','AI','A20N'],['2474','COK','DEL','AI','A20N'],
@@ -599,6 +603,7 @@ AIVA.RAW = [
 
   /* DEL → JAI Jaipur */
   ['1719','DEL','JAI','AI','A20N'],['1834','JAI','DEL','AI','A319'],
+  ['2761','DEL','JAI','AI','A20N'],
   ['1844','JAI','DEL','AI','A20N'],
 
   /* DEL → JDH Jodhpur */
@@ -991,6 +996,11 @@ const SCHEDULE_OVERRIDES = {
   'AI2988': { dep: '20:25', arr: '22:50' },
   'AI2996': { dep: '21:00', arr: '23:25' },
   'AI2970': { dep: '21:35', arr: '00:00+1' }, // BOM → DEL
+
+  /* ===== DEL departures added from the May-2026 published schedule.
+     Times from the official Air India network grid (8-day slot view). */
+  'AI2458': { dep: '12:10', arr: '15:00' },    // DEL → COK
+  'AI2761': { dep: '15:35', arr: '17:00' },    // DEL → JAI
 };
 AIVA.SCHEDULE_OVERRIDES = SCHEDULE_OVERRIDES;
 

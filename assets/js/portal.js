@@ -778,14 +778,17 @@
       hotels:'Layover & Hotel', layovers:'Layover & Hotel',
       welfare:'Crew Welfare', bylaws:'Bylaws',
     };
-    $('#pageTitle').textContent = matched ? matched.label : (HIDDEN_TITLES[id] || 'Dashboard');
-    $('#pageSub').textContent = (PAGES[id]?.sub || 'Operations · Live');
-    const c = $('#content'); c.innerHTML = '';
+    /* Optional-chained — in EMBED_MODE the topbar + sidebar elements
+       don't exist, but we still want the content to render. */
+    const titleEl = $('#pageTitle'); if (titleEl) titleEl.textContent = matched ? matched.label : (HIDDEN_TITLES[id] || 'Dashboard');
+    const subEl   = $('#pageSub');   if (subEl)   subEl.textContent   = (PAGES[id]?.sub || 'Operations · Live');
+    const c = $('#content'); if (!c) return;
+    c.innerHTML = '';
     (PAGES[id] || PAGES.dashboard).render(c);
-    if (window.innerWidth < 980) $('#sidebar').classList.remove('open');
+    if (!EMBED_MODE && window.innerWidth < 980) $('#sidebar')?.classList.remove('open');
     window.scrollTo({ top: 0, behavior: 'smooth' });
     /* Show the Maharaja onboarding tip for this tab, unless skipped */
-    showOnboardingFor(id);
+    if (!EMBED_MODE) showOnboardingFor(id);
   }
 
   /* ================================================================

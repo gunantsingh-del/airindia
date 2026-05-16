@@ -7049,14 +7049,20 @@
                   } catch {}
                 }
                 if (!blob) { failed++; continue; }
+                /* Cloud-sync only files up to 4 MB (Vercel body limit). */
+                if (blob.size > 4 * 1024 * 1024) {
+                  toast(`Skipping "${row.name}" (${(blob.size/1024/1024).toFixed(1)} MB) — over 4 MB cloud-sync cap.`, 'warn', 7000);
+                  failed++;
+                  continue;
+                }
                 try {
-                  const dataUrl = await new Promise(res => {
-                    const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob);
-                  });
-                  const resp = await fetch('/api/announce-upload', {
+                  const resp = await fetch(`/api/announce-upload?stage=${encodeURIComponent(stageId)}`, {
                     method:'POST',
-                    headers:{ 'Content-Type':'application/json' },
-                    body: JSON.stringify({ stageId, name: row.name, dataUrl }),
+                    headers:{
+                      'Content-Type':    blob.type || row.type || 'audio/mpeg',
+                      'X-AIVA-Filename': (row.name || 'clip.mp3').replace(/[^\x20-\x7E]/g,'_').slice(0,120),
+                    },
+                    body: blob,
                   });
                   if (!resp.ok) { failed++; continue; }
                   const j = await resp.json();
@@ -7149,17 +7155,18 @@
               if (!files.length) return;
               const cur = AIVA.Store.get('ann_lib', {});
               cur[stageId] = cur[stageId] || [];
-              /* 8 MB hard limit. Each clip uploads to Catbox via
-                 /api/announce-upload, gets a public URL, AND is cached
-                 locally in IndexedDB. The URL is broadcast over the
-                 crew-chat ntfy relay as an `ann_set` event so other
-                 pilots' devices append the clip to THEIR ann_lib
-                 (linking the URL — they don't have to re-upload). */
-              const MAX_MB = 8;
+              /* 4 MB cloud-sync cap (Vercel hobby plan body limit is
+                 4.5 MB; we send raw binary so base64 overhead doesn't
+                 apply). Local-only upload supports up to 8 MB via IDB
+                 — pilot just won't get cross-device sync for clips
+                 bigger than 4 MB. 4-min speech at 128 kbps is 3.8 MB,
+                 so this is plenty for safety demos. */
+              const LOCAL_MAX_MB = 8;
+              const CLOUD_MAX_MB = 4;
               let added = 0, failed = 0;
               for (const f of files) {
-                if (f.size > MAX_MB * 1024 * 1024) {
-                  toast(`${f.name} is over ${MAX_MB} MB — re-encode at lower bitrate (96 kbps for speech keeps a 4-min demo well under 5 MB).`, 'bad', 8000);
+                if (f.size > LOCAL_MAX_MB * 1024 * 1024) {
+                  toast(`${f.name} is over ${LOCAL_MAX_MB} MB — re-encode at lower bitrate (96 kbps for speech is fine).`, 'bad', 8000);
                   continue;
                 }
                 try {
@@ -7168,26 +7175,31 @@
                   const idbKey = `ann_${stageId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
                   await annPut(idbKey, f);
 
-                  /* 2. Upload to Catbox via our Vercel function. */
+                  /* 2. Upload to Catbox via our Vercel function. Skip
+                        for files over the cloud cap — local-only is OK. */
                   let url = null;
-                  try {
-                    const dataUrl = await new Promise(res => {
-                      const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f);
-                    });
-                    const resp = await fetch('/api/announce-upload', {
-                      method:'POST',
-                      headers:{ 'Content-Type':'application/json' },
-                      body: JSON.stringify({ stageId, name: f.name, dataUrl }),
-                    });
-                    if (resp.ok) {
-                      const j = await resp.json();
-                      url = j.url;
-                    } else {
-                      const j = await resp.json().catch(() => ({}));
-                      toast(`Upload to cloud failed (${resp.status}): ${j.error || 'unknown'}. Clip saved locally — other pilots won't see it until you re-upload.`, 'warn', 8000);
+                  if (f.size <= CLOUD_MAX_MB * 1024 * 1024) {
+                    try {
+                      const resp = await fetch(`/api/announce-upload?stage=${encodeURIComponent(stageId)}`, {
+                        method:'POST',
+                        headers:{
+                          'Content-Type':    f.type || 'audio/mpeg',
+                          'X-AIVA-Filename': f.name.replace(/[^\x20-\x7E]/g,'_').slice(0,120),
+                        },
+                        body: f,    // raw binary — no base64 overhead
+                      });
+                      if (resp.ok) {
+                        const j = await resp.json();
+                        url = j.url;
+                      } else {
+                        const j = await resp.json().catch(() => ({}));
+                        toast(`Cloud upload failed (HTTP ${resp.status}): ${j.error || 'unknown'}. Clip saved locally only.`, 'warn', 8000);
+                      }
+                    } catch (netErr) {
+                      toast(`Cloud upload offline: ${netErr.message}. Clip saved locally only.`, 'warn', 7000);
                     }
-                  } catch (netErr) {
-                    toast(`Cloud upload offline: ${netErr.message}. Clip saved locally only.`, 'warn', 7000);
+                  } else {
+                    toast(`${f.name} is over ${CLOUD_MAX_MB} MB — cross-device sync skipped (Vercel body limit). Clip saved locally only.`, 'warn', 8000);
                   }
 
                   const row = { name: f.name, idbKey, size: f.size, type: f.type, url, ts: Date.now() };

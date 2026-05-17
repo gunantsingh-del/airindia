@@ -1778,6 +1778,23 @@ The SimBrief OFP — what's on each page:
         P.remove('flight_in_progress');
         P.remove('telemetry_' + fp.fno);
         P.remove('events_' + fp.fno);
+        /* Reset the live FSUIPC phase machine so the dashboard widget
+           no longer shows TAXI_IN/LANDED for a sector that's been filed.
+           Clears phase → GATE, inFlight → false, telemetryLog → []. */
+        try { AIVA.FSUIPC?.resetSector?.(); } catch (_) {}
+        /* Push the cleared state to the server immediately so the
+           other device (or the next poll on this device) does NOT
+           re-apply the stale flight_in_progress snapshot we just
+           wiped. Without this push, PilotSync.pollLatest() would
+           see want=AI2577, cur=null and resurrect AI2577 in 30 s. */
+        try { AIVA.PilotSync?.pushNow?.(); } catch (_) {}
+        /* Notify any open windows/tabs/iframes (portal dashboard,
+           live map, sidebar widgets) that pilot state changed so
+           they re-render without waiting for the next poll cycle. */
+        try {
+          window.dispatchEvent(new CustomEvent('aiva-sync', { detail: { kind: 'psr-filed', fno: fp.fno } }));
+          window.dispatchEvent(new StorageEvent('storage', { key: 'roster_bookings' }));
+        } catch (_) {}
         AIVA.CrewChat?.event(`closed sector ${f.fno} ${f.from} → ${f.to} · PSR filed${reasons.length ? ` with ${reasons.length} finding${reasons.length===1?'':'s'}` : ''}`, { fno: f.fno, psrId });
         toast(`PSR filed — sector logged. Admin review pending.`, 'ok');
         location.hash = '';

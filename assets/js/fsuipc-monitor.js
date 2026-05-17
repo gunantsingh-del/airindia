@@ -27,48 +27,64 @@ AIVA.FSUIPC = (() => {
      disembark) hook into these. */
   let phase = 'GATE';
   let topAltSeen = 0;
+  const AIR_PHASES = new Set(['TAKEOFF','CLIMB','CRUISE','DESCENT','APPROACH']);
   function detectPhase(s, prev) {
     const og = !!s.onGround;
     const gs = s.gs || 0;
     const alt = s.alt || 0;
     const vs = s.vs || 0;
     const pb = !!s.parkingBrake;
-    const eng = !!(s.eng1 || s.eng2);
-    /* Ground + brake set + no movement */
-    if (og && gs < 1 && pb) {
-      /* If we arrived (came from a landed/taxi-in state), it's PARKED.
-         Otherwise it's GATE (initial state, pre-departure). */
-      if (prev === 'LANDED' || prev === 'TAXI_IN' || prev === 'PARKED') return 'PARKED';
-      return 'GATE';
+
+    /* === GROUND BRANCH ===
+       Any time on-ground is true, the phase MUST be one of:
+       GATE / PARKED / PUSHBACK / TAXI_OUT / TAXI_IN / TAKEOFF.
+       Never CLIMB/CRUISE/DESCENT/APPROACH while on ground — the
+       previous "return prev" fallback was sticking on airborne
+       phases when a pilot re-spawned cold-and-dark at the next
+       sector. */
+    if (og) {
+      /* Coming from an airborne phase + currently on ground = touchdown.
+         Either we transitioned through landing detection (state machine
+         already at LANDED) or we re-spawned at a new airport (state
+         machine inherited the old CLIMB/CRUISE). Either way, reset to
+         the ground-side equivalent. */
+      const wasAirborne = AIR_PHASES.has(prev);
+      if (gs < 1 && pb) {
+        if (wasAirborne || prev === 'LANDED' || prev === 'TAXI_IN' || prev === 'PARKED') return 'PARKED';
+        return 'GATE';
+      }
+      if (gs < 1) {
+        /* Stationary, brake released. If we just arrived from the air,
+           treat as PARKED (still on the runway / taxiway short hold). */
+        if (wasAirborne) return 'PARKED';
+        if (prev === 'GATE') return 'GATE';
+        return prev || 'GATE';
+      }
+      if (gs < 5) {
+        /* Very slow ground roll. Pushback or taxi-in finish. */
+        if (wasAirborne) return 'TAXI_IN';
+        if (prev === 'GATE' || prev === 'PUSHBACK') return 'PUSHBACK';
+        if (prev === 'LANDED' || prev === 'TAXI_IN') return 'TAXI_IN';
+        return prev || 'PUSHBACK';
+      }
+      if (gs < 80) {
+        /* Taxi speed. Direction (in vs out) decided by recent airborne
+           history. */
+        if (wasAirborne || prev === 'LANDED' || prev === 'TAXI_IN') return 'TAXI_IN';
+        return 'TAXI_OUT';
+      }
+      /* gs ≥ 80 on the ground = takeoff roll or post-touchdown rollout. */
+      if (wasAirborne) return 'LANDED';
+      return 'TAKEOFF';
     }
-    /* Ground + brake released + slow = pushback or beginning of taxi */
-    if (og && gs < 5) {
-      if (prev === 'GATE' || prev === 'PUSHBACK') return 'PUSHBACK';
-      if (prev === 'LANDED' || prev === 'TAXI_IN') return 'TAXI_IN';
-      return prev || 'PUSHBACK';
-    }
-    /* Ground + moderate ground speed = taxi (out vs in depends on history) */
-    if (og && gs >= 5 && gs < 80) {
-      if (prev === 'LANDED' || prev === 'TAXI_IN') return 'TAXI_IN';
-      return 'TAXI_OUT';
-    }
-    /* Ground + high speed (takeoff roll) */
-    if (og && gs >= 80) return 'TAKEOFF';
-    /* Airborne, low + climbing fast = TAKEOFF/INITIAL CLIMB */
-    if (!og && alt < 1000 && vs > 500) return 'TAKEOFF';
-    /* Airborne, climbing */
-    if (!og && vs > 200) return 'CLIMB';
-    /* Airborne, descending below 10k = APPROACH */
-    if (!og && vs < -200 && alt < 10000) return 'APPROACH';
-    /* Airborne, descending above 10k = DESCENT */
-    if (!og && vs < -200) return 'DESCENT';
-    /* Airborne, low alt, level-ish = APPROACH */
-    if (!og && alt < 5000) return 'APPROACH';
-    /* Airborne, stable = CRUISE */
-    if (!og) return 'CRUISE';
-    /* Just touched down */
-    if (og && prev && (prev === 'APPROACH' || prev === 'TAKEOFF' || prev === 'CLIMB' || prev === 'CRUISE' || prev === 'DESCENT')) return 'LANDED';
-    return prev || 'GATE';
+
+    /* === AIRBORNE BRANCH === */
+    if (alt < 1000 && vs > 500) return 'TAKEOFF';
+    if (vs > 200) return 'CLIMB';
+    if (vs < -200 && alt < 10000) return 'APPROACH';
+    if (vs < -200) return 'DESCENT';
+    if (alt < 5000) return 'APPROACH';
+    return 'CRUISE';
   }
   function maybePhaseChange(state) {
     const next = detectPhase(state, phase);

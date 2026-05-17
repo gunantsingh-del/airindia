@@ -1788,26 +1788,31 @@
         }
 
         const flights = el('section', { class: 'grid grid-2' });
-        /* If multi-sector today, render a stacked card; otherwise the original single-card */
+        /* If multi-sector today, render a stacked card; otherwise the original single-card.
+           Completed sectors get a ✓ FLOWN badge + strike-through. The "today" header
+           always shows TOTAL bookings (so 4 of 4 stays as 4, not drops to 3 after
+           filing the third). */
         if (todayBookings.length > 1) {
           const tCard = el('div', { class:'card flight-card flight-card-active' });
           const totalT = todayBookings.reduce((s,b) => s + (b._f?.durMins || 0), 0);
+          const doneT  = todayBookings.filter(b => b.completed).length;
           tCard.innerHTML = `
             <div class="row between mb-2">
               <div>
-                <div class="eyebrow" style="color:var(--ai-gold);">${todayBookings.length} sectors today</div>
+                <div class="eyebrow" style="color:var(--ai-gold);">${todayBookings.length} sectors today${doneT ? ` · ${doneT} flown` : ''}</div>
                 <div class="display" style="font-size:18px;font-weight:600;margin-top:4px;">${(totalT/60).toFixed(1)} block hours</div>
               </div>
               <span class="pill pill-gold">TODAY</span>
             </div>
             <div class="col gap-2">
               ${todayBookings.map((bk, i) => bk._f ? `
-                <div style="padding:10px 12px;background:rgba(255,225,89,.06);border-radius:10px;border:1px solid rgba(255,225,89,.18);">
+                <div style="padding:10px 12px;background:rgba(255,225,89,${bk.completed ? '.03' : '.06'});border-radius:10px;border:1px solid rgba(255,225,89,${bk.completed ? '.10' : '.18'});${bk.completed ? 'opacity:.65;' : ''}">
                   <div class="row between">
                     <div class="row gap-2">
                       <span class="mono" style="color:var(--ai-gold);font-size:11px;">#${i+1}</span>
-                      <span class="mono"><b>${bk._f.fno}</b></span>
-                      <span class="text-mute" style="font-size:12px;">${AIVA.airport(bk._f.from)?.city} → ${AIVA.airport(bk._f.to)?.city}</span>
+                      <span class="mono" style="${bk.completed ? 'text-decoration:line-through;' : ''}"><b>${bk._f.fno}</b></span>
+                      <span class="text-mute" style="font-size:12px;${bk.completed ? 'text-decoration:line-through;' : ''}">${AIVA.airport(bk._f.from)?.city} → ${AIVA.airport(bk._f.to)?.city}</span>
+                      ${bk.completed ? '<span class="pill pill-gold" style="font-size:9px;padding:1px 6px;">✓ FLOWN</span>' : ''}
                     </div>
                     <span class="mono text-mute" style="font-size:11px;">${bk._f.dep}–${bk._f.arr} · ${bk._f.dur}</span>
                   </div>
@@ -4961,7 +4966,8 @@
            from, which is precisely the bug pilots kept hitting when their
            cockpit was logged on as AIC441 but AIVA sent from AIC001. */
         const fpRec      = P.get('flight_in_progress');
-        const activeFno  = fpRec?.fno || (P.get('roster_bookings', []) || []).find(b => b.date === (new Date()).toISOString().slice(0,10))?.fno;
+        const _today     = (new Date()).toISOString().slice(0,10);
+        const activeFno  = fpRec?.fno || (P.get('roster_bookings', []) || []).find(b => b.date === _today && !b.completed)?.fno;
         const activeFl   = activeFno ? AIVA.findFlight?.(activeFno) : null;
         const activeCs   = (activeFl?.cs || '').toString().trim().toUpperCase();
         const fallbackCallsign = (() => {
@@ -7954,18 +7960,23 @@
     const div = el('div', { class: 'roster-day' + (isToday ? ' today' : '') + (!hasFlights ? ' empty' : '') });
     let dutyHtml = '';
     if (hasFlights) {
+      const doneCount = dayBookings.filter(b => b.completed).length;
       /* Render EVERY sector booked for this day, in dep-time order */
       dutyHtml = dayBookings.map((bk, i) => {
         const f = bk._f;
-        if (!f) return `<div class="duty duty-PAIRING">${bk.fno}</div>`;
+        const done = !!bk.completed;
+        const styleExtra = done ? 'opacity:.55;text-decoration:line-through;' : '';
+        const flag = done ? '<span style="color:var(--ai-gold);text-decoration:none;display:inline-block;margin-right:3px;">✓</span>' : '';
+        if (!f) return `<div class="duty duty-PAIRING" style="${styleExtra}">${flag}${bk.fno}</div>`;
         return `
-          <div class="duty duty-PAIRING" style="${i > 0 ? 'margin-top:4px;' : ''}">
-            <div style="font-weight:600;">${f.fno}</div>
-            <div style="font-size:10px;color:var(--text-dim);">${f.from} → ${f.to} · ${f.dep}</div>
+          <div class="duty duty-PAIRING" style="${i > 0 ? 'margin-top:4px;' : ''}${styleExtra}">
+            <div style="font-weight:600;">${flag}${f.fno}</div>
+            <div style="font-size:10px;color:var(--text-dim);text-decoration:none;">${f.from} → ${f.to} · ${f.dep}</div>
           </div>`;
       }).join('');
       if (dayBookings.length > 1) {
-        dutyHtml = `<div style="font-size:9.5px;color:var(--ai-gold);font-family:var(--font-mono);margin-bottom:4px;">${dayBookings.length} sectors</div>` + dutyHtml;
+        const label = doneCount ? `${doneCount}/${dayBookings.length} flown` : `${dayBookings.length} sectors`;
+        dutyHtml = `<div style="font-size:9.5px;color:var(--ai-gold);font-family:var(--font-mono);margin-bottom:4px;">${label}</div>` + dutyHtml;
       }
     } else {
       dutyHtml = `<div class="duty">+ Book day</div>`;

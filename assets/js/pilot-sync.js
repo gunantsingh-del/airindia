@@ -51,6 +51,12 @@ AIVA.PilotSync = (() => {
     const key = JSON.stringify({ f: s.flight_in_progress, a: s.active_flight, p: s.phase });
     if (key === lastSent) return;
     lastSent = key;
+    /* Mark THIS broadcast as the latest authoritative state for THIS
+       device. apply() will then ignore any incoming snapshot with a
+       timestamp <= this one — so a stale snapshot from another tab
+       or device can't resurrect the flight_in_progress we just
+       cleared (e.g. right after filing a PSR). */
+    lastApply = Math.max(lastApply, s.ts);
     try {
       await fetch(`${ENDPOINT}?pilotId=${encodeURIComponent(s.pilotId)}`, {
         method: 'POST',

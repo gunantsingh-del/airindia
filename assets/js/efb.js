@@ -66,8 +66,6 @@
     { id:'psr',       nm:'File PSR',   icon:'activity',   ico:'red' },
     { id:'wb',        nm:'W & B',      icon:'scale',      ico:'gold' },
     { id:'perf',      nm:'Performance',icon:'target',     ico:'dark' },
-    { id:'mel',       nm:'MEL',        icon:'doc',        ico:'dark' },
-    { id:'docs',      nm:'Library',    icon:'book',       ico:'gold' },
     { id:'fsuipc',    nm:'Sim Bridge', icon:'wifi',       ico:'green', live:true },
     { id:'hoppie',    nm:'ACARS',      icon:'send',       ico:'red' },
     { id:'journey',   nm:'Journey Log',icon:'newspaper',  ico:'gold' },
@@ -82,7 +80,6 @@
     { id:'p-fleet',   nm:'Fleet',      icon:'plane2',    ico:'dark', portal:'fleet' },
     { id:'p-flown',   nm:'Flown Fleet',icon:'star',      ico:'gold', portal:'flownfleet' },
     { id:'p-fdtl',    nm:'FDTL',       icon:'clock',     ico:'dark', portal:'fdtl' },
-    { id:'p-dgca',    nm:'DGCA',       icon:'shield',    ico:'dark', portal:'dgca' },
     { id:'p-newsroom',nm:'Newsroom',   icon:'newspaper', ico:'red',  portal:'newsroom' },
     { id:'p-myai',    nm:'myAI',       icon:'cup',       ico:'gold', portal:'myai' },
     { id:'p-profile', nm:'Profile',    icon:'user',      ico:'dark', portal:'profile' },
@@ -2051,26 +2048,6 @@ The SimBrief OFP — what's on each page:
         <h3 class="display mt-3" style="font-size:20px;">Performance — coming soon</h3>
         <p class="text-mute mt-2" style="font-size:13px;">Currently locked until accuracy review is complete. Use Boeing OPT / Airbus FlySmart+ on the side.</p>
       ` }));
-    },
-
-    /* ==================== MEL ==================== */
-    mel: (c) => {
-      c.appendChild(el('div', { class:'efb-card', style:{ padding:0 }, html: `
-        <table class="tbl">
-          <thead><tr><th>ATA</th><th>System</th><th>Item</th><th>Cat</th><th>Notes</th></tr></thead>
-          <tbody>
-            <tr><td class="mono">21-26</td><td>Air Conditioning</td><td>Pack 1</td><td><span class="pill pill-gold" style="font-size:9px;">C</span></td><td class="text-dim">Cabin alt &lt;FL310.</td></tr>
-            <tr><td class="mono">22-10</td><td>Auto Flight</td><td>Autoland</td><td><span class="pill pill-gold" style="font-size:9px;">C</span></td><td class="text-dim">No CAT II/III.</td></tr>
-            <tr><td class="mono">24-22</td><td>Electrical</td><td>APU Gen</td><td><span class="pill pill-gold" style="font-size:9px;">C</span></td><td class="text-dim">No ETOPS.</td></tr>
-            <tr><td class="mono">27-50</td><td>Flight Controls</td><td>Slat Ch B</td><td><span class="pill pill-warn" style="font-size:9px;">B</span></td><td class="text-dim">Flap 3 LDG.</td></tr>
-          </tbody>
-        </table>
-      ` }));
-    },
-
-    /* ==================== DOCS ==================== */
-    docs: (c) => {
-      c.appendChild(el('div', { class:'efb-card', html: `<a href="portal.html#docs" class="btn btn-primary btn-sm">${I('book',14)} Open Document Library</a>` }));
     },
 
     /* ==================== FSUIPC LIVE ====================

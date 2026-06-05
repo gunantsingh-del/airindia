@@ -62,6 +62,7 @@
     { id:'manifest',  nm:'Pax Manifest', icon:'users',    ico:'gold' },
     { id:'seatmap',   nm:'Seat Map',   icon:'layers',     ico:'dark' },
     { id:'announce',  nm:'PA / Audio', icon:'megaphone',  ico:'red' },
+    { id:'tracker',   nm:'Flight Tracker', icon:'activity', ico:'green', live:true },
     { id:'psr',       nm:'File PSR',   icon:'activity',   ico:'red' },
     { id:'wb',        nm:'W & B',      icon:'scale',      ico:'gold' },
     { id:'perf',      nm:'Performance',icon:'target',     ico:'dark' },
@@ -1589,6 +1590,248 @@ The SimBrief OFP — what's on each page:
       frame.title = 'Cabin Announcements';
       wrap.appendChild(frame);
       c.appendChild(wrap);
+    },
+
+    /* ==================== FLIGHT TRACKER ====================
+       Pegasus / ACARS-style live tracker. Mounts an automatic event log
+       seeded with system + sim + addon + aircraft fingerprints, then
+       streams live telemetry from AIVA.FSUIPC.state() into a 3×3 info
+       grid and a chronological event table. Cancel / Complete Flight
+       buttons at the bottom; Complete is the new fast path that calls
+       through to the PSR filer with all sampled telemetry attached. */
+    tracker: (c) => {
+      const fp = P.get('flight_in_progress');
+      const fno = fp?.fno || P.get('active_flight');
+      const f = fno ? AIVA.findFlight(fno) : null;
+      if (!f) {
+        return c.appendChild(emptyState(
+          'No active flight',
+          'Tracker arms automatically when you start a sector from your roster. Pick a flight first.',
+        ));
+      }
+      const fromA = AIVA.airport(f.from), toA = AIVA.airport(f.to);
+      const startedAt = fp?.startedAt || Date.now();
+
+      /* Persist startedAt so refresh / reload doesn't reset the clock. */
+      if (!fp) P.set('flight_in_progress', { fno: f.fno, startedAt });
+
+      /* Seed the initial fingerprint events (idempotent). */
+      try { AIVA.FSUIPC?.seedTrackerEvents?.(f.fno); } catch {}
+
+      /* === Stepper === */
+      const STEPS = ['Pilot', 'Booking', 'Flight', 'PIREP'];
+      const stepIdx = 2;   // Flight is active during tracking
+      const stepper = el('div', { class:'efb-card tracker-stepper', html: `
+        <div class="row" style="justify-content:space-between;gap:10px;">
+          ${STEPS.map((s, i) => `
+            <div class="tracker-step ${i < stepIdx ? 'done' : ''} ${i === stepIdx ? 'on' : ''} ${i > stepIdx ? 'pending' : ''}" style="flex:1;text-align:center;padding:14px 8px;border-radius:10px;background:${i === stepIdx ? 'rgba(218,25,47,.16)' : i < stepIdx ? 'rgba(125,208,143,.10)' : 'rgba(255,255,255,.03)'};border:1px solid ${i === stepIdx ? 'var(--ai-red-bright)' : i < stepIdx ? 'rgba(125,208,143,.32)' : 'var(--border)'};">
+              <div style="font-size:18px;color:${i === stepIdx ? 'var(--ai-red-bright)' : i < stepIdx ? '#7DD08F' : 'var(--text-dim)'};">
+                ${i === 0 ? I('user', 18) : i === 1 ? I('calendar', 18) : i === 2 ? I('plane', 18) : I('clipboard', 18)}
+              </div>
+              <div style="font-family:var(--font-mono);font-size:10.5px;letter-spacing:.18em;margin-top:6px;color:${i === stepIdx ? 'var(--text)' : i < stepIdx ? '#7DD08F' : 'var(--text-mute)'};text-transform:uppercase;font-weight:600;">${s}</div>
+            </div>
+            ${i < STEPS.length - 1 ? `<div style="display:flex;align-items:center;color:${i < stepIdx ? '#7DD08F' : 'var(--text-dim)'};">${I('arrow', 16)}</div>` : ''}
+          `).join('')}
+        </div>
+      ` });
+      c.appendChild(stepper);
+
+      /* === Progress bar (FROM → CURRENT PHASE → TO) === */
+      const progress = el('div', { class:'efb-card mt-3', html: `
+        <div class="row between" style="font-family:var(--font-mono);font-size:13px;font-weight:600;letter-spacing:.04em;">
+          <span style="color:var(--ai-cream);">${fromA?.icao || f.from}</span>
+          <span style="color:var(--ai-gold);" id="trkPhase">—</span>
+          <span style="color:var(--ai-cream);">${toA?.icao || f.to}</span>
+        </div>
+        <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;margin-top:10px;position:relative;overflow:hidden;">
+          <div id="trkProg" style="height:100%;width:0%;background:linear-gradient(90deg,var(--ai-red),var(--ai-gold));border-radius:3px;transition:width .8s ease;"></div>
+        </div>
+        <div class="row between mt-2" style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-mute);">
+          <span>${fromA?.city || ''}</span>
+          <span id="trkPctText">0% complete</span>
+          <span>${toA?.city || ''}</span>
+        </div>
+      ` });
+      c.appendChild(progress);
+
+      /* === 3×3 info grid === */
+      const infoGrid = el('div', { class:'efb-card mt-3', style:{ padding: '20px' }, html: `
+        <div class="tracker-grid" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:20px 28px;font-size:13px;">
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Aircraft Addon</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkAddon">—</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Altitude</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkAlt">—</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Engines</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkEng">—</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Aircraft Name / Type</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkType">${f.acName || f.ac} | ${f.ac}</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Speed (IAS)</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkSpd">—</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Flaps</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkFlaps">—</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Aircraft Livery</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkLiv">Air India</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Heading</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkHdg">—</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Gear</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkGear">—</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">N1 1/2</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkN1">— / —</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Fuel</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkFuel">—</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Vertical Speed</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkVs">—</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Wind</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkWind">—</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">OAT / ISA</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkOat">—</div>
+          </div>
+          <div>
+            <div class="text-mute mono" style="font-size:10px;letter-spacing:.14em;">Autopilot</div>
+            <div class="mono mt-1" style="font-weight:600;" id="trkAp">—</div>
+          </div>
+        </div>
+      ` });
+      c.appendChild(infoGrid);
+
+      /* === Event log table === */
+      const logCard = el('div', { class:'efb-card mt-3', style:{ padding: 0, overflow: 'hidden' }, html: `
+        <div style="display:grid;grid-template-columns:90px 90px 1fr;gap:0;background:var(--bg-2);padding:10px 16px;border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;color:var(--text-mute);font-weight:700;text-transform:uppercase;">
+          <div>Time</div><div>Elapsed</div><div>Event</div>
+        </div>
+        <div id="trkEvents" style="max-height:340px;overflow-y:auto;"></div>
+      ` });
+      c.appendChild(logCard);
+
+      /* === Action bar === */
+      const actions = el('div', { class:'row mt-3', style: { justifyContent: 'flex-end', gap: '10px' } });
+      const btnCancel = el('button', { class:'btn btn-ghost', html: `${I('close', 13)} Cancel sector` });
+      const btnComplete = el('button', { class:'btn btn-primary', html: `${I('check', 13)} Complete Flight → File PSR` });
+      actions.appendChild(btnCancel);
+      actions.appendChild(btnComplete);
+      c.appendChild(actions);
+
+      btnCancel.onclick = () => {
+        if (!confirm('Cancel this sector? Telemetry will be discarded.')) return;
+        P.remove('flight_in_progress');
+        P.remove('telemetry_' + f.fno);
+        P.remove('events_' + f.fno);
+        try { AIVA.FSUIPC?.resetSector?.(); } catch {}
+        try { AIVA.FSUIPC?.clearEventLog?.(); } catch {}
+        toast('Sector cancelled.', 'warn');
+        location.hash = '';
+      };
+      btnComplete.onclick = () => {
+        /* Hand off to the PSR filer — same as clicking the File PSR app */
+        location.hash = '#psr';
+      };
+
+      /* === Live tick — every 800ms refresh info grid + progress + log === */
+      const fmtZ = (ts) => {
+        const d = new Date(ts);
+        return `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}:${String(d.getUTCSeconds()).padStart(2,'0')}`;
+      };
+      const fmtElapsed = (ms) => {
+        const s = Math.max(0, Math.floor(ms / 1000));
+        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+        return `${h}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+      };
+      const sevColor = { info:'rgba(255,255,255,.78)', ok:'#7DD08F', warn:'#FCD34D', bad:'#FCA5A5' };
+      let lastEventCount = 0;
+      const tick = () => {
+        const s = AIVA.FSUIPC?.state?.() || {};
+        const phase = AIVA.FSUIPC?.phase?.() || '—';
+        /* progress = altitude band → 0% at takeoff, 50% at cruise, 100% at landing */
+        const pct = (() => {
+          if (s.onGround && s.gs < 5) {
+            return phase === 'PARKED' || phase === 'TAXI_IN' ? 100 : 0;
+          }
+          if ((s.alt || 0) > 25000) return 50;
+          if (phase === 'CLIMB')   return 20 + Math.min(30, (s.alt || 0) / 1000);
+          if (phase === 'CRUISE') return 50;
+          if (phase === 'DESCENT')return 50 + Math.min(30, (35000 - (s.alt || 0)) / 1000);
+          if (phase === 'APPROACH')return 85;
+          if (phase === 'LANDED') return 95;
+          return 5;
+        })();
+        const set = (id, val) => { const e = $('#' + id, c); if (e) e.textContent = val; };
+        set('trkPhase', phase);
+        const progEl = $('#trkProg', c);
+        if (progEl) progEl.style.width = pct.toFixed(1) + '%';
+        set('trkPctText', pct.toFixed(0) + '% · ' + phase);
+        set('trkAlt',  s.alt != null ? Math.round(s.alt).toLocaleString() + ' ft' : '—');
+        set('trkSpd',  s.ias != null ? Math.round(s.ias) + ' kts' : '—');
+        set('trkHdg',  s.hdg != null ? s.hdg.toFixed(1) + '°' : '—');
+        set('trkFlaps', s.flapsIdx != null ? `IDX ${s.flapsIdx} (${Math.round(s.flapsPct || 0)}%)` : '—');
+        set('trkGear',  s.gearHandle != null ? (s.gearHandle ? `Down (${Math.round(s.gearPct || 0)}%)` : 'Up') : '—');
+        set('trkEng',   (() => {
+          const flags = [s.eng1, s.eng2, s.eng3, s.eng4].filter(v => v !== undefined);
+          if (!flags.length) return '—';
+          return flags.map((on, i) => `[${i+1}] ${on ? 'ON' : 'OFF'}`).join(' · ');
+        })());
+        set('trkN1',    (s.n1_1 != null || s.n1_2 != null)
+          ? `${(s.n1_1 || 0).toFixed(0)}% / ${(s.n1_2 || 0).toFixed(0)}%` : '—');
+        set('trkFuel',  s.fuel != null ? Math.round(s.fuel).toLocaleString() + ' kg' : '—');
+        set('trkVs',    s.vs != null ? `${s.vs > 0 ? '+' : ''}${Math.round(s.vs)} fpm` : '—');
+        set('trkWind',  (s.windDir != null && s.windKt != null) ? `${Math.round(s.windDir).toString().padStart(3,'0')}° / ${Math.round(s.windKt)} kt` : '—');
+        set('trkOat',   s.oat != null ? `${Math.round(s.oat)}°C / ISA ${((s.oat || 0) - (15 - 0.00198 * (s.alt || 0))).toFixed(0)}` : '—');
+        set('trkAp',    s.apMaster != null ? (s.apMaster ? `ENG · FL${Math.round((s.apAlt || 0) / 100)}` : 'OFF') : '—');
+        /* Addon — derived once from the seeded events list, but refresh
+           in case the booking changed. */
+        const evts = AIVA.FSUIPC?.getEventLog?.() || [];
+        const addonEvt = evts.find(e => /^Addon:/.test(e.label));
+        const livEvt   = evts.find(e => /^Aircraft Livery:/.test(e.label));
+        set('trkAddon', addonEvt ? addonEvt.label.replace(/^Addon:\s*/, '') : (f.acName || f.ac));
+        if (livEvt) set('trkLiv', livEvt.label.replace(/^Aircraft Livery:\s*/, ''));
+
+        /* Event log — append only the new rows */
+        const tbody = $('#trkEvents', c);
+        if (tbody && evts.length !== lastEventCount) {
+          tbody.innerHTML = evts.slice().reverse().map(e => `
+            <div style="display:grid;grid-template-columns:90px 90px 1fr;gap:0;padding:7px 16px;border-bottom:1px solid rgba(255,255,255,.04);font-family:var(--font-mono);font-size:11.5px;align-items:center;">
+              <span style="color:rgba(255,225,89,.7);">${fmtZ(e.ts)}</span>
+              <span style="color:var(--text-mute);">${fmtElapsed(e.ts - startedAt)}</span>
+              <span style="color:${sevColor[e.severity] || sevColor.info};">${(e.label || '').replace(/</g, '&lt;')}</span>
+            </div>
+          `).join('');
+          lastEventCount = evts.length;
+        }
+      };
+      tick();
+      const tickTimer = setInterval(tick, 800);
+
+      /* Tear down on navigation */
+      const obs = new MutationObserver(() => {
+        if (!document.body.contains(c)) { clearInterval(tickTimer); obs.disconnect(); }
+      });
+      obs.observe(document.body, { childList: true, subtree: true });
     },
 
     /* ==================== FILE PSR ==================== */

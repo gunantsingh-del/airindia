@@ -258,6 +258,25 @@ AIVA.FSUIPC = (() => {
       overspeedWarn:d.overspeedWarn,
       indAlt:       d.indAlt,
       baroInHg:     d.baroInHg,
+      /* Extended telemetry — added 2026-06 for the Pegasus-style
+         comprehensive Tracker page. All optional; the Tracker
+         degrades gracefully if any field is missing (older sim
+         bridge versions won't have these). */
+      mach:         d.mach,
+      aoa:          d.aoa,
+      pitch:        d.pitch,
+      bank:         d.bank,
+      n2_1:         d.n2_1,
+      n2_2:         d.n2_2,
+      itt_1:        d.itt_1,
+      itt_2:        d.itt_2,
+      ff_1:         d.ff_1,
+      ff_2:         d.ff_2,
+      oat:          d.oat,
+      windKt:       d.windKt,
+      windDir:      d.windDir,
+      elevTrim:     d.elevTrim,
+      cabinAlt:     d.cabinAlt,
       ts: Date.now(),
     };
     /* Hold the prior frame for delta-based detectors (descent10k, landing)
@@ -367,6 +386,47 @@ AIVA.FSUIPC = (() => {
     /* Warnings */
     if (s.stallWarn && !p.stallWarn)         pushEvt('STALL WARNING', 'bad');
     if (s.overspeedWarn && !p.overspeedWarn) pushEvt('OVERSPEED', 'bad');
+
+    /* ── Phase-specific edges that the Pegasus-style Tracker shows ── */
+    /* Takeoff roll: ground + IAS crossing 80 kt */
+    if (s.onGround && (p.ias || 0) < 80 && (s.ias || 0) >= 80) {
+      pushEvt(`80 KTS — takeoff roll`, 'ok');
+    }
+    /* Rotation: weight off wheels with IAS > 100 */
+    if (!s.onGround && p.onGround && (s.ias || 0) > 100) {
+      pushEvt(`AIRBORNE · IAS ${Math.round(s.ias)} kt`, 'ok');
+    }
+    /* Climb-thrust crossing 10,000 ft going up */
+    if (!s.onGround && (p.alt || 0) < 10000 && (s.alt || 0) >= 10000 && (s.vs || 0) > 200) {
+      pushEvt(`PASSING 10,000 FT CLIMBING`, 'info');
+    }
+    /* Top of climb — level off above FL250 */
+    if (!s.onGround && Math.abs(s.vs || 0) < 100 && (s.alt || 0) > 25000
+        && (p.vs || 0) > 200) {
+      pushEvt(`TOP OF CLIMB · FL${Math.round((s.alt || 0) / 100)}`, 'ok');
+    }
+    /* Top of descent — start of sustained descent above FL150 */
+    if (!s.onGround && (p.vs || 0) > -200 && (s.vs || 0) < -500 && (s.alt || 0) > 15000) {
+      pushEvt(`TOP OF DESCENT · FL${Math.round((s.alt || 0) / 100)}`, 'info');
+    }
+    /* Descending through 10,000 ft */
+    if (!s.onGround && (p.alt || 0) > 10000 && (s.alt || 0) <= 10000 && (s.vs || 0) < -200) {
+      pushEvt(`PASSING 10,000 FT DESCENDING`, 'info');
+    }
+    /* Touchdown vertical speed — record on transition to ground if airborne previously */
+    if (!p.onGround && s.onGround) {
+      const ldgFpm = Math.round(p.vs || s.vs || 0);
+      pushEvt(`TOUCHDOWN · ${ldgFpm} fpm`, ldgFpm < -800 ? 'bad' : ldgFpm < -300 ? 'warn' : 'ok');
+    }
+    /* Reverse thrust deployment (throttle1 going negative on ground) */
+    if (s.onGround && (p.throttle1 || 0) >= 0 && (s.throttle1 || 0) < -5) {
+      pushEvt('REVERSE THRUST DEPLOYED', 'info');
+    }
+    /* Engine flame-out / shutdown during flight (already covered by eng_) */
+    /* Sustained bank > 35° */
+    if (Math.abs(s.bank || 0) > 35 && Math.abs(p.bank || 0) <= 35) {
+      pushEvt(`STEEP BANK · ${Math.round(s.bank)}°`, 'warn');
+    }
   }
   function resetSector() {
     topAlt = 0; arrivalArmed = true; landingArmed = true; inFlight = false;
@@ -517,6 +577,63 @@ AIVA.FSUIPC = (() => {
     }
   }
 
+  /* ============ Tracker bootstrap ============
+     Writes the initial fingerprint events that the Pegasus-style
+     Tracker page expects at the top of the log: AIVA version, OS,
+     sim source, addon (from booking), aircraft type, livery, reg.
+     Pulls aircraft details from the currently-active flight + booking
+     so the row text matches what the pilot sees on dispatch.
+     Called by the Tracker page on mount. Safe to call multiple times —
+     dedup happens via the `kind` field. */
+  const seededKinds = new Set();
+  function seedTrackerEvents(activeFno) {
+    const seedOnce = (kind, label, severity = 'info') => {
+      if (seededKinds.has(kind)) return;
+      seededKinds.add(kind);
+      pushEvt(label, severity);
+    };
+    const ua = navigator.userAgent || '';
+    const osName =
+      /Windows NT 11/.test(ua) || /Windows NT 10/.test(ua) ? 'Windows' :
+      /Mac OS X/.test(ua)      ? 'macOS' :
+      /Linux/.test(ua)         ? 'Linux' :
+      /iPad|iPhone/.test(ua)   ? 'iPadOS / iOS' :
+      'Unknown';
+    seedOnce('aiva', `AIVA ${window.AIVA_VERSION || '2026.06.05'}`, 'ok');
+    seedOnce('os',   `OS: ${osName}`);
+    seedOnce('src',  simSource === 'sim'
+      ? `Simulator Connection: SimConnect (AIVA Desktop)`
+      : `Simulator Connection: FSUIPC WebSocket`);
+    seedOnce('sim',  `Simulator: Microsoft Flight Simulator`);
+    /* Aircraft details derived from the active booking, since string
+       SimVars aren't yet wired through the bridge. */
+    const fl = AIVA.findFlight?.(activeFno);
+    if (fl) {
+      const addon = (() => {
+        const t = (fl.ac || '').toUpperCase();
+        if (t === 'B77W') return 'PMDG Boeing 777-300ER';
+        if (t === 'B789') return 'PMDG Boeing 787-9';
+        if (t === 'A20N') return 'Fenix A320 / FBW A320';
+        if (t === 'A21N') return 'Fenix A321';
+        if (t === 'A359') return 'FBW A350-900';
+        if (t === 'A388') return 'iniBuilds A380-800';
+        return fl.acName || t;
+      })();
+      seedOnce('addon',  `Addon: ${addon}`);
+      seedOnce('actype', `Aircraft: ${fl.acName || fl.ac}`);
+      seedOnce('atype',  `Aircraft Type: ${fl.ac}`);
+      /* Reg + livery from booking if pilot picked them. */
+      const today = (new Date()).toISOString().slice(0, 10);
+      const bk = (AIVA.Store?.pilot?.(AIVA.Auth?.currentPilot?.()?.id)?.get('roster_bookings', []) || [])
+        .find(b => b.fno === activeFno && b.date === today);
+      if (bk?.reg) {
+        seedOnce('reg',     `Registration: ${bk.reg}`);
+        seedOnce('livery',  `Aircraft Livery: Air India (${bk.reg} | 2025)`);
+      }
+    }
+    seedOnce('ready', 'Ready to track', 'ok');
+  }
+
   /* Public surface */
   return {
     on, connect,
@@ -530,7 +647,8 @@ AIVA.FSUIPC = (() => {
        AP engage/disengage, transponder mode etc. Returns a copy so
        callers can't mutate the internal buffer. */
     getEventLog: () => telemetryLog.slice(),
-    clearEventLog: () => { telemetryLog.length = 0; },
+    clearEventLog: () => { telemetryLog.length = 0; seededKinds.clear(); },
+    seedTrackerEvents,
     resetSector,
     startAutoDetect, stopAutoDetect,
     /* For UI debugging / manual triggers */

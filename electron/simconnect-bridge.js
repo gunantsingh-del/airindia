@@ -108,6 +108,30 @@ const VARS = [
   ['OVERSPEED WARNING',                       'bool',            'overspeedWarn','int32'],
   ['INDICATED ALTITUDE',                      'feet',            'indAlt'],
   ['BAROMETER PRESSURE',                      'inHg',            'baroInHg'],
+  ['MACH SPEED',                              'mach',            'mach'],
+  ['INCIDENCE ALPHA',                         'degrees',         'aoa'],
+  ['PLANE PITCH DEGREES',                     'degrees',         'pitch'],
+  ['PLANE BANK DEGREES',                      'degrees',         'bank'],
+
+  /* Engines deeper — per-engine N2, ITT/EGT, fuel flow. The renderer
+     only needs to know "is engine alive + healthy"; these let the
+     tracker show real EICAS-style numbers. */
+  ['TURB ENG N2:1',                           'percent',         'n2_1'],
+  ['TURB ENG N2:2',                           'percent',         'n2_2'],
+  ['TURB ENG ITT:1',                          'celsius',         'itt_1'],
+  ['TURB ENG ITT:2',                          'celsius',         'itt_2'],
+  ['ENG FUEL FLOW PPH:1',                     'pounds per hour', 'ff_1'],
+  ['ENG FUEL FLOW PPH:2',                     'pounds per hour', 'ff_2'],
+
+  /* Environmental — drives the Tracker page's wind + OAT + ISA dev
+     fields, plus the Met card on the dashboard. */
+  ['AMBIENT TEMPERATURE',                     'celsius',         'oat'],
+  ['AMBIENT WIND VELOCITY',                   'knots',           'windKt'],
+  ['AMBIENT WIND DIRECTION',                  'degrees',         'windDir'],
+
+  /* Trim + pressurisation — useful for the post-flight review. */
+  ['ELEVATOR TRIM POSITION',                  'degrees',         'elevTrim'],
+  ['CABIN ALTITUDE',                          'feet',            'cabinAlt'],
 ];
 
 const DEF_ID = 0;     // single data definition for all of the above
